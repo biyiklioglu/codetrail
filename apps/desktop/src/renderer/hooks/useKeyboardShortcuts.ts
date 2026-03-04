@@ -17,6 +17,8 @@ export function useKeyboardShortcuts(args: {
   toggleHistoryCategory: (category: MessageCategory) => void;
   toggleProjectPaneCollapsed: () => void;
   toggleSessionPaneCollapsed: () => void;
+  goToPreviousPage: () => void;
+  goToNextPage: () => void;
   applyZoomAction: (action: "in" | "out" | "reset") => Promise<void>;
 }): void {
   const {
@@ -33,6 +35,8 @@ export function useKeyboardShortcuts(args: {
     toggleHistoryCategory,
     toggleProjectPaneCollapsed,
     toggleSessionPaneCollapsed,
+    goToPreviousPage,
+    goToNextPage,
     applyZoomAction,
   } = args;
 
@@ -72,6 +76,26 @@ export function useKeyboardShortcuts(args: {
       } else if (command && event.key === "0") {
         event.preventDefault();
         void applyZoomAction("reset");
+      } else if (
+        mainView === "history" &&
+        command &&
+        !shift &&
+        !event.altKey &&
+        event.key === "ArrowLeft" &&
+        !isEditableTarget(event.target)
+      ) {
+        event.preventDefault();
+        goToPreviousPage();
+      } else if (
+        mainView === "history" &&
+        command &&
+        !shift &&
+        !event.altKey &&
+        event.key === "ArrowRight" &&
+        !isEditableTarget(event.target)
+      ) {
+        event.preventDefault();
+        goToNextPage();
       } else if (mainView === "history" && command && shift && key === "m") {
         event.preventDefault();
         toggleFocusMode();
@@ -122,10 +146,23 @@ export function useKeyboardShortcuts(args: {
     setMainView,
     setShowShortcuts,
     showShortcuts,
+    goToNextPage,
+    goToPreviousPage,
     toggleFocusMode,
     toggleHistoryCategory,
     toggleProjectPaneCollapsed,
     toggleScopedMessagesExpanded,
     toggleSessionPaneCollapsed,
   ]);
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!target || !(target instanceof HTMLElement)) {
+    return false;
+  }
+  if (target.isContentEditable) {
+    return true;
+  }
+  const tagName = target.tagName;
+  return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
 }

@@ -1087,6 +1087,23 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     }
     return Math.ceil(totalCount / PAGE_SIZE);
   }, [historyMode, projectCombinedDetail?.totalCount, sessionDetail?.totalCount]);
+  const canNavigatePages = historyMode !== "bookmarks";
+  const canGoToPreviousPage = canNavigatePages && sessionPage > 0;
+  const canGoToNextPage = canNavigatePages && sessionPage + 1 < totalPages;
+
+  const goToPreviousPage = useCallback(() => {
+    if (!canNavigatePages) {
+      return;
+    }
+    setSessionPage((value) => Math.max(0, value - 1));
+  }, [canNavigatePages]);
+
+  const goToNextPage = useCallback(() => {
+    if (!canNavigatePages) {
+      return;
+    }
+    setSessionPage((value) => Math.min(totalPages - 1, value + 1));
+  }, [canNavigatePages, totalPages]);
 
   const canZoomIn = zoomPercent < 500;
   const canZoomOut = zoomPercent > 25;
@@ -1146,6 +1163,8 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
       { shortcut: "Cmd/Ctrl+5", description: "Toggle Tool Result button on session messages" },
       { shortcut: "Cmd/Ctrl+6", description: "Toggle Thinking button on session messages" },
       { shortcut: "Cmd/Ctrl+7", description: "Toggle System button on session messages" },
+      { shortcut: "Cmd/Ctrl+Left", description: "Previous page" },
+      { shortcut: "Cmd/Ctrl+Right", description: "Next page" },
       { shortcut: "Cmd/Ctrl+B", description: "Expand/collapse Projects pane" },
       { shortcut: "Cmd/Ctrl+Shift+B", description: "Expand/collapse Sessions pane" },
       { shortcut: "?", description: "Shortcut help" },
@@ -1295,6 +1314,8 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     toggleHistoryCategory: handleToggleHistoryCategoryShortcut,
     toggleProjectPaneCollapsed: () => setProjectPaneCollapsed((value) => !value),
     toggleSessionPaneCollapsed: () => setSessionPaneCollapsed((value) => !value),
+    goToPreviousPage,
+    goToNextPage,
     applyZoomAction,
   });
 
@@ -1661,8 +1682,10 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
                   <button
                     type="button"
                     className="page-btn"
-                    onClick={() => setSessionPage((value) => Math.max(0, value - 1))}
-                    disabled={sessionPage <= 0}
+                    onClick={goToPreviousPage}
+                    disabled={!canGoToPreviousPage}
+                    title="Previous page (Cmd/Ctrl+Left)"
+                    aria-label="Previous page"
                   >
                     Previous
                   </button>
@@ -1676,8 +1699,10 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
                   <button
                     type="button"
                     className="page-btn"
-                    onClick={() => setSessionPage((value) => Math.min(totalPages - 1, value + 1))}
-                    disabled={sessionPage + 1 >= totalPages}
+                    onClick={goToNextPage}
+                    disabled={!canGoToNextPage}
+                    title="Next page (Cmd/Ctrl+Right)"
+                    aria-label="Next page"
                   >
                     Next
                   </button>
