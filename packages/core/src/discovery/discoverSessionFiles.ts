@@ -348,7 +348,12 @@ function discoverCursorFiles(
       continue;
     }
 
-    const projectPath = decodeCursorProjectPath(projectDir, projectEntry.name, dependencies);
+    const cursorProject = decodeCursorProjectPath(projectDir, projectEntry.name, dependencies);
+    const projectPath = cursorProject.projectPath;
+    const unresolvedProject = cursorProject.unresolvedProject;
+    const projectName = unresolvedProject
+      ? projectEntry.name
+      : projectNameFromPath(cursorProject.projectPath);
 
     for (const sessionDir of safeReadDir(transcriptsDir, dependencies)) {
       if (!sessionDir.isDirectory()) {
@@ -366,12 +371,12 @@ function discoverCursorFiles(
         continue;
       }
 
-      const sessionIdentity = `cursor:${sessionUuid}`;
+      const sessionIdentity = providerSessionIdentity("cursor", sessionUuid, jsonlPath);
 
       discovered.push({
         provider: "cursor",
         projectPath,
-        projectName: projectNameFromPath(projectPath),
+        projectName,
         sessionIdentity,
         sourceSessionId: sessionUuid,
         filePath: jsonlPath,
@@ -380,7 +385,7 @@ function discoverCursorFiles(
         metadata: {
           includeInHistory: true,
           isSubagent: false,
-          unresolvedProject: false,
+          unresolvedProject,
           gitBranch: null,
           cwd: projectPath || null,
         },
@@ -395,7 +400,7 @@ function decodeCursorProjectPath(
   projectDir: string,
   encodedName: string,
   dependencies: ResolvedDiscoveryDependencies,
-): string {
+): { projectPath: string; unresolvedProject: boolean } {
   const terminalsDir = join(projectDir, "terminals");
   if (safeIsDirectory(terminalsDir, dependencies)) {
     for (const entry of safeReadDir(terminalsDir, dependencies)) {
@@ -408,20 +413,49 @@ function decodeCursorProjectPath(
       }
       const cwdMatch = content.match(/^cwd:\s*(.+)$/m);
       if (cwdMatch?.[1]) {
-        const cwd = cwdMatch[1].trim();
-        if (cwd.length > 0) {
-          return cwd;
+        const cwd = normalizeCursorTerminalCwd(cwdMatch[1]);
+        if (cwd && isLikelyAbsolutePath(cwd)) {
+          return { projectPath: cwd, unresolvedProject: false };
         }
       }
     }
   }
 
   const naive = `/${encodedName.replaceAll("-", "/")}`;
-  if (dependencies.fs.existsSync(naive) && safeIsDirectory(naive, dependencies)) {
-    return naive;
+  if (safeIsDirectory(naive, dependencies)) {
+    return { projectPath: naive, unresolvedProject: false };
   }
 
-  return naive;
+  return { projectPath: "", unresolvedProject: true };
+}
+
+function normalizeCursorTerminalCwd(value: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      return typeof parsed === "string" && parsed.trim().length > 0 ? parsed.trim() : null;
+    } catch {
+      return trimmed.slice(1, -1).trim() || null;
+    }
+  }
+
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1).trim() || null;
+  }
+
+  return trimmed;
+}
+
+function isLikelyAbsolutePath(pathValue: string): boolean {
+  if (pathValue.startsWith("/")) {
+    return true;
+  }
+  return /^[A-Za-z]:[\\/]/.test(pathValue);
 }
 
 function buildGeminiProjectResolution(

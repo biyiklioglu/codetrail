@@ -1,0 +1,7 @@
+---
+pid: 1234
+cwd: "/Users/redacted/workspace/demo-cursor"
+command: "ls"
+started_at: 2026-02-20T10:00:00.000Z
+running_for_seconds: 10
+---

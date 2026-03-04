@@ -270,7 +270,8 @@ export function runIncrementalIndexing(
       const messagesWithDuration = deriveOperationDurations(normalizedMessages);
       const fileMtimeIso = new Date(discovered.fileMtimeMs).toISOString();
       const messagesWithTimestamps = messagesWithDuration.map((message) => {
-        if (Date.parse(message.createdAt) <= 0) {
+        const createdAtMs = Date.parse(message.createdAt);
+        if (!Number.isFinite(createdAtMs) || createdAtMs <= 0) {
           return { ...message, createdAt: fileMtimeIso };
         }
         return message;
@@ -546,10 +547,18 @@ function extractSourceMetadata(
         continue;
       }
       const messageRecord = asRecord(record.message);
+      const metadataRecord = asRecord(record.metadata);
+      const gitRecord = asRecord(record.git) ?? asRecord(metadataRecord?.git);
       const model = readString(messageRecord?.model) ?? readString(record.model);
       if (model) {
         models.add(model);
       }
+      cwd ??=
+        readString(record.cwd) ??
+        readString(messageRecord?.cwd) ??
+        readString(metadataRecord?.cwd);
+      gitBranch ??=
+        readString(gitRecord?.branch) ?? readString(record.gitBranch) ?? readString(record.branch);
     }
   }
 

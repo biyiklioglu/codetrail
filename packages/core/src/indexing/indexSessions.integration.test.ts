@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -437,6 +437,193 @@ describe("runIncrementalIndexing", () => {
         category: "user",
       },
     ]);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("falls back to file mtime for cursor messages with invalid timestamps", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-cursor-time-"));
+    const dbPath = join(dir, "index.db");
+    const cursorRoot = join(dir, ".cursor", "projects");
+    const actualProjectPath = join(dir, "workspace", "cursor-app");
+    const encodedProjectName = actualProjectPath.slice(1).replaceAll("/", "-");
+    const sessionUuid = "cursor-session-1";
+    const transcriptPath = join(
+      cursorRoot,
+      encodedProjectName,
+      "agent-transcripts",
+      sessionUuid,
+      `${sessionUuid}.jsonl`,
+    );
+    mkdirSync(join(cursorRoot, encodedProjectName, "terminals"), { recursive: true });
+    mkdirSync(join(actualProjectPath), { recursive: true });
+    mkdirSync(dirname(transcriptPath), { recursive: true });
+
+    writeFileSync(
+      join(cursorRoot, encodedProjectName, "terminals", "1.txt"),
+      [
+        "---",
+        `cwd: "${actualProjectPath}"`,
+        'command: "ls"',
+        "started_at: 2026-03-04T00:00:00.000Z",
+        "---",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      transcriptPath,
+      `${[
+        JSON.stringify({
+          id: "cur-u-1",
+          role: "user",
+          timestamp: "not-a-date",
+          message: {
+            content: [{ type: "text", text: "<user_query>\nCheck timestamps\n</user_query>" }],
+          },
+        }),
+        JSON.stringify({
+          id: "cur-a-1",
+          message: {
+            role: "assistant",
+            created_at: "still-not-a-date",
+            content: [{ type: "text", text: "Working on it." }],
+          },
+        }),
+        JSON.stringify({
+          id: "cur-a-2",
+          role: "assistant",
+          timestamp: "2026-03-04T10:00:05.000Z",
+          message: {
+            content: [{ type: "text", text: "Done." }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+    const fileMtime = new Date("2026-03-04T10:00:00.000Z");
+    utimesSync(transcriptPath, fileMtime, fileMtime);
+
+    const result = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig: {
+        claudeRoot: join(dir, ".claude", "projects"),
+        codexRoot: join(dir, ".codex", "sessions"),
+        geminiRoot: join(dir, ".gemini", "tmp"),
+        geminiHistoryRoot: join(dir, ".gemini", "history"),
+        geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+        cursorRoot,
+        includeClaudeSubagents: false,
+      },
+    });
+
+    expect(result.discoveredFiles).toBe(1);
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    const session = db
+      .prepare(
+        "SELECT started_at, ended_at, cwd FROM sessions WHERE provider = 'cursor' AND file_path = ?",
+      )
+      .get(transcriptPath) as {
+      started_at: string;
+      ended_at: string;
+      cwd: string;
+    };
+    const fallbackMessage = db
+      .prepare("SELECT created_at FROM messages WHERE source_id = ?")
+      .get("cur-u-1") as { created_at: string };
+    const nestedFallbackMessage = db
+      .prepare("SELECT created_at FROM messages WHERE source_id = ?")
+      .get("cur-a-1") as { created_at: string };
+    const validMessage = db
+      .prepare("SELECT created_at FROM messages WHERE source_id = ?")
+      .get("cur-a-2") as { created_at: string };
+    db.close();
+
+    expect(session.cwd).toBe(actualProjectPath);
+    expect(session.started_at).toBe("2026-03-04T10:00:00.000Z");
+    expect(session.ended_at).toBe("2026-03-04T10:00:05.000Z");
+    expect(fallbackMessage.created_at).toBe("2026-03-04T10:00:00.000Z");
+    expect(nestedFallbackMessage.created_at).toBe("2026-03-04T10:00:00.000Z");
+    expect(validMessage.created_at).toBe("2026-03-04T10:00:05.000Z");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("keeps cursor sessions with identical source ids in distinct projects", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-cursor-dupe-"));
+    const dbPath = join(dir, "index.db");
+    const cursorRoot = join(dir, ".cursor", "projects");
+    const sessionUuid = "shared-cursor-session";
+    const projectAPath = join(dir, "workspace", "cursor-one");
+    const projectBPath = join(dir, "workspace", "cursor-two");
+    const encodedA = projectAPath.slice(1).replaceAll("/", "-");
+    const encodedB = projectBPath.slice(1).replaceAll("/", "-");
+    mkdirSync(projectAPath, { recursive: true });
+    mkdirSync(projectBPath, { recursive: true });
+
+    const transcriptA = join(
+      cursorRoot,
+      encodedA,
+      "agent-transcripts",
+      sessionUuid,
+      `${sessionUuid}.jsonl`,
+    );
+    const transcriptB = join(
+      cursorRoot,
+      encodedB,
+      "agent-transcripts",
+      sessionUuid,
+      `${sessionUuid}.jsonl`,
+    );
+    mkdirSync(join(cursorRoot, encodedA, "terminals"), { recursive: true });
+    mkdirSync(join(cursorRoot, encodedB, "terminals"), { recursive: true });
+    mkdirSync(dirname(transcriptA), { recursive: true });
+    mkdirSync(dirname(transcriptB), { recursive: true });
+    writeFileSync(
+      join(cursorRoot, encodedA, "terminals", "a.txt"),
+      `---\ncwd: "${projectAPath}"\n---\n`,
+    );
+    writeFileSync(
+      join(cursorRoot, encodedB, "terminals", "b.txt"),
+      `---\ncwd: "${projectBPath}"\n---\n`,
+    );
+
+    const content = `${JSON.stringify({
+      id: "cur-1",
+      role: "assistant",
+      timestamp: "2026-03-04T10:00:00.000Z",
+      message: { content: [{ type: "text", text: "Done." }] },
+    })}\n`;
+    writeFileSync(transcriptA, content);
+    writeFileSync(transcriptB, content);
+
+    const result = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig: {
+        claudeRoot: join(dir, ".claude", "projects"),
+        codexRoot: join(dir, ".codex", "sessions"),
+        geminiRoot: join(dir, ".gemini", "tmp"),
+        geminiHistoryRoot: join(dir, ".gemini", "history"),
+        geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+        cursorRoot,
+        includeClaudeSubagents: false,
+      },
+    });
+
+    expect(result.discoveredFiles).toBe(2);
+    expect(result.indexedFiles).toBe(2);
+
+    const db = openDatabase(dbPath);
+    const sessionCount = db
+      .prepare("SELECT COUNT(*) as c FROM sessions WHERE provider = 'cursor'")
+      .get() as { c: number };
+    const identities = db
+      .prepare("SELECT id, file_path FROM sessions WHERE provider = 'cursor' ORDER BY file_path ASC")
+      .all() as Array<{ id: string; file_path: string }>;
+    db.close();
+
+    expect(sessionCount.c).toBe(2);
+    expect(identities[0]?.id).not.toBe(identities[1]?.id);
 
     rmSync(dir, { recursive: true, force: true });
   });

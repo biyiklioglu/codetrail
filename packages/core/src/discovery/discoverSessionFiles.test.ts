@@ -135,4 +135,81 @@ describe("discoverSessionFiles", () => {
 
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("discovers cursor sessions using terminal cwd and marks unresolved project paths", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-discovery-cursor-"));
+    const cursorRoot = join(dir, ".cursor", "projects");
+
+    const actualProjectPath = join(dir, "workspace", "my-hyphen-app");
+    mkdirSync(actualProjectPath, { recursive: true });
+    const encodedResolvedName = actualProjectPath.slice(1).replaceAll("/", "-");
+    const resolvedProjectDir = join(cursorRoot, encodedResolvedName);
+    const resolvedSessionUuid = "cursor-session-shared";
+    const resolvedTranscriptDir = join(
+      resolvedProjectDir,
+      "agent-transcripts",
+      resolvedSessionUuid,
+    );
+    mkdirSync(resolvedTranscriptDir, { recursive: true });
+    mkdirSync(join(resolvedProjectDir, "terminals"), { recursive: true });
+    writeFileSync(
+      join(resolvedProjectDir, "terminals", "1.txt"),
+      [
+        "---",
+        `cwd: "${actualProjectPath}"`,
+        'command: "ls"',
+        "started_at: 2026-03-04T00:00:00.000Z",
+        "---",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(resolvedTranscriptDir, `${resolvedSessionUuid}.jsonl`),
+      `${JSON.stringify({ role: "user", message: { content: [{ type: "text", text: "Hello" }] } })}\n`,
+    );
+
+    const encodedUnresolvedName = "Users-nonexistent-my-hyphen-project";
+    const unresolvedProjectDir = join(cursorRoot, encodedUnresolvedName);
+    const unresolvedSessionUuid = "cursor-session-shared";
+    const unresolvedTranscriptDir = join(
+      unresolvedProjectDir,
+      "agent-transcripts",
+      unresolvedSessionUuid,
+    );
+    mkdirSync(unresolvedTranscriptDir, { recursive: true });
+    writeFileSync(
+      join(unresolvedTranscriptDir, `${unresolvedSessionUuid}.jsonl`),
+      `${JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "Done" }] } })}\n`,
+    );
+
+    const discovered = discoverSessionFiles({
+      claudeRoot: join(dir, ".claude", "projects"),
+      codexRoot: join(dir, ".codex", "sessions"),
+      geminiRoot: join(dir, ".gemini", "tmp"),
+      geminiHistoryRoot: join(dir, ".gemini", "history"),
+      geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+      cursorRoot,
+      includeClaudeSubagents: false,
+    });
+
+    const cursorSessions = discovered.filter((file) => file.provider === "cursor");
+    expect(cursorSessions).toHaveLength(2);
+
+    const resolved = cursorSessions.find((file) => file.filePath.includes(encodedResolvedName));
+    expect(resolved?.projectPath).toBe(actualProjectPath);
+    expect(resolved?.metadata.cwd).toBe(actualProjectPath);
+    expect(resolved?.metadata.unresolvedProject).toBe(false);
+    expect(resolved?.sessionIdentity.startsWith(`cursor:${resolvedSessionUuid}:`)).toBe(true);
+
+    const unresolved = cursorSessions.find((file) => file.filePath.includes(encodedUnresolvedName));
+    expect(unresolved?.projectPath).toBe("");
+    expect(unresolved?.projectName).toBe(encodedUnresolvedName);
+    expect(unresolved?.metadata.cwd).toBeNull();
+    expect(unresolved?.metadata.unresolvedProject).toBe(true);
+    expect(unresolved?.sessionIdentity.startsWith(`cursor:${unresolvedSessionUuid}:`)).toBe(true);
+
+    expect(resolved?.sessionIdentity).not.toBe(unresolved?.sessionIdentity);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
 });

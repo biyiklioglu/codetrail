@@ -133,4 +133,36 @@ describe("parseSession python fixtures", () => {
     expect(split[1]?.tokenInput).toBeNull();
     expect(split[1]?.tokenOutput).toBeNull();
   });
+
+  it("parses cursor fixture role/content variants with nested role fallback", () => {
+    const fixturesRoot = join(process.cwd(), "packages", "core", "test-fixtures", "providers");
+    const payload = readJsonl(
+      join(
+        fixturesRoot,
+        "cursor",
+        "projects",
+        "Users-redacted-workspace-demo-cursor",
+        "agent-transcripts",
+        "cursor-session-redacted-001",
+        "cursor-session-redacted-001.jsonl",
+      ),
+    );
+
+    const parsed = parseSession({
+      provider: "cursor",
+      sessionId: "cursor-session-redacted-001",
+      payload,
+    });
+
+    expect(parsed.diagnostics).toEqual([]);
+    expect(new Set(parsed.messages.map((message) => message.category))).toEqual(
+      new Set(["user", "assistant", "thinking", "tool_use", "tool_result"]),
+    );
+    expect(parsed.messages.some((message) => message.id === "cur-u-1")).toBe(true);
+    expect(parsed.messages.some((message) => message.id === "cur-a-1")).toBe(true);
+    expect(parsed.messages.some((message) => message.id === "cur-a-1#2")).toBe(true);
+    expect(parsed.messages.some((message) => message.id === "cur-a-1#3")).toBe(true);
+    expect(parsed.messages.some((message) => message.id === "cur-a-2")).toBe(true);
+    expect(parsed.messages.some((message) => message.content.includes("<user_query>"))).toBe(false);
+  });
 });

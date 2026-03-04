@@ -329,11 +329,23 @@ function parseCursorPayload(args: {
       continue;
     }
 
-    const role = lowerString(eventRecord.role);
     const messageRecord = asRecord(eventRecord.message);
-    const createdAt = extractEventTimestamp(eventRecord);
+    const role = lowerString(
+      eventRecord.role ??
+        messageRecord?.role ??
+        eventRecord.author ??
+        messageRecord?.author ??
+        eventRecord.sender ??
+        messageRecord?.sender,
+    );
+    const createdAt = firstKnownTimestamp(eventRecord, messageRecord ?? eventRecord);
     const usage = extractTokenUsage(messageRecord ?? eventRecord);
-    const baseId = readString(eventRecord.id) ?? readString(eventRecord.uuid) ?? null;
+    const baseId =
+      readString(eventRecord.id) ??
+      readString(eventRecord.uuid) ??
+      readString(messageRecord?.id) ??
+      readString(messageRecord?.uuid) ??
+      null;
     const segments = dedupeSegments(parseCursorSegments(role, messageRecord ?? eventRecord));
 
     if (segments.length === 0) {
@@ -373,7 +385,7 @@ function parseCursorSegments(
     const blockRecord = asRecord(block);
     if (!blockRecord) {
       if (typeof block === "string" && block.length > 0) {
-        const category: MessageCategory = role === "user" ? "user" : "assistant";
+        const category = cursorRoleCategory(role, "assistant");
         segments.push({ category, content: stripCursorWrapperTags(block) });
       }
       continue;
@@ -390,7 +402,7 @@ function parseCursorSegments(
       if (cleaned.length === 0) {
         continue;
       }
-      const category: MessageCategory = role === "user" ? "user" : "assistant";
+      const category = cursorRoleCategory(role, "assistant");
       segments.push({ category, content: cleaned });
       continue;
     }
@@ -418,8 +430,7 @@ function parseCursorSegments(
     }
 
     if (text.length > 0) {
-      const category: MessageCategory =
-        role === "user" ? "user" : role === "assistant" ? "assistant" : "system";
+      const category = cursorRoleCategory(role, "system");
       segments.push({ category, content: stripCursorWrapperTags(text) });
     }
   }
@@ -429,14 +440,26 @@ function parseCursorSegments(
     if (fallback.length > 0) {
       const cleaned = stripCursorWrapperTags(fallback);
       if (cleaned.length > 0) {
-        const category: MessageCategory =
-          role === "user" ? "user" : role === "assistant" ? "assistant" : "system";
+        const category = cursorRoleCategory(role, "system");
         segments.push({ category, content: cleaned });
       }
     }
   }
 
   return segments;
+}
+
+function cursorRoleCategory(
+  role: string | null,
+  fallback: MessageCategory,
+): MessageCategory {
+  if (role === "user") {
+    return "user";
+  }
+  if (role === "assistant" || role === "model") {
+    return "assistant";
+  }
+  return fallback;
 }
 
 function stripCursorWrapperTags(text: string): string {
