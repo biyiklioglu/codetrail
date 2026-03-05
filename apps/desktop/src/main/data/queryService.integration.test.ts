@@ -138,6 +138,13 @@ describe("queryService", () => {
 
     const textFiltered = listProjects(dbPath, { providers: undefined, query: "workspace/codex" });
     expect(textFiltered.projects.length).toBe(1);
+    const wildcardFiltered = listProjects(dbPath, { providers: undefined, query: "/work*" });
+    expect(wildcardFiltered.projects.length).toBe(1);
+    const suffixWildcardFiltered = listProjects(dbPath, {
+      providers: undefined,
+      query: "/workspace*",
+    });
+    expect(suffixWildcardFiltered.projects.length).toBe(1);
 
     const codexProjectId = allProjects.projects.find((project) => project.provider === "codex")?.id;
     if (!codexProjectId) {
@@ -209,6 +216,18 @@ describe("queryService", () => {
     expect(filtered.categoryCounts.tool_use).toBeGreaterThanOrEqual(1);
     expect(filtered.messages[0]?.category).toBe("tool_use");
 
+    const wildcardFiltered = getSessionDetail(dbPath, {
+      sessionId: claudeSessionIdRow.id,
+      page: 0,
+      pageSize: 100,
+      sortDirection: "asc",
+      categories: undefined,
+      query: "*ixed",
+      focusMessageId: undefined,
+      focusSourceId: undefined,
+    });
+    expect(wildcardFiltered.totalCount).toBe(0);
+
     const noCategoriesSelected = getSessionDetail(dbPath, {
       sessionId: claudeSessionIdRow.id,
       page: 0,
@@ -273,6 +292,39 @@ describe("queryService", () => {
     });
     expect(filtered.totalCount).toBeGreaterThanOrEqual(1);
     expect(filtered.categoryCounts).toEqual(all.categoryCounts);
+
+    const trailingWildcard = runSearchQuery(dbPath, {
+      query: "par*",
+      categories: undefined,
+      providers: undefined,
+      projectIds: undefined,
+      projectQuery: "",
+      limit: 50,
+      offset: 0,
+    });
+    expect(trailingWildcard.totalCount).toBeGreaterThanOrEqual(1);
+
+    const leadingWildcard = runSearchQuery(dbPath, {
+      query: "*ixed",
+      categories: undefined,
+      providers: undefined,
+      projectIds: undefined,
+      projectQuery: "",
+      limit: 50,
+      offset: 0,
+    });
+    expect(leadingWildcard.totalCount).toBe(0);
+
+    const infixWildcard = runSearchQuery(dbPath, {
+      query: "p*er",
+      categories: undefined,
+      providers: undefined,
+      projectIds: undefined,
+      projectQuery: "",
+      limit: 50,
+      offset: 0,
+    });
+    expect(infixWildcard.totalCount).toBe(0);
 
     cleanup();
   });

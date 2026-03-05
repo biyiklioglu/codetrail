@@ -150,6 +150,12 @@ describe("bookmarkStore", () => {
     expect(wildcardParserMatches).toHaveLength(1);
     expect(wildcardParserMatches[0]?.message_id).toBe("m1");
 
+    const leadingWildcardMatches = store.listProjectBookmarks("p1", "*ixed");
+    expect(leadingWildcardMatches).toHaveLength(0);
+
+    const infixWildcardMatches = store.listProjectBookmarks("p1", "p*er");
+    expect(infixWildcardMatches).toHaveLength(0);
+
     const uppercaseMatches = store.listProjectBookmarks("p1", "FORMATTING");
     expect(uppercaseMatches).toHaveLength(1);
     expect(uppercaseMatches[0]?.message_id).toBe("m2");
@@ -239,12 +245,20 @@ describe("bookmarkStore", () => {
     const indexes = metaDb.prepare("PRAGMA index_list('bookmarks')").all() as Array<{
       name: string;
     }>;
+    const ftsSql = metaDb
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bookmarks_fts'")
+      .get() as { sql: string } | undefined;
+    const ftsCount = metaDb.prepare("SELECT COUNT(*) as c FROM bookmarks_fts").get() as {
+      c: number;
+    };
     metaDb.close();
 
     expect(schemaVersion?.value).toBe("2");
     expect(
       indexes.some((index) => index.name === "idx_bookmarks_project_message_content_lower"),
-    ).toBe(true);
+    ).toBe(false);
+    expect(ftsSql?.sql).toContain("prefix='2 3 4'");
+    expect(ftsCount.c).toBe(1);
 
     store.close();
     rmSync(dir, { recursive: true, force: true });

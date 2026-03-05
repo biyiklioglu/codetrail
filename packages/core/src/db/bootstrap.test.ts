@@ -22,6 +22,9 @@ describe("initializeDatabase", () => {
     const messageColumns = (
       db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>
     ).map((column) => column.name);
+    const ftsSql = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_fts'")
+      .get() as { sql: string } | undefined;
     db.close();
 
     expect(result.schemaVersion).toBe(DATABASE_SCHEMA_VERSION);
@@ -44,6 +47,7 @@ describe("initializeDatabase", () => {
         "operation_duration_confidence",
       ]),
     );
+    expect(ftsSql?.sql).toContain("prefix='2 3 4'");
 
     rmSync(dir, { recursive: true, force: true });
   });
@@ -116,6 +120,70 @@ describe("initializeDatabase", () => {
       projects: 0,
       indexedFiles: 0,
     });
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("upgrades existing message_fts tables to include prefix indexes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-db-fts-upgrade-"));
+    const dbPath = join(dir, "test-fts-upgrade.db");
+    const db = openDatabase(dbPath);
+    db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.exec(
+      `CREATE TABLE IF NOT EXISTS messages (
+         id TEXT PRIMARY KEY,
+         source_id TEXT NOT NULL,
+         session_id TEXT NOT NULL,
+         provider TEXT NOT NULL,
+         category TEXT NOT NULL,
+         content TEXT NOT NULL,
+         created_at TEXT NOT NULL,
+         token_input INTEGER,
+         token_output INTEGER,
+         operation_duration_ms INTEGER,
+         operation_duration_source TEXT,
+         operation_duration_confidence TEXT
+       )`,
+    );
+    db.exec(
+      `CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
+         message_id UNINDEXED,
+         session_id UNINDEXED,
+         provider,
+         category,
+         content
+       )`,
+    );
+    db.prepare(
+      "INSERT INTO messages (id, source_id, session_id, provider, category, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "m1",
+      "src1",
+      "s1",
+      "claude",
+      "assistant",
+      "prefix upgrade check",
+      "2026-03-05T00:00:00Z",
+    );
+    db.prepare(
+      "INSERT INTO message_fts (message_id, session_id, provider, category, content) VALUES (?, ?, ?, ?, ?)",
+    ).run("m1", "s1", "claude", "assistant", "prefix upgrade check");
+    db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(
+      String(DATABASE_SCHEMA_VERSION),
+    );
+
+    expect(() => ensureDatabaseSchema(db)).not.toThrow();
+
+    const upgradedFtsSql = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_fts'")
+      .get() as { sql: string } | undefined;
+    const upgradedCount = db.prepare("SELECT COUNT(*) as c FROM message_fts").get() as {
+      c: number;
+    };
+    db.close();
+
+    expect(upgradedFtsSql?.sql).toContain("prefix='2 3 4'");
+    expect(upgradedCount.c).toBe(1);
 
     rmSync(dir, { recursive: true, force: true });
   });

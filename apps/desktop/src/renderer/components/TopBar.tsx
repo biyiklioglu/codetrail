@@ -11,10 +11,10 @@ export function TopBar({
   onIncrementalRefresh,
   onForceRefresh,
   onToggleFocus,
-  onToggleShortcuts,
+  onToggleHelp,
   onToggleSettings,
 }: {
-  mainView: "history" | "search" | "settings";
+  mainView: "history" | "search" | "settings" | "help";
   theme: "light" | "dark";
   refreshing: boolean;
   focusMode: boolean;
@@ -24,7 +24,7 @@ export function TopBar({
   onIncrementalRefresh: () => void;
   onForceRefresh: () => void;
   onToggleFocus: () => void;
-  onToggleShortcuts: () => void;
+  onToggleHelp: () => void;
   onToggleSettings: () => void;
 }) {
   return (
@@ -88,13 +88,13 @@ export function TopBar({
         </button>
         <button
           type="button"
-          className="tb-btn"
-          onClick={onToggleShortcuts}
-          aria-label="Show keyboard shortcuts"
-          title="Show keyboard shortcuts (?)"
+          className={mainView === "help" ? "tb-btn active" : "tb-btn"}
+          onClick={onToggleHelp}
+          aria-label={mainView === "help" ? "Return to history view" : "Open help"}
+          title={mainView === "help" ? "Return to history view (Esc)" : "Open help (?)"}
         >
-          <ToolbarIcon name="shortcuts" />
-          Shortcuts
+          <ToolbarIcon name="help" />
+          Help
         </button>
         <div className="theme-toggle" aria-label="Theme toggle">
           <svg

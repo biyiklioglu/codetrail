@@ -13,7 +13,6 @@ function Harness(args: Parameters<typeof useKeyboardShortcuts>[0]) {
 describe("useKeyboardShortcuts", () => {
   it("routes search, zoom, and history shortcuts", () => {
     const setMainView = vi.fn();
-    const setShowShortcuts = vi.fn();
     const focusGlobalSearch = vi.fn();
     const focusSessionSearch = vi.fn();
     const toggleFocusMode = vi.fn();
@@ -30,10 +29,8 @@ describe("useKeyboardShortcuts", () => {
     render(
       <Harness
         mainView="history"
-        showShortcuts={false}
         hasFocusedHistoryMessage={false}
         setMainView={setMainView}
-        setShowShortcuts={setShowShortcuts}
         clearFocusedHistoryMessage={vi.fn()}
         focusGlobalSearch={focusGlobalSearch}
         focusSessionSearch={focusSessionSearch}
@@ -74,7 +71,6 @@ describe("useKeyboardShortcuts", () => {
     expect(goToPreviousSearchPage).not.toHaveBeenCalled();
     expect(goToNextSearchPage).not.toHaveBeenCalled();
     expect(setMainView).not.toHaveBeenCalledWith("history");
-    expect(setShowShortcuts).not.toHaveBeenCalledWith(false);
   });
 
   it("routes page shortcuts to global search pagination in search view", () => {
@@ -86,10 +82,8 @@ describe("useKeyboardShortcuts", () => {
     render(
       <Harness
         mainView="search"
-        showShortcuts={false}
         hasFocusedHistoryMessage={false}
         setMainView={vi.fn()}
-        setShowShortcuts={vi.fn()}
         clearFocusedHistoryMessage={vi.fn()}
         focusGlobalSearch={vi.fn()}
         focusSessionSearch={vi.fn()}
@@ -115,17 +109,14 @@ describe("useKeyboardShortcuts", () => {
     expect(goToNextHistoryPage).not.toHaveBeenCalled();
   });
 
-  it("handles escape and shortcut-help interactions", () => {
+  it("handles escape and question-mark help shortcuts", () => {
     const setMainView = vi.fn();
-    const setShowShortcuts = vi.fn();
 
     const { rerender } = render(
       <Harness
         mainView="search"
-        showShortcuts={false}
         hasFocusedHistoryMessage={false}
         setMainView={setMainView}
-        setShowShortcuts={setShowShortcuts}
         clearFocusedHistoryMessage={vi.fn()}
         focusGlobalSearch={vi.fn()}
         focusSessionSearch={vi.fn()}
@@ -148,10 +139,8 @@ describe("useKeyboardShortcuts", () => {
     rerender(
       <Harness
         mainView="history"
-        showShortcuts={true}
         hasFocusedHistoryMessage={false}
         setMainView={setMainView}
-        setShowShortcuts={setShowShortcuts}
         clearFocusedHistoryMessage={vi.fn()}
         focusGlobalSearch={vi.fn()}
         focusSessionSearch={vi.fn()}
@@ -168,11 +157,42 @@ describe("useKeyboardShortcuts", () => {
       />,
     );
 
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }));
+    expect(setMainView).toHaveBeenCalledWith("help");
+  });
 
-    expect(setShowShortcuts).toHaveBeenCalledWith(false);
-    expect(setShowShortcuts).toHaveBeenCalledWith(true);
+  it("does not open help when typing '?' in an input", () => {
+    const setMainView = vi.fn();
+
+    render(
+      <div>
+        <input id="query-input" />
+        <Harness
+          mainView="history"
+          hasFocusedHistoryMessage={false}
+          setMainView={setMainView}
+          clearFocusedHistoryMessage={vi.fn()}
+          focusGlobalSearch={vi.fn()}
+          focusSessionSearch={vi.fn()}
+          toggleFocusMode={vi.fn()}
+          toggleScopedMessagesExpanded={vi.fn()}
+          toggleHistoryCategory={vi.fn()}
+          toggleProjectPaneCollapsed={vi.fn()}
+          toggleSessionPaneCollapsed={vi.fn()}
+          goToPreviousHistoryPage={vi.fn()}
+          goToNextHistoryPage={vi.fn()}
+          goToPreviousSearchPage={vi.fn()}
+          goToNextSearchPage={vi.fn()}
+          applyZoomAction={vi.fn(async () => undefined)}
+        />
+      </div>,
+    );
+
+    const input = document.getElementById("query-input");
+    input?.focus();
+    input?.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true }));
+
+    expect(setMainView).not.toHaveBeenCalledWith("help");
   });
 
   it("clears focused history message on escape", () => {
@@ -181,10 +201,8 @@ describe("useKeyboardShortcuts", () => {
     render(
       <Harness
         mainView="history"
-        showShortcuts={false}
         hasFocusedHistoryMessage={true}
         setMainView={vi.fn()}
-        setShowShortcuts={vi.fn()}
         clearFocusedHistoryMessage={clearFocusedHistoryMessage}
         focusGlobalSearch={vi.fn()}
         focusSessionSearch={vi.fn()}

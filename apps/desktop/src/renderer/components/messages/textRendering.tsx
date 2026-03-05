@@ -2,6 +2,7 @@ import { Children, type ReactNode, cloneElement, isValidElement } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { buildSearchHighlightRegex } from "../../lib/searchQuery";
 import { tryParseJsonRecord } from "./toolParsing";
 
 export function renderRichText(
@@ -9,6 +10,7 @@ export function renderRichText(
   query: string,
   keyPrefix: string,
   pathRoots: string[] = [],
+  highlightPatterns: string[] = [],
 ): ReactNode[] {
   const normalized = normalizeMarkdownInput(value);
   return [
@@ -16,7 +18,7 @@ export function renderRichText(
       key={`${keyPrefix}:md`}
       remarkPlugins={[remarkGfm]}
       skipHtml
-      components={buildMarkdownComponents(pathRoots, query)}
+      components={buildMarkdownComponents(pathRoots, query, highlightPatterns)}
     >
       {normalized}
     </ReactMarkdown>,
@@ -28,6 +30,7 @@ export function renderPlainText(
   query: string,
   keyPrefix: string,
   pathRoots: string[] = [],
+  highlightPatterns: string[] = [],
 ): ReactNode[] {
   const lines = value.split(/\r?\n/);
   const items: ReactNode[] = [];
@@ -39,7 +42,7 @@ export function renderPlainText(
     }
     items.push(
       <p key={`${key}:p`} className="md-p">
-        {renderTextWithLocalPathLinks(line, query, `${key}:txt`, pathRoots)}
+        {renderTextWithLocalPathLinks(line, query, `${key}:txt`, pathRoots, highlightPatterns)}
       </p>,
     );
   }
@@ -66,57 +69,67 @@ export function looksLikeMarkdown(value: string): boolean {
 const TEXT_PATH_PATTERN =
   /(file:\/\/[^\s)\],;!?"'`]+|[A-Za-z]:[\\/][^\s)\],;!?"'`]+|\/[^\s)\],;!?"'`]+)/g;
 
-function buildMarkdownComponents(pathRoots: string[], query: string): Components {
+function buildMarkdownComponents(
+  pathRoots: string[],
+  query: string,
+  highlightPatterns: string[],
+): Components {
   return {
     h1({ children }) {
       return (
         <h3 className="md-h1">
-          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h1")}
+          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h1", highlightPatterns)}
         </h3>
       );
     },
     h2({ children }) {
       return (
         <h4 className="md-h2">
-          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h2")}
+          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h2", highlightPatterns)}
         </h4>
       );
     },
     h3({ children }) {
       return (
         <h5 className="md-h3">
-          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h3")}
+          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h3", highlightPatterns)}
         </h5>
       );
     },
     h4({ children }) {
       return (
         <h5 className="md-h3">
-          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h4")}
+          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h4", highlightPatterns)}
         </h5>
       );
     },
     h5({ children }) {
       return (
         <h5 className="md-h3">
-          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h5")}
+          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h5", highlightPatterns)}
         </h5>
       );
     },
     h6({ children }) {
       return (
         <h5 className="md-h3">
-          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h6")}
+          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h6", highlightPatterns)}
         </h5>
       );
     },
     p({ children }) {
       return (
-        <p className="md-p">{renderChildrenWithLocalPathLinks(children, query, pathRoots, "p")}</p>
+        <p className="md-p">
+          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "p", highlightPatterns)}
+        </p>
       );
     },
     li({ children }) {
-      return <li>{renderChildrenWithLocalPathLinks(children, query, pathRoots, "li")}</li>;
+      return (
+        <li>
+          {renderChildrenWithLocalPathLinks(children, query, pathRoots, "li", highlightPatterns)}
+        </li>
+      );
     },
     ul({ children }) {
       return <ul className="md-list">{children}</ul>;
@@ -192,7 +205,15 @@ function buildMarkdownComponents(pathRoots: string[], query: string): Components
         );
       }
       return (
-        <span>{renderChildrenWithLocalPathLinks(children, query, pathRoots, "unsafe-link")}</span>
+        <span>
+          {renderChildrenWithLocalPathLinks(
+            children,
+            query,
+            pathRoots,
+            "unsafe-link",
+            highlightPatterns,
+          )}
+        </span>
       );
     },
   };
@@ -264,6 +285,7 @@ function renderChildrenWithLocalPathLinks(
   query: string,
   pathRoots: string[],
   keyPrefix: string,
+  highlightPatterns: string[],
 ): ReactNode {
   const mapped: ReactNode[] = [];
 
@@ -271,7 +293,13 @@ function renderChildrenWithLocalPathLinks(
     const childKey = `${keyPrefix}:${index}`;
     if (typeof child === "string" || typeof child === "number") {
       mapped.push(
-        ...renderTextWithLocalPathLinks(String(child), query, `${childKey}:text`, pathRoots),
+        ...renderTextWithLocalPathLinks(
+          String(child),
+          query,
+          `${childKey}:text`,
+          pathRoots,
+          highlightPatterns,
+        ),
       );
       continue;
     }
@@ -307,7 +335,13 @@ function renderChildrenWithLocalPathLinks(
       cloneElement(
         child,
         undefined,
-        renderChildrenWithLocalPathLinks(props.children, query, pathRoots, `${childKey}:child`),
+        renderChildrenWithLocalPathLinks(
+          props.children,
+          query,
+          pathRoots,
+          `${childKey}:child`,
+          highlightPatterns,
+        ),
       ),
     );
   }
@@ -320,6 +354,7 @@ function renderTextWithLocalPathLinks(
   query: string,
   keyPrefix: string,
   pathRoots: string[],
+  highlightPatterns: string[],
 ): ReactNode[] {
   const nodes: ReactNode[] = [];
   let cursor = 0;
@@ -342,6 +377,7 @@ function renderTextWithLocalPathLinks(
           value.slice(cursor, plainEnd),
           query,
           `${keyPrefix}:${cursor}:plain`,
+          highlightPatterns,
         ),
       );
     }
@@ -356,24 +392,36 @@ function renderTextWithLocalPathLinks(
             void openLocalPath(resolved.absolutePath);
           }}
         >
-          {buildHighlightedTextNodes(resolved.displayLabel, query, `${keyPrefix}:${index}:label`)}
+          {buildHighlightedTextNodes(
+            resolved.displayLabel,
+            query,
+            `${keyPrefix}:${index}:label`,
+            highlightPatterns,
+          )}
         </button>,
       );
       cursor = tokenEnd + (bracketWrapped ? 1 : 0);
     } else {
-      nodes.push(...buildHighlightedTextNodes(rawToken, query, `${keyPrefix}:${index}:raw`));
+      nodes.push(
+        ...buildHighlightedTextNodes(rawToken, query, `${keyPrefix}:${index}:raw`, highlightPatterns),
+      );
       cursor = tokenEnd;
     }
   }
 
   if (cursor < value.length) {
     nodes.push(
-      ...buildHighlightedTextNodes(value.slice(cursor), query, `${keyPrefix}:${cursor}:tail`),
+      ...buildHighlightedTextNodes(
+        value.slice(cursor),
+        query,
+        `${keyPrefix}:${cursor}:tail`,
+        highlightPatterns,
+      ),
     );
   }
 
   if (nodes.length === 0) {
-    nodes.push(...buildHighlightedTextNodes(value, query, `${keyPrefix}:all`));
+    nodes.push(...buildHighlightedTextNodes(value, query, `${keyPrefix}:all`, highlightPatterns));
   }
 
   return nodes;
@@ -1148,14 +1196,15 @@ export function buildHighlightedTextNodes(
   value: string,
   query: string,
   keyPrefix: string,
+  highlightPatterns: string[] = [],
 ): ReactNode[] {
-  const normalizedQuery = query.trim();
-  if (normalizedQuery.length === 0) {
+  const matcher = buildSearchHighlightRegex(query, highlightPatterns);
+  if (!matcher) {
     return [<span key={`${keyPrefix}:all`}>{value}</span>];
   }
 
-  const matcher = new RegExp(`(${escapeRegExp(normalizedQuery)})`, "ig");
-  const parts = value.split(matcher);
+  const splitMatcher = new RegExp(`(${matcher.source})`, matcher.flags);
+  const parts = value.split(splitMatcher);
   const nodes: ReactNode[] = [];
   let cursor = 0;
   for (const [index, part] of parts.entries()) {

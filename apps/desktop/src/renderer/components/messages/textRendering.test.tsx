@@ -286,6 +286,35 @@ describe("text helpers", () => {
     expect(markCount).toBe(3);
   });
 
+  it("highlights wildcard query matches", () => {
+    const html = renderNodes(
+      buildHighlightedTextNodes("focus focuses discuss fzzzus", "fo* *cus f*us", "hl-wild"),
+    );
+
+    expect(html).toContain("<mark>focus</mark>");
+    expect(html).toMatch(/<mark>[^<]*cus[^<]*<\/mark>/);
+  });
+
+  it("highlights punctuation-separated query terms as FTS token boundaries", () => {
+    const html = renderNodes(
+      buildHighlightedTextNodes(
+        "we should focus on something concrete",
+        "focus+on+something",
+        "hl-plus",
+      ),
+    );
+
+    expect(html).toContain("<mark>focus on something</mark>");
+  });
+
+  it("highlights postfix wildcard with punctuation-separated phrase tokens", () => {
+    const html = renderNodes(
+      buildHighlightedTextNodes("keep focus on somethingElse now", "focus+on+some*", "hl-plus-wc"),
+    );
+
+    expect(html).toContain("<mark>focus on somethingElse</mark>");
+  });
+
   it("escapes regex metacharacters in queries", () => {
     expect(escapeRegExp("a+b*c?.[x]")).toBe("a\\+b\\*c\\?\\.\\[x\\]");
   });

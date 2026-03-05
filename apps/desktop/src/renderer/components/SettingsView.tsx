@@ -16,7 +16,6 @@ import { copyTextToClipboard } from "../lib/clipboard";
 import { openPath } from "../lib/pathActions";
 import { prettyCategory } from "../lib/viewUtils";
 import { ToolbarIcon } from "./ToolbarIcon";
-
 type SettingsInfo = IpcResponse<"app:getSettingsInfo">;
 type DiscoveryProvider = "claude" | "codex" | "gemini" | "cursor";
 type RegexRuleProvider = "claude" | "codex" | "gemini" | "cursor";
@@ -117,16 +116,24 @@ export function SettingsView({
 
   return (
     <div className="settings-view">
-      <div className="settings-scroll">
-        <div className="settings-title">
-          <ToolbarIcon name="settings" />
-          <span>Settings</span>
-        </div>
+      <div className="settings-page">
+        <header className="settings-page-header">
+          <div className="settings-page-header-left">
+            <span className="settings-page-eyebrow">Code Trail</span>
+            <h2>Settings</h2>
+            <p>Application preferences and configuration</p>
+          </div>
+        </header>
 
         <section className="settings-section">
           <div className="settings-section-header">
-            <h3>Fonts</h3>
-            <p>Choose regular and monospaced fonts used in the UI and message content.</p>
+            <div className="settings-section-icon settings-section-icon-fonts" aria-hidden>
+              Aa
+            </div>
+            <div>
+              <h3>Fonts</h3>
+              <p>Regular and monospaced fonts used in the UI and message content.</p>
+            </div>
           </div>
           <div className="settings-section-body">
             <div className="settings-font-grid">
@@ -208,8 +215,13 @@ export function SettingsView({
 
         <section className="settings-section">
           <div className="settings-section-header">
-            <h3>Default Expansion</h3>
-            <p>Select which message types should start expanded in session view.</p>
+            <div className="settings-section-icon settings-section-icon-expansion" aria-hidden>
+              []
+            </div>
+            <div>
+              <h3>Default Expansion</h3>
+              <p>Which message types should start expanded in session view.</p>
+            </div>
           </div>
           <div className="settings-section-body">
             <div className="settings-category-row">
@@ -240,12 +252,16 @@ export function SettingsView({
 
         <section className="settings-section">
           <div className="settings-section-header">
-            <h3>System Message Rules</h3>
-            <p>
-              Regex patterns applied during ingestion to classify matching messages as system
-              messages. Run Reindex manually after changing these to update already indexed
-              sessions.
-            </p>
+            <div className="settings-section-icon settings-section-icon-rules" aria-hidden>
+              //
+            </div>
+            <div>
+              <h3>System Message Rules</h3>
+              <p>
+                Regex patterns applied during ingestion to classify messages. Run Reindex after
+                changes.
+              </p>
+            </div>
           </div>
           <div className="settings-section-body">
             {(["claude", "codex", "gemini", "cursor"] as const).map((provider) => {
@@ -317,8 +333,13 @@ export function SettingsView({
           <>
             <section className="settings-section">
               <div className="settings-section-header">
-                <h3>Storage</h3>
-                <p>File and directory locations used by the application.</p>
+                <div className="settings-section-icon settings-section-icon-storage" aria-hidden>
+                  DB
+                </div>
+                <div>
+                  <h3>Storage</h3>
+                  <p>File and directory locations used by the application.</p>
+                </div>
               </div>
               <div className="settings-section-body">
                 <div className="settings-grid">
@@ -330,8 +351,13 @@ export function SettingsView({
             </section>
             <section className="settings-section">
               <div className="settings-section-header">
-                <h3>Discovery Roots</h3>
-                <p>Session and project directories scanned for each provider.</p>
+                <div className="settings-section-icon settings-section-icon-discovery" aria-hidden>
+                  /\
+                </div>
+                <div>
+                  <h3>Discovery Roots</h3>
+                  <p>Session and project directories scanned for each provider.</p>
+                </div>
               </div>
               <div className="settings-section-body">
                 <div className="settings-grid">

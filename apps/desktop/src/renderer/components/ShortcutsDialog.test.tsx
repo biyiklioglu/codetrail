@@ -1,35 +1,45 @@
 // @vitest-environment jsdom
 
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { ShortcutsDialog } from "./ShortcutsDialog";
 
 describe("ShortcutsDialog", () => {
-  it("renders shortcut items and closes via button", async () => {
-    const user = userEvent.setup();
-    const onClose = vi.fn();
-
+  it("renders grouped shortcuts and syntax blocks in help view", () => {
     render(
       <ShortcutsDialog
         shortcutItems={[
-          { shortcut: "Cmd/Ctrl+F", description: "Search messages" },
-          { shortcut: "Esc", description: "Close shortcuts" },
+          { group: "Search & Navigation", shortcut: "Cmd/Ctrl+F", description: "Search messages" },
+          { group: "System", shortcut: "Esc", description: "Return to history view" },
         ]}
-        onClose={onClose}
+        commonSyntaxItems={[{ syntax: "term*", description: "Prefix wildcard", note: "Postfix only" }]}
+        advancedSyntaxItems={[{ syntax: "A OR B", description: "Boolean OR", note: "Advanced mode" }]}
       />,
     );
 
+    expect(screen.getByText("Help & Reference")).toBeInTheDocument();
+    expect(screen.getByText("Code Trail")).toBeInTheDocument();
     expect(screen.getByText("Keyboard Shortcuts")).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Shortcut" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Description" })).toBeInTheDocument();
-    expect(screen.getByText("Cmd/Ctrl+F")).toBeInTheDocument();
+    expect(screen.getByText("Search Syntax")).toBeInTheDocument();
+    expect(screen.getByText("Common")).toBeInTheDocument();
+    expect(screen.getByText("Advanced Only")).toBeInTheDocument();
+    expect(screen.getByText("Search & Navigation")).toBeInTheDocument();
+    expect(screen.getByText("System")).toBeInTheDocument();
+    expect(screen.getByText("Cmd/Ctrl")).toBeInTheDocument();
     expect(screen.getByText("Search messages")).toBeInTheDocument();
     expect(screen.getByText("Esc")).toBeInTheDocument();
-    expect(screen.getByText("Close shortcuts")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Close shortcuts" }));
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Return to history view")).toBeInTheDocument();
+    expect(
+      screen.getByText((_, element) => (element?.textContent ?? "").trim() === "term*"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Prefix wildcard")).toBeInTheDocument();
+    expect(screen.getByText("Postfix only")).toBeInTheDocument();
+    expect(
+      screen.getByText((_, element) => (element?.textContent ?? "").trim() === "A OR B"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Boolean OR")).toBeInTheDocument();
+    expect(screen.getAllByText("Advanced mode").length).toBeGreaterThan(0);
+    expect(screen.getByText("Built-in Guide")).toBeInTheDocument();
   });
 });

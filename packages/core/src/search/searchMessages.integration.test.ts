@@ -168,6 +168,16 @@ describe("searchMessages", () => {
     const wildcard = searchMessages(db, { query: "pars*" });
     expect(wildcard.totalCount).toBeGreaterThanOrEqual(1);
 
+    const leadingWildcard = searchMessages(db, { query: "*ixed" });
+    expect(leadingWildcard.totalCount).toBe(0);
+
+    const infixWildcard = searchMessages(db, { query: "p*er" });
+    expect(infixWildcard.totalCount).toBe(0);
+
+    const advancedNot = searchMessages(db, { query: "bug NOT cursor", searchMode: "advanced" });
+    expect(advancedNot.queryError).toBeNull();
+    expect(advancedNot.totalCount).toBeGreaterThanOrEqual(1);
+
     db.close();
     cleanup();
   });
@@ -194,11 +204,13 @@ describe("searchMessages", () => {
     expect(cursorOnly.results.every((result) => result.provider === "cursor")).toBe(true);
 
     const projectMatch = searchMessages(db, { query: "bug", projectQuery: "project" });
+    const projectWildcard = searchMessages(db, { query: "bug", projectQuery: "project*" });
     const projectMiss = searchMessages(db, {
       query: "bug",
       projectQuery: "definitely-missing-project",
     });
     expect(projectMatch.totalCount).toBeGreaterThanOrEqual(1);
+    expect(projectWildcard.totalCount).toBeGreaterThanOrEqual(1);
     expect(projectMiss.totalCount).toBe(0);
 
     const all = searchMessages(db, { query: "bug" });

@@ -1,6 +1,7 @@
 import type { IpcResponse, Provider } from "@codetrail/core";
 import { useEffect, useRef } from "react";
 
+import { SEARCH_PLACEHOLDERS } from "../../lib/searchPlaceholders";
 import { compactPath, formatDate, prettyProvider } from "../../lib/viewUtils";
 import { ToolbarIcon } from "../ToolbarIcon";
 
@@ -71,9 +72,7 @@ export function ProjectPane({
                 className="collapse-btn sort-btn"
                 onClick={onToggleSortDirection}
                 aria-label={
-                  sortDirection === "asc"
-                    ? "Sort projects descending"
-                    : "Sort projects ascending"
+                  sortDirection === "asc" ? "Sort projects descending" : "Sort projects ascending"
                 }
                 title={sortTooltip}
               >
@@ -106,11 +105,7 @@ export function ProjectPane({
             className="collapse-btn pane-collapse-btn"
             onClick={onToggleCollapsed}
             aria-label={collapsed ? "Expand Projects pane" : "Collapse Projects pane"}
-            title={
-              collapsed
-                ? "Expand Projects (Cmd/Ctrl+B)"
-                : "Collapse Projects (Cmd/Ctrl+B)"
-            }
+            title={collapsed ? "Expand Projects (Cmd/Ctrl+B)" : "Collapse Projects (Cmd/Ctrl+B)"}
           >
             <ToolbarIcon name="chevronLeft" />
           </button>
@@ -123,7 +118,7 @@ export function ProjectPane({
             className="search-input"
             value={projectQueryInput}
             onChange={(event) => onProjectQueryChange(event.target.value)}
-            placeholder="Filter projects..."
+            placeholder={SEARCH_PLACEHOLDERS.sidebarProjects}
           />
         </div>
       </div>

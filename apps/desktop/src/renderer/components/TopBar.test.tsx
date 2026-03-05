@@ -14,7 +14,7 @@ describe("TopBar", () => {
     const onIncrementalRefresh = vi.fn();
     const onForceRefresh = vi.fn();
     const onToggleFocus = vi.fn();
-    const onToggleShortcuts = vi.fn();
+    const onToggleHelp = vi.fn();
     const onToggleSettings = vi.fn();
 
     render(
@@ -29,7 +29,7 @@ describe("TopBar", () => {
         onIncrementalRefresh={onIncrementalRefresh}
         onForceRefresh={onForceRefresh}
         onToggleFocus={onToggleFocus}
-        onToggleShortcuts={onToggleShortcuts}
+        onToggleHelp={onToggleHelp}
         onToggleSettings={onToggleSettings}
       />,
     );
@@ -47,7 +47,7 @@ describe("TopBar", () => {
     await user.click(screen.getByRole("button", { name: "Refresh index" }));
     await user.click(screen.getByRole("button", { name: "Force reindex" }));
     await user.click(screen.getByRole("button", { name: "Enter focus mode" }));
-    await user.click(screen.getByRole("button", { name: "Show keyboard shortcuts" }));
+    await user.click(screen.getByRole("button", { name: "Open help" }));
     await user.click(screen.getByRole("button", { name: "Switch to Dark theme" }));
     await user.click(screen.getByRole("button", { name: "Open settings" }));
 
@@ -55,7 +55,7 @@ describe("TopBar", () => {
     expect(onIncrementalRefresh).toHaveBeenCalledTimes(1);
     expect(onForceRefresh).toHaveBeenCalledTimes(1);
     expect(onToggleFocus).toHaveBeenCalledTimes(1);
-    expect(onToggleShortcuts).toHaveBeenCalledTimes(1);
+    expect(onToggleHelp).toHaveBeenCalledTimes(1);
     expect(onThemeChange).toHaveBeenCalledWith("dark");
     expect(onToggleSettings).toHaveBeenCalledTimes(1);
   });
@@ -73,7 +73,7 @@ describe("TopBar", () => {
         onIncrementalRefresh={vi.fn()}
         onForceRefresh={vi.fn()}
         onToggleFocus={vi.fn()}
-        onToggleShortcuts={vi.fn()}
+        onToggleHelp={vi.fn()}
         onToggleSettings={vi.fn()}
       />,
     );

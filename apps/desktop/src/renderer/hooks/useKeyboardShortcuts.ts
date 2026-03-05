@@ -1,14 +1,12 @@
 import { useEffect } from "react";
 import type { MessageCategory } from "@codetrail/core";
 
-type MainView = "history" | "search" | "settings";
+type MainView = "history" | "search" | "settings" | "help";
 
 export function useKeyboardShortcuts(args: {
   mainView: MainView;
-  showShortcuts: boolean;
   hasFocusedHistoryMessage: boolean;
   setMainView: (view: MainView | ((value: MainView) => MainView)) => void;
-  setShowShortcuts: (value: boolean | ((current: boolean) => boolean)) => void;
   clearFocusedHistoryMessage: () => void;
   focusGlobalSearch: () => void;
   focusSessionSearch: () => void;
@@ -25,10 +23,8 @@ export function useKeyboardShortcuts(args: {
 }): void {
   const {
     mainView,
-    showShortcuts,
     hasFocusedHistoryMessage,
     setMainView,
-    setShowShortcuts,
     clearFocusedHistoryMessage,
     focusGlobalSearch,
     focusSessionSearch,
@@ -52,13 +48,11 @@ export function useKeyboardShortcuts(args: {
       if (event.defaultPrevented) {
         return;
       }
-      if (event.key === "?") {
-        setShowShortcuts(true);
+      if (event.key === "?" && !isEditableTarget(event.target)) {
+        event.preventDefault();
+        setMainView("help");
       } else if (event.key === "Escape") {
-        if (showShortcuts) {
-          event.preventDefault();
-          setShowShortcuts(false);
-        } else if (mainView === "search" || mainView === "settings") {
+        if (mainView === "search" || mainView === "settings" || mainView === "help") {
           event.preventDefault();
           setMainView("history");
         } else if (mainView === "history" && hasFocusedHistoryMessage) {
@@ -156,8 +150,6 @@ export function useKeyboardShortcuts(args: {
     hasFocusedHistoryMessage,
     mainView,
     setMainView,
-    setShowShortcuts,
-    showShortcuts,
     goToNextHistoryPage,
     goToPreviousHistoryPage,
     goToNextSearchPage,

@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { SEARCH_PLACEHOLDERS } from "../../lib/searchPlaceholders";
 import { ProjectPane } from "./ProjectPane";
 
 const projects = [
@@ -74,7 +75,7 @@ describe("ProjectPane", () => {
     await user.click(screen.getByRole("button", { name: "Sort projects ascending" }));
     await user.click(screen.getByRole("button", { name: "Copy project details" }));
     await user.click(screen.getByRole("button", { name: "Open project folder" }));
-    await user.type(screen.getByPlaceholderText("Filter projects..."), "abc");
+    await user.type(screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.sidebarProjects), "abc");
     await user.click(screen.getByRole("button", { name: /Gemini/i }));
     await user.click(screen.getByRole("button", { name: /Project Two/i }));
 

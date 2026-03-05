@@ -5,6 +5,8 @@ import {
   type OperationDurationConfidence,
   type OperationDurationSource,
   type Provider,
+  type SearchMode,
+  buildSearchQueryPlan,
   openDatabase,
 } from "@codetrail/core";
 
@@ -53,7 +55,7 @@ export type BookmarkReconciliationResult = {
 };
 
 export type BookmarkStore = {
-  listProjectBookmarks: (projectId: string, query?: string) => StoredBookmark[];
+  listProjectBookmarks: (projectId: string, query?: string, searchMode?: SearchMode) => StoredBookmark[];
   getBookmark: (projectId: string, messageId: string) => StoredBookmark | null;
   upsertBookmark: (snapshot: Omit<BookmarkSnapshot, "snapshotVersion" | "snapshotJson">) => void;
   removeBookmark: (projectId: string, messageId: string) => boolean;
@@ -94,31 +96,6 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
      WHERE project_id = ?
      ORDER BY message_created_at DESC, message_id DESC`,
   );
-  const listByFtsQueryStmt = db.prepare(
-    `SELECT
-       b.project_id,
-       b.session_id,
-       b.message_id,
-       b.message_source_id,
-       b.provider,
-       b.session_title,
-       b.message_category,
-       b.message_content,
-       b.message_created_at,
-       b.bookmarked_at,
-       b.is_orphaned,
-       b.orphaned_at,
-       b.snapshot_version,
-       b.snapshot_json
-     FROM bookmarks b
-     JOIN bookmarks_fts
-       ON bookmarks_fts.project_id = b.project_id
-      AND bookmarks_fts.message_id = b.message_id
-     WHERE b.project_id = ?
-       AND bookmarks_fts MATCH ?
-     ORDER BY b.message_created_at DESC, b.message_id DESC`,
-  );
-
   const getStmt = db.prepare(
     `SELECT
        project_id,
@@ -180,12 +157,52 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
   );
 
   return {
-    listProjectBookmarks: (projectId, query) => {
+    listProjectBookmarks: (projectId, query, searchMode = "simple") => {
       const normalizedQuery = query?.trim() ?? "";
       if (normalizedQuery.length === 0) {
         return listStmt.all(projectId) as StoredBookmark[];
       }
-      return listByFtsQueryStmt.all(projectId, escapeFtsQuery(normalizedQuery)) as StoredBookmark[];
+
+      const queryPlan = buildSearchQueryPlan(normalizedQuery, searchMode);
+      if (queryPlan.error) {
+        return [];
+      }
+      if (!queryPlan.hasTerms) {
+        return listStmt.all(projectId) as StoredBookmark[];
+      }
+
+      const conditions = ["b.project_id = ?"];
+      const params: string[] = [projectId];
+      if (queryPlan.ftsQuery) {
+        conditions.push("bookmarks_fts MATCH ?");
+        params.push(queryPlan.ftsQuery);
+      }
+
+      return db
+        .prepare(
+          `SELECT
+             b.project_id,
+             b.session_id,
+             b.message_id,
+             b.message_source_id,
+             b.provider,
+             b.session_title,
+             b.message_category,
+             b.message_content,
+             b.message_created_at,
+             b.bookmarked_at,
+             b.is_orphaned,
+             b.orphaned_at,
+             b.snapshot_version,
+             b.snapshot_json
+           FROM bookmarks b
+           JOIN bookmarks_fts
+             ON bookmarks_fts.project_id = b.project_id
+            AND bookmarks_fts.message_id = b.message_id
+           WHERE ${conditions.join(" AND ")}
+           ORDER BY b.message_created_at DESC, b.message_id DESC`,
+        )
+        .all(...params) as StoredBookmark[];
     },
     getBookmark: (projectId, messageId) => {
       const row = getStmt.get(projectId, messageId) as StoredBookmark | undefined;
@@ -270,24 +287,10 @@ function ensureBookmarkSchema(db: DatabaseHandle): void {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_bookmarks_project_category ON bookmarks(project_id, message_category)",
   );
-  db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_bookmarks_project_message_content_lower ON bookmarks(project_id, LOWER(message_content))",
-  );
+  db.exec("DROP INDEX IF EXISTS idx_bookmarks_project_message_content_lower");
   db.exec("CREATE INDEX IF NOT EXISTS idx_bookmarks_session_id ON bookmarks(session_id)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_bookmarks_orphaned ON bookmarks(is_orphaned)");
-  db.exec(
-    `CREATE VIRTUAL TABLE IF NOT EXISTS bookmarks_fts USING fts5(
-       project_id UNINDEXED,
-       message_id UNINDEXED,
-       message_content
-     )`,
-  );
-  db.exec("DELETE FROM bookmarks_fts");
-  db.exec(
-    `INSERT INTO bookmarks_fts (project_id, message_id, message_content)
-     SELECT project_id, message_id, message_content
-     FROM bookmarks`,
-  );
+  ensureBookmarksFtsTable(db);
 
   db.prepare(
     `INSERT INTO meta (key, value) VALUES ('schema_version', ?)
@@ -295,28 +298,29 @@ function ensureBookmarkSchema(db: DatabaseHandle): void {
   ).run(String(BOOKMARKS_DB_SCHEMA_VERSION));
 }
 
-function escapeFtsQuery(query: string): string {
-  const terms = query
-    .trim()
-    .split(/\s+/)
-    .filter((term) => term.length > 0);
-  const escapedTerms = terms
-    .map((term) => {
-      const supportsPrefix = term.length > 1 && term.endsWith("*");
-      const base = supportsPrefix ? term.slice(0, -1) : term;
-      const normalized = base.trim();
-      if (normalized.length === 0) {
-        return null;
-      }
-      return `"${normalized.replaceAll('"', '""')}"${supportsPrefix ? "*" : ""}`;
-    })
-    .filter((value) => value !== null);
-
-  if (escapedTerms.length === 0) {
-    return '""';
+function ensureBookmarksFtsTable(db: DatabaseHandle): void {
+  const existing = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bookmarks_fts'")
+    .get() as { sql: string } | undefined;
+  const hasPrefix = existing ? /\bprefix\s*=\s*['"]2 3 4['"]/i.test(existing.sql ?? "") : false;
+  if (existing && hasPrefix) {
+    return;
   }
 
-  return escapedTerms.join(" ");
+  db.exec("DROP TABLE IF EXISTS bookmarks_fts");
+  db.exec(
+    `CREATE VIRTUAL TABLE bookmarks_fts USING fts5(
+       project_id UNINDEXED,
+       message_id UNINDEXED,
+       message_content,
+       prefix='2 3 4'
+     )`,
+  );
+  db.exec(
+    `INSERT INTO bookmarks_fts (project_id, message_id, message_content)
+     SELECT project_id, message_id, message_content
+     FROM bookmarks`,
+  );
 }
 
 function reconcileBookmarks(

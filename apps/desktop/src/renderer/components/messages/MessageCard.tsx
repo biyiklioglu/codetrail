@@ -19,6 +19,7 @@ import type { SessionMessage } from "./types";
 type MessageCardProps = {
   message: SessionMessage;
   query: string;
+  highlightPatterns?: string[];
   pathRoots: string[];
   isFocused: boolean;
   isBookmarked?: boolean;
@@ -33,6 +34,7 @@ type MessageCardProps = {
 function MessageCardComponent({
   message,
   query,
+  highlightPatterns = [],
   pathRoots,
   isFocused,
   isBookmarked = false,
@@ -198,6 +200,7 @@ function MessageCardComponent({
               text={message.content}
               category={message.category}
               query={query}
+              highlightPatterns={highlightPatterns}
               pathRoots={pathRoots}
             />
           </div>

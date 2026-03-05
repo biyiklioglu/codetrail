@@ -2,6 +2,9 @@ import {
   type IpcRequest,
   type IpcResponse,
   type Provider,
+  type SearchQueryPlan,
+  buildSearchQueryPlan,
+  buildWildcardFilterPatterns,
   makeEmptyCategoryCounts,
   normalizeMessageCategories,
   normalizeMessageCategory,
@@ -244,11 +247,10 @@ function listProjectsWithDatabase(
     params.push(...request.providers);
   }
 
-  const query = request.query.trim().toLowerCase();
-  if (query.length > 0) {
-    conditions.push("(LOWER(p.name) LIKE ? OR LOWER(p.path) LIKE ?)");
-    const like = `%${query}%`;
-    params.push(like, like);
+  const projectPatterns = buildWildcardFilterPatterns(request.query);
+  for (const pattern of projectPatterns) {
+    conditions.push("(LOWER(p.name) LIKE ? ESCAPE '\\' OR LOWER(p.path) LIKE ? ESCAPE '\\')");
+    params.push(pattern, pattern);
   }
 
   const rows = db
@@ -349,16 +351,31 @@ function getProjectCombinedDetailWithDatabase(
        )`;
   const pageSize = request.pageSize;
   let page = request.page;
+  const queryPlan = buildSearchQueryPlan(request.query, request.searchMode ?? "simple");
   const messageFilters: {
     projectId: string;
     categories?: string[];
-    query: string;
+    queryPlan: SearchQueryPlan;
   } = {
     projectId: request.projectId,
-    query: request.query,
+    queryPlan,
   };
   if (request.categories !== undefined) {
     messageFilters.categories = request.categories;
+  }
+
+  if (queryPlan.error) {
+    return {
+      projectId: request.projectId,
+      totalCount: 0,
+      categoryCounts: makeEmptyCategoryCounts(),
+      page: 0,
+      pageSize,
+      focusIndex: null,
+      queryError: queryPlan.error,
+      highlightPatterns: [],
+      messages: [],
+    };
   }
 
   const { whereClause, params } = buildProjectMessageFilters(messageFilters);
@@ -376,7 +393,7 @@ function getProjectCombinedDetailWithDatabase(
 
   const queryOnlyFilter = buildProjectMessageFilters({
     projectId: request.projectId,
-    query: request.query,
+    queryPlan,
   });
   const categoryRows = db
     .prepare(
@@ -480,6 +497,8 @@ function getProjectCombinedDetailWithDatabase(
     page,
     pageSize,
     focusIndex,
+    queryError: null,
+    highlightPatterns: queryPlan.highlightPatterns,
     messages: rows.map(mapProjectCombinedMessageRow),
   };
 }
@@ -538,22 +557,39 @@ function getSessionDetailWithDatabase(
       page: 0,
       pageSize: request.pageSize,
       focusIndex: null,
+      queryError: null,
+      highlightPatterns: [],
       messages: [],
     };
   }
 
   const pageSize = request.pageSize;
   let page = request.page;
+  const queryPlan = buildSearchQueryPlan(request.query, request.searchMode ?? "simple");
   const messageFilters: {
     sessionId: string;
     categories?: string[];
-    query: string;
+    queryPlan: SearchQueryPlan;
   } = {
     sessionId: request.sessionId,
-    query: request.query,
+    queryPlan,
   };
   if (request.categories !== undefined) {
     messageFilters.categories = request.categories;
+  }
+
+  if (queryPlan.error) {
+    return {
+      session: mapSessionSummaryRow(sessionRow),
+      totalCount: 0,
+      categoryCounts: makeEmptyCategoryCounts(),
+      page: 0,
+      pageSize,
+      focusIndex: null,
+      queryError: queryPlan.error,
+      highlightPatterns: [],
+      messages: [],
+    };
   }
 
   const { whereClause, params } = buildMessageFilters(messageFilters);
@@ -566,7 +602,7 @@ function getSessionDetailWithDatabase(
 
   const queryOnlyFilter = buildMessageFilters({
     sessionId: request.sessionId,
-    query: request.query,
+    queryPlan,
   });
   const categoryRows = db
     .prepare(
@@ -660,6 +696,8 @@ function getSessionDetailWithDatabase(
     page,
     pageSize,
     focusIndex,
+    queryError: null,
+    highlightPatterns: queryPlan.highlightPatterns,
     messages: rows.map(mapSessionMessageRow),
   };
 }
@@ -671,8 +709,26 @@ function listProjectBookmarksWithStore(
 ): IpcResponse<"bookmarks:listProject"> {
   const allStoredRows = bookmarkStore.listProjectBookmarks(request.projectId);
   const hasQuery = (request.query?.trim().length ?? 0) > 0;
+  const queryPlan = hasQuery
+    ? buildSearchQueryPlan(request.query ?? "", request.searchMode ?? "simple")
+    : buildSearchQueryPlan("", request.searchMode ?? "simple");
+  if (queryPlan.error) {
+    return {
+      projectId: request.projectId,
+      totalCount: allStoredRows.length,
+      filteredCount: 0,
+      categoryCounts: makeEmptyCategoryCounts(),
+      queryError: queryPlan.error,
+      highlightPatterns: [],
+      results: [],
+    };
+  }
   const storedRows = hasQuery
-    ? bookmarkStore.listProjectBookmarks(request.projectId, request.query)
+    ? bookmarkStore.listProjectBookmarks(
+        request.projectId,
+        request.query,
+        request.searchMode ?? "simple",
+      )
     : allStoredRows;
   const liveRowsByMessageId = listLiveBookmarkMessagesById(
     db,
@@ -724,6 +780,8 @@ function listProjectBookmarksWithStore(
     totalCount: allStoredRows.length,
     filteredCount: results.length,
     categoryCounts,
+    queryError: null,
+    highlightPatterns: queryPlan.highlightPatterns,
     results,
   };
 }
@@ -837,6 +895,7 @@ function runSearchQueryWithDatabase(
 ): IpcResponse<"search:query"> {
   const searchInput: {
     query: string;
+    searchMode: "simple" | "advanced";
     categories?: string[];
     providers?: string[];
     projectIds?: string[];
@@ -845,6 +904,7 @@ function runSearchQueryWithDatabase(
     offset: number;
   } = {
     query: request.query,
+    searchMode: request.searchMode ?? "simple",
     projectQuery: request.projectQuery,
     limit: request.limit,
     offset: request.offset,
@@ -866,7 +926,7 @@ function runSearchQueryWithDatabase(
 function buildMessageFilters(args: {
   sessionId: string;
   categories?: string[];
-  query: string;
+  queryPlan: SearchQueryPlan;
 }): { whereClause: string; params: string[] } {
   const conditions = ["m.session_id = ?"];
   const params = [args.sessionId];
@@ -881,13 +941,7 @@ function buildMessageFilters(args: {
     }
   }
 
-  const query = args.query.trim();
-  if (query.length > 0) {
-    conditions.push(
-      "EXISTS (SELECT 1 FROM message_fts WHERE message_fts.message_id = m.id AND message_fts MATCH ?)",
-    );
-    params.push(escapeFtsQuery(query));
-  }
+  appendMessageQueryConditions(conditions, params, args.queryPlan, "m");
 
   return { whereClause: conditions.join(" AND "), params };
 }
@@ -895,7 +949,7 @@ function buildMessageFilters(args: {
 function buildProjectMessageFilters(args: {
   projectId: string;
   categories?: string[];
-  query: string;
+  queryPlan: SearchQueryPlan;
 }): { whereClause: string; params: string[] } {
   const conditions = ["s.project_id = ?"];
   const params = [args.projectId];
@@ -910,15 +964,32 @@ function buildProjectMessageFilters(args: {
     }
   }
 
-  const query = args.query.trim();
-  if (query.length > 0) {
-    conditions.push(
-      "EXISTS (SELECT 1 FROM message_fts WHERE message_fts.message_id = m.id AND message_fts MATCH ?)",
-    );
-    params.push(escapeFtsQuery(query));
-  }
+  appendMessageQueryConditions(conditions, params, args.queryPlan, "m");
 
   return { whereClause: conditions.join(" AND "), params };
+}
+
+function appendMessageQueryConditions(
+  conditions: string[],
+  params: string[],
+  queryPlan: SearchQueryPlan,
+  messageAlias: string,
+): void {
+  if (!queryPlan.hasTerms) {
+    return;
+  }
+
+  const textConditions: string[] = [];
+  if (queryPlan.ftsQuery) {
+    textConditions.push(
+      `${messageAlias}.id IN (SELECT message_id FROM message_fts WHERE message_fts MATCH ?)`,
+    );
+    params.push(queryPlan.ftsQuery);
+  }
+
+  if (textConditions.length > 0) {
+    conditions.push(`(${textConditions.join(" AND ")})`);
+  }
 }
 
 function mapSessionMessageRow(
@@ -1024,28 +1095,4 @@ function withDatabaseAndBookmarkStore<T>(
       bookmarkStore.close();
     }
   }
-}
-
-function escapeFtsQuery(query: string): string {
-  const terms = query
-    .trim()
-    .split(/\s+/)
-    .filter((term) => term.length > 0);
-  const escapedTerms = terms
-    .map((term) => {
-      const supportsPrefix = term.length > 1 && term.endsWith("*");
-      const base = supportsPrefix ? term.slice(0, -1) : term;
-      const normalized = base.trim();
-      if (normalized.length === 0) {
-        return null;
-      }
-      return `"${normalized.replaceAll('"', '""')}"${supportsPrefix ? "*" : ""}`;
-    })
-    .filter((value) => value !== null);
-
-  if (escapedTerms.length === 0) {
-    return '""';
-  }
-
-  return escapedTerms.join(" ");
 }

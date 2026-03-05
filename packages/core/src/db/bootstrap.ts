@@ -79,7 +79,8 @@ const tableStatements = [
     session_id UNINDEXED,
     provider,
     category,
-    content
+    content,
+    prefix='2 3 4'
   )`,
 ] as const;
 
@@ -117,6 +118,7 @@ export function ensureDatabaseSchema(db: SqliteDatabase): DatabaseBootstrapResul
       db.exec(statement);
     }
   }
+  ensureMessageFtsTable(db);
 
   db.prepare(
     `INSERT INTO meta (key, value) VALUES ('schema_version', ?)
@@ -161,6 +163,33 @@ function clearAllSchemaObjects(db: SqliteDatabase): void {
   db.exec("DROP TABLE IF EXISTS projects");
   db.exec("DROP TABLE IF EXISTS indexed_files");
   db.exec("DROP TABLE IF EXISTS meta");
+}
+
+function ensureMessageFtsTable(db: SqliteDatabase): void {
+  const existing = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_fts'")
+    .get() as { sql: string } | undefined;
+  const hasPrefix = existing ? /\bprefix\s*=\s*['"]2 3 4['"]/i.test(existing.sql ?? "") : false;
+  if (existing && hasPrefix) {
+    return;
+  }
+
+  db.exec("DROP TABLE IF EXISTS message_fts");
+  db.exec(
+    `CREATE VIRTUAL TABLE message_fts USING fts5(
+       message_id UNINDEXED,
+       session_id UNINDEXED,
+       provider,
+       category,
+       content,
+       prefix='2 3 4'
+     )`,
+  );
+  db.exec(
+    `INSERT INTO message_fts (message_id, session_id, provider, category, content)
+     SELECT id, session_id, provider, category, content
+     FROM messages`,
+  );
 }
 
 function readSchemaVersion(db: SqliteDatabase): number | null {

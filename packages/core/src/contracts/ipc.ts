@@ -114,6 +114,7 @@ const regularFontSizeSchema = z.enum([
   "20px",
 ]);
 const sortDirectionSchema = z.enum(["asc", "desc"]);
+const searchModeSchema = z.enum(["simple", "advanced"]);
 const systemMessageRegexRulesSchema = z.object({
   claude: z.array(z.string()),
   codex: z.array(z.string()),
@@ -213,6 +214,7 @@ export const ipcContractSchemas = {
       pageSize: z.number().int().positive().max(500).default(100),
       categories: z.array(messageCategorySchema).optional(),
       query: z.string().default(""),
+      searchMode: searchModeSchema.optional(),
       sortDirection: sortDirectionSchema.default("asc"),
       focusMessageId: z.string().min(1).optional(),
       focusSourceId: z.string().min(1).optional(),
@@ -224,6 +226,8 @@ export const ipcContractSchemas = {
       page: z.number().int().nonnegative(),
       pageSize: z.number().int().positive(),
       focusIndex: z.number().int().nonnegative().nullable(),
+      queryError: z.string().nullable().optional(),
+      highlightPatterns: z.array(z.string()).optional(),
       messages: z.array(projectCombinedMessageSchema),
     }),
   },
@@ -242,6 +246,7 @@ export const ipcContractSchemas = {
       pageSize: z.number().int().positive().max(500).default(100),
       categories: z.array(messageCategorySchema).optional(),
       query: z.string().default(""),
+      searchMode: searchModeSchema.optional(),
       sortDirection: sortDirectionSchema.default("asc"),
       focusMessageId: z.string().min(1).optional(),
       focusSourceId: z.string().min(1).optional(),
@@ -253,6 +258,8 @@ export const ipcContractSchemas = {
       page: z.number().int().nonnegative(),
       pageSize: z.number().int().positive(),
       focusIndex: z.number().int().nonnegative().nullable(),
+      queryError: z.string().nullable().optional(),
+      highlightPatterns: z.array(z.string()).optional(),
       messages: z.array(sessionMessageSchema),
     }),
   },
@@ -260,6 +267,7 @@ export const ipcContractSchemas = {
     request: z.object({
       projectId: z.string().min(1),
       query: z.string().optional(),
+      searchMode: searchModeSchema.optional(),
       categories: z.array(messageCategorySchema).optional(),
     }),
     response: z.object({
@@ -267,6 +275,8 @@ export const ipcContractSchemas = {
       totalCount: z.number().int().nonnegative(),
       filteredCount: z.number().int().nonnegative(),
       categoryCounts: categoryCountsSchema,
+      queryError: z.string().nullable().optional(),
+      highlightPatterns: z.array(z.string()).optional(),
       results: z.array(bookmarkEntrySchema),
     }),
   },
@@ -284,6 +294,7 @@ export const ipcContractSchemas = {
   "search:query": {
     request: z.object({
       query: z.string().default(""),
+      searchMode: searchModeSchema.optional(),
       categories: z.array(messageCategorySchema).optional(),
       providers: z.array(providerSchema).optional(),
       projectIds: z.array(z.string().min(1)).optional(),
@@ -293,6 +304,8 @@ export const ipcContractSchemas = {
     }),
     response: z.object({
       query: z.string(),
+      queryError: z.string().nullable().optional(),
+      highlightPatterns: z.array(z.string()).optional(),
       totalCount: z.number().int().nonnegative(),
       categoryCounts: categoryCountsSchema,
       results: z.array(searchResultSchema),

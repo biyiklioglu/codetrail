@@ -26,25 +26,43 @@ export function MessageContent({
   text,
   category,
   query,
+  highlightPatterns = [],
   pathRoots = [],
 }: {
   text: string;
   category: MessageCategory;
   query: string;
+  highlightPatterns?: string[];
   pathRoots?: string[];
 }) {
   if (category === "thinking") {
     return (
-      <pre className="thinking-block">{buildHighlightedTextNodes(text, query, "thinking")}</pre>
+      <pre className="thinking-block">
+        {buildHighlightedTextNodes(text, query, "thinking", highlightPatterns)}
+      </pre>
     );
   }
 
   if (category === "tool_edit") {
-    return <ToolEditContent text={text} query={query} pathRoots={pathRoots} />;
+    return (
+      <ToolEditContent
+        text={text}
+        query={query}
+        highlightPatterns={highlightPatterns}
+        pathRoots={pathRoots}
+      />
+    );
   }
 
   if (category === "tool_use") {
-    return <ToolUseContent text={text} query={query} pathRoots={pathRoots} />;
+    return (
+      <ToolUseContent
+        text={text}
+        query={query}
+        highlightPatterns={highlightPatterns}
+        pathRoots={pathRoots}
+      />
+    );
   }
 
   if (category === "tool_result") {
@@ -53,24 +71,26 @@ export function MessageContent({
 
   if (category === "assistant") {
     const content = looksLikeMarkdown(text)
-      ? renderRichText(text, query, "assistant-md", pathRoots)
-      : renderPlainText(text, query, "assistant-txt", pathRoots);
+      ? renderRichText(text, query, "assistant-md", pathRoots, highlightPatterns)
+      : renderPlainText(text, query, "assistant-txt", pathRoots, highlightPatterns);
     return <div className="rich-block">{content}</div>;
   }
 
   const content = looksLikeMarkdown(text)
-    ? renderRichText(text, query, "msg-md", pathRoots)
-    : renderPlainText(text, query, "msg-txt", pathRoots);
+    ? renderRichText(text, query, "msg-md", pathRoots, highlightPatterns)
+    : renderPlainText(text, query, "msg-txt", pathRoots, highlightPatterns);
   return <div className="rich-block">{content}</div>;
 }
 
 function ToolUseContent({
   text,
   query,
+  highlightPatterns,
   pathRoots,
 }: {
   text: string;
   query: string;
+  highlightPatterns: string[];
   pathRoots: string[];
 }) {
   const parsed = parseToolInvocationPayload(text);
@@ -78,13 +98,20 @@ function ToolUseContent({
     const formatted = tryFormatJson(text);
     return (
       <pre className="tool-block">
-        {buildHighlightedTextNodes(formatted, query, "tool-use-raw")}
+        {buildHighlightedTextNodes(formatted, query, "tool-use-raw", highlightPatterns)}
       </pre>
     );
   }
 
   if (parsed.isWrite) {
-    return <ToolEditContent text={text} query={query} pathRoots={pathRoots} />;
+    return (
+      <ToolEditContent
+        text={text}
+        query={query}
+        highlightPatterns={highlightPatterns}
+        pathRoots={pathRoots}
+      />
+    );
   }
 
   const command = asNonEmptyString(parsed.inputRecord?.cmd ?? parsed.inputRecord?.command);
@@ -157,10 +184,12 @@ function ToolResultContent({ text }: { text: string }) {
 function ToolEditContent({
   text,
   query,
+  highlightPatterns,
   pathRoots,
 }: {
   text: string;
   query: string;
+  highlightPatterns: string[];
   pathRoots: string[];
 }) {
   const parsed = parseToolEditPayload(text);
@@ -168,7 +197,7 @@ function ToolEditContent({
     const formatted = tryFormatJson(text);
     return (
       <pre className="tool-block tool-edit-block">
-        {buildHighlightedTextNodes(formatted, query, "tool-edit")}
+        {buildHighlightedTextNodes(formatted, query, "tool-edit", highlightPatterns)}
       </pre>
     );
   }
@@ -212,7 +241,7 @@ function ToolEditContent({
   const formatted = tryFormatJson(text);
   return (
     <pre className="tool-block tool-edit-block">
-      {buildHighlightedTextNodes(formatted, query, "tool-edit")}
+      {buildHighlightedTextNodes(formatted, query, "tool-edit", highlightPatterns)}
     </pre>
   );
 }

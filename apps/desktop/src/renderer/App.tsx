@@ -28,6 +28,7 @@ import { useResizablePanes } from "./hooks/useResizablePanes";
 import { copyTextToClipboard } from "./lib/clipboard";
 import { isMissingCodetrailClient, useCodetrailClient } from "./lib/codetrailClient";
 import { openInFileManager, openPath } from "./lib/pathActions";
+import { SEARCH_PLACEHOLDERS } from "./lib/searchPlaceholders";
 import { decideSessionSelectionAfterLoad } from "./lib/sessionSelection";
 import {
   clamp,
@@ -77,11 +78,12 @@ const EMPTY_CATEGORY_COUNTS = {
   system: 0,
 };
 
-type MainView = "history" | "search" | "settings";
+type MainView = "history" | "search" | "settings" | "help";
 type HistoryMode = "session" | "bookmarks" | "project_all";
 type BulkExpandScope = "all" | MessageCategory;
 type SystemMessageRegexRules = Record<Provider, string[]>;
 type SortDirection = "asc" | "desc";
+type SearchMode = "simple" | "advanced";
 type PaneStateSnapshot = IpcResponse<"ui:getState">;
 
 const EMPTY_BOOKMARKS_RESPONSE: BookmarkListResponse = {
@@ -89,6 +91,8 @@ const EMPTY_BOOKMARKS_RESPONSE: BookmarkListResponse = {
   totalCount: 0,
   filteredCount: 0,
   categoryCounts: EMPTY_CATEGORY_COUNTS,
+  queryError: null,
+  highlightPatterns: [],
   results: [],
 };
 const EMPTY_SYSTEM_MESSAGE_REGEX_RULES: SystemMessageRegexRules = {
@@ -157,7 +161,6 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   const [sessionPaneCollapsed, setSessionPaneCollapsed] = useState(
     initialPaneState?.sessionPaneCollapsed ?? false,
   );
-  const [showShortcuts, setShowShortcuts] = useState(false);
   const isHistoryLayout = mainView === "history" && !focusMode;
 
   const [projectQueryInput, setProjectQueryInput] = useState("");
@@ -230,6 +233,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   } | null>(null);
 
   const [searchQueryInput, setSearchQueryInput] = useState("");
+  const [advancedSearchEnabled, setAdvancedSearchEnabled] = useState(false);
   const [searchProjectQueryInput, setSearchProjectQueryInput] = useState("");
   const [searchProviders, setSearchProviders] = useState<Provider[]>(
     initialPaneState?.searchProviders ?? [],
@@ -238,6 +242,8 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   const [searchPage, setSearchPage] = useState(0);
   const [searchResponse, setSearchResponse] = useState<SearchQueryResponse>({
     query: "",
+    queryError: null,
+    highlightPatterns: [],
     totalCount: 0,
     categoryCounts: EMPTY_CATEGORY_COUNTS,
     results: [],
@@ -251,6 +257,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   const bookmarkQuery = useDebouncedValue(bookmarkQueryInput, 180);
   const searchQuery = useDebouncedValue(searchQueryInput, 220);
   const searchProjectQuery = useDebouncedValue(searchProjectQueryInput, 180);
+  const searchMode: SearchMode = advancedSearchEnabled ? "advanced" : "simple";
   const effectiveSessionQuery = sessionQueryInput.trim().length === 0 ? "" : sessionQuery;
   const effectiveBookmarkQuery = bookmarkQueryInput.trim().length === 0 ? "" : bookmarkQuery;
   const logError = useCallback((context: string, error: unknown) => {
@@ -374,6 +381,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     const response = await codetrail.invoke("bookmarks:listProject", {
       projectId: selectedProjectId,
       query: effectiveBookmarkQuery,
+      searchMode,
       categories: isAllHistoryCategoriesSelected ? undefined : historyCategories,
     });
     if (requestToken !== bookmarksLoadTokenRef.current) {
@@ -381,7 +389,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     }
     setBookmarksResponse(response);
     setBookmarksLoadedProjectId(selectedProjectId);
-  }, [codetrail, effectiveBookmarkQuery, historyCategories, selectedProjectId]);
+  }, [codetrail, effectiveBookmarkQuery, historyCategories, searchMode, selectedProjectId]);
 
   const loadSearch = useCallback(async () => {
     const requestToken = searchLoadTokenRef.current + 1;
@@ -396,6 +404,8 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
         query: searchQuery,
         totalCount: 0,
         categoryCounts: EMPTY_CATEGORY_COUNTS,
+        highlightPatterns: [],
+        queryError: null,
         results: [],
       });
       return;
@@ -403,6 +413,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
 
     const response = await codetrail.invoke("search:query", {
       query: searchQuery,
+      searchMode,
       categories: isAllHistoryCategoriesSelected ? undefined : historyCategories,
       providers: searchProviders.length > 0 ? searchProviders : undefined,
       projectIds: searchProjectId ? [searchProjectId] : undefined,
@@ -422,6 +433,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     searchProjectQuery,
     searchProviders,
     searchQuery,
+    searchMode,
   ]);
 
   const loadSettingsInfo = useCallback(async () => {
@@ -750,6 +762,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
         pageSize: PAGE_SIZE,
         categories: effectiveCategories,
         query: effectiveQuery,
+        searchMode,
         sortDirection: messageSortDirection,
         focusMessageId: pendingRevealTarget?.messageId || undefined,
         focusSourceId: pendingRevealTarget?.sourceId || undefined,
@@ -783,6 +796,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     messageSortDirection,
     historyCategories,
     effectiveSessionQuery,
+    searchMode,
     pendingRevealTarget,
     logError,
   ]);
@@ -805,6 +819,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
         pageSize: PAGE_SIZE,
         categories: effectiveCategories,
         query: effectiveQuery,
+        searchMode,
         sortDirection: projectAllSortDirection,
         focusMessageId: pendingRevealTarget?.messageId || undefined,
         focusSourceId: pendingRevealTarget?.sourceId || undefined,
@@ -838,6 +853,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     projectAllSortDirection,
     historyCategories,
     effectiveSessionQuery,
+    searchMode,
     pendingRevealTarget,
     logError,
   ]);
@@ -1170,6 +1186,18 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
       : historyMode === "project_all"
         ? (projectCombinedDetail?.categoryCounts ?? EMPTY_CATEGORY_COUNTS)
         : (sessionDetail?.categoryCounts ?? EMPTY_CATEGORY_COUNTS);
+  const historyQueryError =
+    historyMode === "bookmarks"
+      ? (bookmarksResponse.queryError ?? null)
+      : historyMode === "project_all"
+        ? (projectCombinedDetail?.queryError ?? null)
+        : (sessionDetail?.queryError ?? null);
+  const historyHighlightPatterns =
+    historyMode === "bookmarks"
+      ? (bookmarksResponse.highlightPatterns ?? [])
+      : historyMode === "project_all"
+        ? (projectCombinedDetail?.highlightPatterns ?? [])
+        : (sessionDetail?.highlightPatterns ?? []);
   const sessionMessages = activeHistoryMessages;
   const isExpandedByDefault = useCallback(
     (category: MessageCategory) => expandedByDefaultCategories.includes(category),
@@ -1206,28 +1234,92 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
 
   const shortcutItems = useMemo(() => {
     return [
-      { shortcut: "Cmd/Ctrl+F", description: "Search messages" },
-      { shortcut: "Cmd/Ctrl+Shift+F", description: "Open global search" },
-      { shortcut: "Cmd/Ctrl+Shift+M", description: "Toggle focus mode" },
-      { shortcut: "Cmd/Ctrl+B", description: "Expand/collapse Projects pane" },
-      { shortcut: "Cmd/Ctrl+Shift+B", description: "Expand/collapse Sessions pane" },
-      { shortcut: "Cmd/Ctrl+E", description: "Expand/collapse session messages" },
-      { shortcut: "Cmd/Ctrl+Left", description: "Previous page" },
-      { shortcut: "Cmd/Ctrl+Right", description: "Next page" },
-      { shortcut: "Cmd/Ctrl+1", description: "Toggle User button on session messages" },
-      { shortcut: "Cmd/Ctrl+2", description: "Toggle Assistant button on session messages" },
-      { shortcut: "Cmd/Ctrl+3", description: "Toggle Write button on session messages" },
-      { shortcut: "Cmd/Ctrl+4", description: "Toggle Tool Use button on session messages" },
-      { shortcut: "Cmd/Ctrl+5", description: "Toggle Tool Result button on session messages" },
-      { shortcut: "Cmd/Ctrl+6", description: "Toggle Thinking button on session messages" },
-      { shortcut: "Cmd/Ctrl+7", description: "Toggle System button on session messages" },
-      { shortcut: "Cmd/Ctrl++", description: "Zoom in" },
-      { shortcut: "Cmd/Ctrl+-", description: "Zoom out" },
-      { shortcut: "Cmd/Ctrl+0", description: "Reset zoom" },
-      { shortcut: "?", description: "Shortcut help" },
-      { shortcut: "Esc", description: "Close shortcuts / clear focused message" },
+      { group: "Search & Navigation", shortcut: "Cmd/Ctrl+F", description: "Search messages" },
+      {
+        group: "Search & Navigation",
+        shortcut: "Cmd/Ctrl+Shift+F",
+        description: "Open global search",
+      },
+      { group: "Search & Navigation", shortcut: "Cmd/Ctrl+Left", description: "Previous page" },
+      { group: "Search & Navigation", shortcut: "Cmd/Ctrl+Right", description: "Next page" },
+      { group: "Panels", shortcut: "Cmd/Ctrl+B", description: "Expand/collapse Projects pane" },
+      {
+        group: "Panels",
+        shortcut: "Cmd/Ctrl+Shift+B",
+        description: "Expand/collapse Sessions pane",
+      },
+      {
+        group: "Panels",
+        shortcut: "Cmd/Ctrl+E",
+        description: "Expand/collapse session messages",
+      },
+      { group: "Panels", shortcut: "Cmd/Ctrl+Shift+M", description: "Toggle focus mode" },
+      {
+        group: "Message Filters",
+        shortcut: "Cmd/Ctrl+1",
+        description: "Toggle User button on session messages",
+      },
+      {
+        group: "Message Filters",
+        shortcut: "Cmd/Ctrl+2",
+        description: "Toggle Assistant button on session messages",
+      },
+      {
+        group: "Message Filters",
+        shortcut: "Cmd/Ctrl+3",
+        description: "Toggle Write button on session messages",
+      },
+      {
+        group: "Message Filters",
+        shortcut: "Cmd/Ctrl+4",
+        description: "Toggle Tool Use button on session messages",
+      },
+      {
+        group: "Message Filters",
+        shortcut: "Cmd/Ctrl+5",
+        description: "Toggle Tool Result button on session messages",
+      },
+      {
+        group: "Message Filters",
+        shortcut: "Cmd/Ctrl+6",
+        description: "Toggle Thinking button on session messages",
+      },
+      {
+        group: "Message Filters",
+        shortcut: "Cmd/Ctrl+7",
+        description: "Toggle System button on session messages",
+      },
+      { group: "System", shortcut: "Cmd/Ctrl++", description: "Zoom in" },
+      { group: "System", shortcut: "Cmd/Ctrl+-", description: "Zoom out" },
+      { group: "System", shortcut: "Cmd/Ctrl+0", description: "Reset zoom" },
+      { group: "System", shortcut: "?", description: "Open help page" },
+      { group: "System", shortcut: "Esc", description: "Close help / clear focused message" },
     ];
   }, []);
+  const commonSyntaxItems = useMemo(
+    () => [
+      { syntax: "term", description: "Match term token" },
+      { syntax: "term*", description: "Prefix wildcard", note: "Postfix only" },
+      { syntax: "focus+on", description: "Punctuation like '+' can still match tokenized text" },
+      { syntax: "focus-on", description: "Punctuation like '-' can still match tokenized text" },
+      { syntax: "focus+on+something", description: "Multiple separators are supported in a token" },
+    ],
+    [],
+  );
+  const advancedSyntaxItems = useMemo(
+    () => [
+      { syntax: '"exact phrase"', description: "Match exact phrase" },
+      { syntax: "A OR B", description: "Either side may match (advanced mode)" },
+      { syntax: "A NOT B", description: "Exclude B from A matches (advanced mode)" },
+      {
+        syntax: '"and" / "or" / "not"',
+        description: "Use quotes for literal words",
+        note: "Unquoted AND / OR / NOT are operators",
+      },
+      { syntax: "(A OR B) C", description: "Use parentheses to group expressions" },
+    ],
+    [],
+  );
 
   const handleToggleScopedMessagesExpanded = useCallback(() => {
     if (scopedMessages.length === 0) {
@@ -1394,10 +1486,8 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
 
   useKeyboardShortcuts({
     mainView,
-    showShortcuts,
     hasFocusedHistoryMessage: Boolean(visibleFocusedMessageId),
     setMainView,
-    setShowShortcuts,
     clearFocusedHistoryMessage: () => setFocusMessageId(""),
     focusGlobalSearch,
     focusSessionSearch,
@@ -1439,7 +1529,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
         onIncrementalRefresh={() => void handleIncrementalRefresh()}
         onForceRefresh={() => void handleForceRefresh()}
         onToggleFocus={() => setFocusMode((value) => !value)}
-        onToggleShortcuts={() => setShowShortcuts((value) => !value)}
+        onToggleHelp={() => setMainView((value) => (value === "help" ? "history" : "help"))}
         onToggleSettings={() =>
           setMainView((value) => (value === "settings" ? "history" : "settings"))
         }
@@ -1686,7 +1776,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
                   <ToolbarIcon name="search" />
                   <input
                     ref={sessionSearchInputRef}
-                    className="search-input"
+                    className={historyQueryError ? "search-input invalid" : "search-input"}
                     value={historyMode === "bookmarks" ? bookmarkQueryInput : sessionQueryInput}
                     onKeyDown={handleHistorySearchKeyDown}
                     onChange={(event) => {
@@ -1699,13 +1789,49 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
                     }}
                     placeholder={
                       historyMode === "bookmarks"
-                        ? "Search in bookmarks..."
+                        ? SEARCH_PLACEHOLDERS.historyBookmarks
                         : historyMode === "project_all"
-                          ? "Search in project sessions..."
-                          : "Search in session..."
+                          ? SEARCH_PLACEHOLDERS.historyProjectSessions
+                          : SEARCH_PLACEHOLDERS.historySession
                     }
+                    title={historyQueryError ?? undefined}
                   />
+                  <button
+                    type="button"
+                    className={`search-mode-icon-btn${advancedSearchEnabled ? " active" : ""}`}
+                    onClick={() => {
+                      setAdvancedSearchEnabled((value) => !value);
+                      setSessionPage(0);
+                    }}
+                    aria-pressed={advancedSearchEnabled}
+                    aria-label={
+                      advancedSearchEnabled
+                        ? "Disable advanced search syntax"
+                        : "Enable advanced search syntax"
+                    }
+                    title={
+                      advancedSearchEnabled
+                        ? "Advanced syntax enabled"
+                        : "Advanced syntax disabled"
+                    }
+                  >
+                    <svg
+                      className="search-mode-glyph"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      aria-hidden
+                    >
+                      <path d="M8 8l-4 4l4 4M16 8l4 4l-4 4M13 6l-2 12" />
+                    </svg>
+                  </button>
                 </div>
+                {historyQueryError ? (
+                  <p className="search-error" title={historyQueryError}>
+                    {historyQueryError}
+                  </p>
+                ) : null}
               </div>
 
               <div
@@ -1721,6 +1847,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
                       query={
                         historyMode === "bookmarks" ? effectiveBookmarkQuery : effectiveSessionQuery
                       }
+                      highlightPatterns={historyHighlightPatterns}
                       pathRoots={messagePathRoots}
                       isFocused={message.id === focusMessageId}
                       isBookmarked={bookmarkedMessageIds.has(message.id)}
@@ -1786,22 +1913,62 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
                 <p>{searchResponse.totalCount} matches</p>
               </div>
               <div className="search-controls">
-                <input
-                  ref={globalSearchInputRef}
-                  value={searchQueryInput}
-                  onChange={(event) => {
-                    setSearchQueryInput(event.target.value);
-                    setSearchPage(0);
-                  }}
-                  placeholder="Search all message text"
-                />
+                <div className="search-box">
+                  <ToolbarIcon name="search" />
+                  <input
+                    ref={globalSearchInputRef}
+                    className={searchResponse.queryError ? "search-input invalid" : "search-input"}
+                    value={searchQueryInput}
+                    onChange={(event) => {
+                      setSearchQueryInput(event.target.value);
+                      setSearchPage(0);
+                    }}
+                    placeholder={SEARCH_PLACEHOLDERS.globalMessages}
+                    title={searchResponse.queryError ?? undefined}
+                  />
+                  <button
+                    type="button"
+                    className={`search-mode-icon-btn${advancedSearchEnabled ? " active" : ""}`}
+                    onClick={() => {
+                      setAdvancedSearchEnabled((value) => !value);
+                      setSearchPage(0);
+                    }}
+                    aria-pressed={advancedSearchEnabled}
+                    aria-label={
+                      advancedSearchEnabled
+                        ? "Disable advanced search syntax"
+                        : "Enable advanced search syntax"
+                    }
+                    title={
+                      advancedSearchEnabled
+                        ? "Advanced syntax enabled"
+                        : "Advanced syntax disabled"
+                    }
+                  >
+                    <svg
+                      className="search-mode-glyph"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      aria-hidden
+                    >
+                      <path d="M8 8l-4 4l4 4M16 8l4 4l-4 4M13 6l-2 12" />
+                    </svg>
+                  </button>
+                </div>
+                {searchResponse.queryError ? (
+                  <p className="search-error" title={searchResponse.queryError}>
+                    {searchResponse.queryError}
+                  </p>
+                ) : null}
                 <input
                   value={searchProjectQueryInput}
                   onChange={(event) => {
                     setSearchProjectQueryInput(event.target.value);
                     setSearchPage(0);
                   }}
-                  placeholder="Filter by project text"
+                  placeholder={SEARCH_PLACEHOLDERS.globalProjects}
                 />
                 <select
                   className="search-select"
@@ -1933,6 +2100,12 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
                 </div>
               ) : null}
             </div>
+          ) : mainView === "help" ? (
+            <ShortcutsDialog
+              shortcutItems={shortcutItems}
+              commonSyntaxItems={commonSyntaxItems}
+              advancedSyntaxItems={advancedSyntaxItems}
+            />
           ) : (
             <SettingsView
               info={settingsInfo}
@@ -1991,10 +2164,6 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
           )}
         </section>
       </div>
-
-      {showShortcuts ? (
-        <ShortcutsDialog shortcutItems={shortcutItems} onClose={() => setShowShortcuts(false)} />
-      ) : null}
     </main>
   );
 }

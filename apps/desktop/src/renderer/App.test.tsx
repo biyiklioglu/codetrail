@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { App } from "./App";
+import { SEARCH_PLACEHOLDERS } from "./lib/searchPlaceholders";
 import { createMockCodetrailClient } from "./test/mockCodetrailClient";
 import { renderWithClient } from "./test/renderWithClient";
 
@@ -639,7 +640,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Global Search" }));
     expect(screen.getByRole("heading", { name: "Global Search" })).toBeInTheDocument();
 
-    await user.type(screen.getByPlaceholderText("Search all message text"), "markdown");
+    await user.type(screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.globalMessages), "markdown");
     await waitFor(() => {
       expect(screen.getByText("markdown table rendering")).toBeInTheDocument();
     });
@@ -671,7 +672,7 @@ describe("App", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Global Search" }));
-    await user.type(screen.getByPlaceholderText("Search all message text"), "markdown");
+    await user.type(screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.globalMessages), "markdown");
     await waitFor(() => {
       expect(screen.getByText("Page 1 / 3 (250 matches)")).toBeInTheDocument();
     });
@@ -683,9 +684,9 @@ describe("App", () => {
 
     await waitFor(() => {
       const calls = client.invoke.mock.calls.filter(([channel]) => channel === "search:query");
-      expect(
-        calls.some(([, payload]) => (payload as { offset?: number }).offset === 100),
-      ).toBe(true);
+      expect(calls.some(([, payload]) => (payload as { offset?: number }).offset === 100)).toBe(
+        true,
+      );
     });
 
     fireEvent.keyDown(window, { key: "ArrowLeft", ctrlKey: true });
@@ -694,7 +695,7 @@ describe("App", () => {
     });
   });
 
-  it("shows generic pagination shortcuts in help dialog", async () => {
+  it("shows generic pagination shortcuts in help page", async () => {
     const user = userEvent.setup();
     const client = createAppClient();
 
@@ -704,7 +705,7 @@ describe("App", () => {
       expect(screen.getByText("Project One")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "Show keyboard shortcuts" }));
+    await user.click(screen.getByRole("button", { name: "Open help" }));
 
     expect(screen.getByText("Previous page")).toBeInTheDocument();
     expect(screen.getByText("Next page")).toBeInTheDocument();
@@ -754,7 +755,7 @@ describe("App", () => {
       expect(screen.getByText("Parser behavior inspected and fixed.")).toBeInTheDocument();
     });
 
-    const bookmarksSearch = screen.getByPlaceholderText("Search in bookmarks...");
+    const bookmarksSearch = screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.historyBookmarks);
     await user.clear(bookmarksSearch);
     await user.type(bookmarksSearch, "no-match-token");
 
@@ -790,7 +791,7 @@ describe("App", () => {
     });
 
     const bookmarksSearch = screen.getByPlaceholderText(
-      "Search in bookmarks...",
+      SEARCH_PLACEHOLDERS.historyBookmarks,
     ) as HTMLInputElement;
 
     await user.keyboard("{Control>}f{/Control}");
@@ -798,7 +799,7 @@ describe("App", () => {
     await waitFor(() => {
       expect(document.activeElement).toBe(bookmarksSearch);
     });
-    expect(screen.getByPlaceholderText("Search in bookmarks...")).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("Search in session...")).toBeNull();
+    expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.historyBookmarks)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDERS.historySession)).toBeNull();
   });
 });
