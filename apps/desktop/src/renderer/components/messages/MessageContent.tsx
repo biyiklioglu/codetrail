@@ -66,7 +66,7 @@ export function MessageContent({
   }
 
   if (category === "tool_result") {
-    return <ToolResultContent text={text} />;
+    return <ToolResultContent text={text} query={query} highlightPatterns={highlightPatterns} />;
   }
 
   if (category === "assistant") {
@@ -126,28 +126,56 @@ function ToolUseContent({
       {command ? (
         <div className="tool-use-section">
           <div className="tool-use-section-label">Command</div>
-          <CodeBlock language="shell" codeValue={command} />
+          <CodeBlock
+            language="shell"
+            codeValue={command}
+            query={query}
+            highlightPatterns={highlightPatterns}
+          />
         </div>
       ) : null}
       {parsed.inputRecord ? (
         <div className="tool-use-section">
           <div className="tool-use-section-label">Arguments</div>
-          <CodeBlock language="json" codeValue={JSON.stringify(parsed.inputRecord, null, 2)} />
+          <CodeBlock
+            language="json"
+            codeValue={JSON.stringify(parsed.inputRecord, null, 2)}
+            query={query}
+            highlightPatterns={highlightPatterns}
+          />
         </div>
       ) : (
-        <CodeBlock language="json" codeValue={JSON.stringify(parsed.record, null, 2)} />
+        <CodeBlock
+          language="json"
+          codeValue={JSON.stringify(parsed.record, null, 2)}
+          query={query}
+          highlightPatterns={highlightPatterns}
+        />
       )}
     </div>
   );
 }
 
-function ToolResultContent({ text }: { text: string }) {
+function ToolResultContent({
+  text,
+  query,
+  highlightPatterns,
+}: {
+  text: string;
+  query: string;
+  highlightPatterns: string[];
+}) {
   const parsed = tryParseJsonRecord(text);
   if (!parsed) {
     const language = detectLanguageFromContent(text);
     return (
       <div className="tool-result-view">
-        <CodeBlock language={language} codeValue={text} />
+        <CodeBlock
+          language={language}
+          codeValue={text}
+          query={query}
+          highlightPatterns={highlightPatterns}
+        />
       </div>
     );
   }
@@ -163,7 +191,12 @@ function ToolResultContent({ text }: { text: string }) {
       {metadata ? (
         <div className="tool-use-section">
           <div className="tool-use-section-label">Metadata</div>
-          <CodeBlock language="json" codeValue={JSON.stringify(metadata, null, 2)} />
+          <CodeBlock
+            language="json"
+            codeValue={JSON.stringify(metadata, null, 2)}
+            query={query}
+            highlightPatterns={highlightPatterns}
+          />
         </div>
       ) : null}
       {normalizedOutput ? (
@@ -172,10 +205,17 @@ function ToolResultContent({ text }: { text: string }) {
           <CodeBlock
             language={inner ? "json" : outputLanguage}
             codeValue={inner ? JSON.stringify(inner, null, 2) : normalizedOutput}
+            query={query}
+            highlightPatterns={highlightPatterns}
           />
         </div>
       ) : (
-        <CodeBlock language="json" codeValue={JSON.stringify(parsed, null, 2)} />
+        <CodeBlock
+          language="json"
+          codeValue={JSON.stringify(parsed, null, 2)}
+          query={query}
+          highlightPatterns={highlightPatterns}
+        />
       )}
     </div>
   );
@@ -205,7 +245,13 @@ function ToolEditContent({
   if (parsed.diff && isLikelyDiff("diff", parsed.diff)) {
     return (
       <div className="tool-edit-view">
-        <DiffBlock codeValue={parsed.diff} filePath={parsed.filePath} pathRoots={pathRoots} />
+        <DiffBlock
+          codeValue={parsed.diff}
+          filePath={parsed.filePath}
+          pathRoots={pathRoots}
+          query={query}
+          highlightPatterns={highlightPatterns}
+        />
       </div>
     );
   }
@@ -218,7 +264,13 @@ function ToolEditContent({
     });
     return (
       <div className="tool-edit-view">
-        <DiffBlock codeValue={diff} filePath={parsed.filePath} pathRoots={pathRoots} />
+        <DiffBlock
+          codeValue={diff}
+          filePath={parsed.filePath}
+          pathRoots={pathRoots}
+          query={query}
+          highlightPatterns={highlightPatterns}
+        />
       </div>
     );
   }
@@ -232,6 +284,8 @@ function ToolEditContent({
           <CodeBlock
             language={detectLanguageFromFilePath(parsed.filePath)}
             codeValue={parsed.newText}
+            query={query}
+            highlightPatterns={highlightPatterns}
           />
         </div>
       </div>

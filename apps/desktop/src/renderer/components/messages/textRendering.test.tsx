@@ -16,6 +16,7 @@ vi.mock("./toolParsing", () => ({
 }));
 
 import {
+  CodeBlock,
   DiffBlock,
   buildHighlightedTextNodes,
   detectLanguageFromContent,
@@ -99,6 +100,45 @@ describe("renderRichText", () => {
     expect(html).toMatch(/<a[^>]*class="md-link"[^>]*href="https:\/\/example\.com\/repo"/);
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noreferrer"');
+  });
+
+  it("highlights inline code matches that span punctuation-separated tokens", () => {
+    const markdown = "`feat(history): add collapsible side panes`";
+
+    const html = renderNodes(
+      renderRichText(markdown, '"history add"', "inline-code-highlight", [], ["history add"]),
+    );
+
+    expect(html).toContain("<code><span>feat(</span><mark>history): add</mark>");
+  });
+
+  it("highlights external link labels without rewriting them into path links", () => {
+    const markdown = "[history add](https://example.com/repo)";
+
+    const html = renderNodes(
+      renderRichText(markdown, '"history add"', "external-link-highlight", [], ["history add"]),
+    );
+
+    expect(html).toMatch(/<a[^>]*class="md-link"[^>]*>/);
+    expect(html).toContain("<mark>history add</mark>");
+    expect(html).not.toContain('class="md-link-local"');
+  });
+
+  it("highlights local link labels inside markdown buttons", () => {
+    const markdown = "[history add](/Users/acme/repo/docs/guide.md)";
+
+    const html = renderNodes(
+      renderRichText(
+        markdown,
+        '"history add"',
+        "local-link-highlight",
+        ["/Users/acme/repo"],
+        ["history add"],
+      ),
+    );
+
+    expect(html).toContain('class="md-link-local"');
+    expect(html).toContain("<mark>history add</mark>");
   });
 
   it("drops unsafe javascript links and keeps text", () => {
@@ -342,5 +382,33 @@ describe("text helpers", () => {
   it("formats valid json and preserves invalid json", () => {
     expect(tryFormatJson('{"a":1}')).toBe('{\n  "a": 1\n}');
     expect(tryFormatJson("{oops")).toBe("{oops");
+  });
+});
+
+describe("CodeBlock", () => {
+  it("highlights phrase matches inside code lines", () => {
+    const html = renderNode(
+      <CodeBlock
+        language="text"
+        codeValue="feat(history): add collapsible side panes"
+        query={'"history add"'}
+        highlightPatterns={["history add"]}
+      />,
+    );
+
+    expect(html).toContain("<mark>history): add</mark>");
+  });
+
+  it("highlights diff content when a query is active", () => {
+    const html = renderNode(
+      <CodeBlock
+        language="diff"
+        codeValue={["-feat(history): remove panes", "+feat(history): add panes"].join("\n")}
+        query={'"history add"'}
+        highlightPatterns={["history add"]}
+      />,
+    );
+
+    expect(html).toContain("<mark>history): add</mark>");
   });
 });

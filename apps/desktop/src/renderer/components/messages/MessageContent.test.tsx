@@ -80,6 +80,22 @@ describe("MessageContent", () => {
     expect(document.body.textContent).toContain('"ok": true');
   });
 
+  it("highlights query matches inside tool_result code output", () => {
+    render(
+      <MessageContent
+        text={JSON.stringify({
+          output: "feat(history): add collapsible side panes",
+        })}
+        category="tool_result"
+        query={'"history add"'}
+        highlightPatterns={["history add"]}
+      />,
+    );
+
+    const marks = Array.from(document.querySelectorAll("mark")).map((node) => node.textContent);
+    expect(marks).toContain("history): add");
+  });
+
   it("renders markdown-rich assistant content and generic fallback content", () => {
     const { rerender } = render(
       <MessageContent

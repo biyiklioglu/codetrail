@@ -277,17 +277,33 @@ function buildMarkdownComponents(
                 void openLocalPath(resolved.absolutePath);
               }}
             >
-              {resolved.displayLabel}
+              {buildHighlightedTextNodes(
+                resolved.displayLabel,
+                query,
+                "inline-code-path",
+                highlightPatterns,
+              )}
             </button>
           );
         }
-        return <code>{children}</code>;
+        return (
+          <code>
+            {renderChildrenWithHighlights(
+              children,
+              query,
+              "inline-code",
+              highlightPatterns,
+            )}
+          </code>
+        );
       }
       return (
         <CodeBlock
           language={codeDescriptor.syntaxLanguage}
           codeValue={codeValue}
           metaLabel={codeDescriptor.metaLabel}
+          query={query}
+          highlightPatterns={highlightPatterns}
         />
       );
     },
@@ -296,7 +312,7 @@ function buildMarkdownComponents(
       if (parsedHref.kind === "external") {
         return (
           <a className="md-link" href={parsedHref.href} target="_blank" rel="noreferrer">
-            {children}
+            {renderChildrenWithHighlights(children, query, "external-link", highlightPatterns)}
           </a>
         );
       }
@@ -309,7 +325,12 @@ function buildMarkdownComponents(
               void openLocalPath(parsedHref.path);
             }}
           >
-            {formatLocalLinkLabel(children, parsedHref.path, pathRoots)}
+            {buildHighlightedTextNodes(
+              String(formatLocalLinkLabel(children, parsedHref.path, pathRoots)),
+              query,
+              "local-link",
+              highlightPatterns,
+            )}
           </button>
         );
       }
@@ -424,19 +445,30 @@ function renderChildrenWithLocalPathLinks(
     }
 
     const elementType = child.type;
+    const props = child.props as { children?: ReactNode };
+    if (props.children === undefined) {
+      mapped.push(child);
+      continue;
+    }
+
     if (
       elementType === "code" ||
       elementType === "a" ||
       elementType === "button" ||
       elementType === "pre"
     ) {
-      mapped.push(child);
-      continue;
-    }
-
-    const props = child.props as { children?: ReactNode };
-    if (props.children === undefined) {
-      mapped.push(child);
+      mapped.push(
+        cloneElement(
+          child,
+          undefined,
+          renderChildrenWithHighlights(
+            props.children,
+            query,
+            `${childKey}:child`,
+            highlightPatterns,
+          ),
+        ),
+      );
       continue;
     }
 
@@ -539,6 +571,49 @@ function renderTextWithLocalPathLinks(
   }
 
   return nodes;
+}
+
+function renderChildrenWithHighlights(
+  children: ReactNode,
+  query: string,
+  keyPrefix: string,
+  highlightPatterns: string[],
+): ReactNode {
+  const mapped: ReactNode[] = [];
+
+  for (const [index, child] of Children.toArray(children).entries()) {
+    const childKey = `${keyPrefix}:${index}`;
+    if (typeof child === "string" || typeof child === "number") {
+      mapped.push(...buildHighlightedTextNodes(String(child), query, childKey, highlightPatterns));
+      continue;
+    }
+
+    if (!isValidElement(child)) {
+      mapped.push(child);
+      continue;
+    }
+
+    const props = child.props as { children?: ReactNode };
+    if (props.children === undefined) {
+      mapped.push(child);
+      continue;
+    }
+
+    mapped.push(
+      cloneElement(
+        child,
+        undefined,
+        renderChildrenWithHighlights(
+          props.children,
+          query,
+          `${childKey}:child`,
+          highlightPatterns,
+        ),
+      ),
+    );
+  }
+
+  return mapped;
 }
 
 function resolvePathToken(
@@ -714,20 +789,26 @@ export function CodeBlock({
   language,
   codeValue,
   metaLabel,
+  query = "",
+  highlightPatterns = [],
 }: {
   language: string;
   codeValue: string;
   metaLabel?: string;
+  query?: string;
+  highlightPatterns?: string[];
 }) {
   const normalizedLanguage = language.trim().toLowerCase();
   if (isLikelyDiff(normalizedLanguage, codeValue)) {
-    return <DiffBlock codeValue={codeValue} />;
+    return <DiffBlock codeValue={codeValue} query={query} highlightPatterns={highlightPatterns} />;
   }
 
   const lines = codeValue.split(/\r?\n/);
   const renderedLines = lines.map((line, index) => (
     <span key={`${index}:${line.length}`} className="code-line">
-      {renderSyntaxHighlightedLine(line, normalizedLanguage)}
+      {query.trim() || highlightPatterns.length > 0
+        ? buildHighlightedTextNodes(line, query, `code:${index}`, highlightPatterns)
+        : renderSyntaxHighlightedLine(line, normalizedLanguage)}
       {"\n"}
     </span>
   ));
@@ -814,10 +895,14 @@ export function DiffBlock({
   codeValue,
   filePath,
   pathRoots = [],
+  query = "",
+  highlightPatterns = [],
 }: {
   codeValue: string;
   filePath?: string | null;
   pathRoots?: string[];
+  query?: string;
+  highlightPatterns?: string[];
 }) {
   const lines = codeValue.split(/\r?\n/);
   const rows: ReactNode[] = [];
@@ -846,7 +931,14 @@ export function DiffBlock({
         <div key={`${lineKey}:remove`} className="diff-row diff-remove">
           <span className="diff-ln"> </span>
           <span className="diff-code">
-            {(() => {
+            {query.trim() || highlightPatterns.length > 0
+              ? buildHighlightedTextNodes(
+                  line.slice(1),
+                  query,
+                  `${lineKey}:remove-highlight`,
+                  highlightPatterns,
+                )
+              : (() => {
               let leftCursor = 0;
               return inlineDiff.left.map((part) => {
                 const key = `${lineKey}:l:${leftCursor}:${part.changed ? "1" : "0"}`;
@@ -865,7 +957,14 @@ export function DiffBlock({
         <div key={`${lineKey}:add`} className="diff-row diff-add">
           <span className="diff-ln">{newLineNumber}</span>
           <span className="diff-code">
-            {(() => {
+            {query.trim() || highlightPatterns.length > 0
+              ? buildHighlightedTextNodes(
+                  nextLine.slice(1),
+                  query,
+                  `${lineKey}:add-highlight`,
+                  highlightPatterns,
+                )
+              : (() => {
               let rightCursor = 0;
               return inlineDiff.right.map((part) => {
                 const key = `${lineKey}:r:${rightCursor}:${part.changed ? "1" : "0"}`;
@@ -892,7 +991,14 @@ export function DiffBlock({
       rows.push(
         <div key={`${lineKey}:add-only`} className="diff-row diff-add">
           <span className="diff-ln">{newLineNumber}</span>
-          <span className="diff-code">{line.slice(1)}</span>
+          <span className="diff-code">
+            {buildHighlightedTextNodes(
+              line.slice(1),
+              query,
+              `${lineKey}:add-only`,
+              highlightPatterns,
+            )}
+          </span>
         </div>,
       );
       addedLineCount += 1;
@@ -901,7 +1007,14 @@ export function DiffBlock({
       rows.push(
         <div key={`${lineKey}:remove-only`} className="diff-row diff-remove">
           <span className="diff-ln"> </span>
-          <span className="diff-code">{line.slice(1)}</span>
+          <span className="diff-code">
+            {buildHighlightedTextNodes(
+              line.slice(1),
+              query,
+              `${lineKey}:remove-only`,
+              highlightPatterns,
+            )}
+          </span>
         </div>,
       );
       removedLineCount += 1;
@@ -918,7 +1031,14 @@ export function DiffBlock({
       rows.push(
         <div key={`${lineKey}:context`} className="diff-row diff-context">
           <span className="diff-ln">{newLineNumber}</span>
-          <span className="diff-code">{line.startsWith(" ") ? line.slice(1) : line}</span>
+          <span className="diff-code">
+            {buildHighlightedTextNodes(
+              line.startsWith(" ") ? line.slice(1) : line,
+              query,
+              `${lineKey}:context`,
+              highlightPatterns,
+            )}
+          </span>
         </div>,
       );
       oldLineNumber += 1;
