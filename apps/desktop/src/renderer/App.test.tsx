@@ -1099,6 +1099,338 @@ function createHistoryNavigationClient() {
   return client;
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
+function createProjectSwitchBookmarksDelayClient() {
+  const client = createMockCodetrailClient();
+  const delayedBookmarks = createDeferred<{
+    projectId: string;
+    totalCount: number;
+    filteredCount: number;
+    categoryCounts: {
+      user: number;
+      assistant: number;
+      tool_use: number;
+      tool_edit: number;
+      tool_result: number;
+      thinking: number;
+      system: number;
+    };
+    results: Array<{
+      projectId: string;
+      sessionId: string;
+      sessionTitle: string;
+      bookmarkedAt: string;
+      isOrphaned: boolean;
+      orphanedAt: null;
+      message: {
+        id: string;
+        sourceId: string;
+        sessionId: string;
+        provider: "claude";
+        category: "assistant";
+        content: string;
+        createdAt: string;
+        tokenInput: null;
+        tokenOutput: null;
+        operationDurationMs: null;
+        operationDurationSource: null;
+        operationDurationConfidence: null;
+      };
+    }>;
+  }>();
+
+  client.invoke.mockImplementation(async (channel, payload) => {
+    const request = payload as Record<string, unknown>;
+
+    if (channel === "ui:getState") {
+      return {
+        projectPaneWidth: null,
+        sessionPaneWidth: null,
+        projectPaneCollapsed: null,
+        sessionPaneCollapsed: null,
+        projectProviders: null,
+        historyCategories: null,
+        expandedByDefaultCategories: null,
+        searchProviders: null,
+        theme: null,
+        monoFontFamily: null,
+        regularFontFamily: null,
+        monoFontSize: null,
+        regularFontSize: null,
+        useMonospaceForAllMessages: null,
+        selectedProjectId: null,
+        selectedSessionId: null,
+        historyMode: null,
+        projectSortDirection: null,
+        sessionSortDirection: null,
+        messageSortDirection: null,
+        bookmarkSortDirection: null,
+        projectAllSortDirection: null,
+        sessionPage: null,
+        sessionScrollTop: null,
+        systemMessageRegexRules: null,
+      };
+    }
+
+    if (channel === "ui:setState") {
+      return { ok: true };
+    }
+
+    if (channel === "ui:getZoom") {
+      return { percent: 100 };
+    }
+
+    if (channel === "projects:list") {
+      return {
+        projects: [
+          {
+            id: "project_1",
+            provider: "claude",
+            name: "Project One",
+            path: "/workspace/project-one",
+            sessionCount: 1,
+            lastActivity: "2026-03-01T12:00:05.000Z",
+          },
+          {
+            id: "project_2",
+            provider: "claude",
+            name: "Project Two",
+            path: "/workspace/project-two",
+            sessionCount: 1,
+            lastActivity: "2026-03-01T11:00:05.000Z",
+          },
+        ],
+      };
+    }
+
+    if (channel === "sessions:list") {
+      if (request.projectId === "project_2") {
+        return {
+          sessions: [
+            {
+              id: "session_2",
+              projectId: "project_2",
+              provider: "claude",
+              filePath: "/workspace/project-two/session-2.jsonl",
+              title: "Project two delayed bookmarks session",
+              modelNames: "claude-opus-4-1",
+              startedAt: "2026-03-01T11:00:00.000Z",
+              endedAt: "2026-03-01T11:00:05.000Z",
+              durationMs: 5000,
+              gitBranch: "main",
+              cwd: "/workspace/project-two",
+              messageCount: 1,
+              tokenInputTotal: 4,
+              tokenOutputTotal: 5,
+            },
+          ],
+        };
+      }
+
+      return {
+        sessions: [
+          {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Project one session",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 1,
+            tokenInputTotal: 4,
+            tokenOutputTotal: 5,
+          },
+        ],
+      };
+    }
+
+    if (channel === "bookmarks:listProject") {
+      if (request.projectId === "project_2") {
+        return delayedBookmarks.promise;
+      }
+      return {
+        projectId: String(request.projectId),
+        totalCount: 0,
+        filteredCount: 0,
+        categoryCounts: {
+          user: 0,
+          assistant: 0,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        results: [],
+      };
+    }
+
+    if (channel === "projects:getCombinedDetail") {
+      return {
+        projectId: String(request.projectId),
+        totalCount: 1,
+        categoryCounts: {
+          user: 1,
+          assistant: 0,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: 0,
+        pageSize: 100,
+        focusIndex: null,
+        messages: [
+          {
+            id: request.projectId === "project_2" ? "project_2_message" : "project_1_message",
+            sourceId: request.projectId === "project_2" ? "project_2_src" : "project_1_src",
+            sessionId: request.projectId === "project_2" ? "session_2" : "session_1",
+            provider: "claude",
+            category: "user",
+            content: request.projectId === "project_2" ? "Project two message" : "Project one message",
+            createdAt: "2026-03-01T10:00:05.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+            sessionTitle: request.projectId === "project_2"
+              ? "Project two delayed bookmarks session"
+              : "Project one session",
+            sessionActivity: "2026-03-01T10:00:05.000Z",
+            sessionStartedAt: "2026-03-01T10:00:00.000Z",
+            sessionEndedAt: "2026-03-01T10:00:05.000Z",
+            sessionGitBranch: "main",
+            sessionCwd: request.projectId === "project_2" ? "/workspace/project-two" : "/workspace/project-one",
+          },
+        ],
+      };
+    }
+
+    if (channel === "sessions:getDetail") {
+      return {
+        session: {
+          id: String(request.sessionId),
+          projectId: request.sessionId === "session_2" ? "project_2" : "project_1",
+          provider: "claude",
+          filePath:
+            request.sessionId === "session_2"
+              ? "/workspace/project-two/session-2.jsonl"
+              : "/workspace/project-one/session-1.jsonl",
+          title:
+            request.sessionId === "session_2"
+              ? "Project two delayed bookmarks session"
+              : "Project one session",
+          modelNames: "claude-opus-4-1",
+          startedAt: "2026-03-01T10:00:00.000Z",
+          endedAt: "2026-03-01T10:00:05.000Z",
+          durationMs: 5000,
+          gitBranch: "main",
+          cwd: request.sessionId === "session_2" ? "/workspace/project-two" : "/workspace/project-one",
+          messageCount: 1,
+          tokenInputTotal: 4,
+          tokenOutputTotal: 5,
+        },
+        totalCount: 1,
+        categoryCounts: {
+          user: 1,
+          assistant: 0,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: 0,
+        pageSize: 100,
+        focusIndex: null,
+        messages: [
+          {
+            id: request.sessionId === "session_2" ? "session_2_message" : "session_1_message",
+            sourceId: request.sessionId === "session_2" ? "session_2_src" : "session_1_src",
+            sessionId: String(request.sessionId),
+            provider: "claude",
+            category: "user",
+            content: request.sessionId === "session_2" ? "Session two message" : "Session one message",
+            createdAt: "2026-03-01T10:00:05.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+        ],
+      };
+    }
+
+    if (channel === "search:query") {
+      return {
+        query: String(request.query ?? ""),
+        totalCount: 0,
+        categoryCounts: {
+          user: 0,
+          assistant: 0,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        results: [],
+      };
+    }
+
+    if (channel === "ui:setZoom") {
+      return { percent: 100 };
+    }
+
+    if (channel === "indexer:refresh") {
+      return { jobId: "refresh-1" };
+    }
+
+    if (channel === "bookmarks:toggle") {
+      return { bookmarked: true };
+    }
+
+    if (channel === "app:getSettingsInfo") {
+      return {
+        storage: {
+          settingsFile: "/tmp/ui-state.json",
+          cacheDir: "/tmp/cache",
+          databaseFile: "/tmp/codetrail.sqlite",
+          bookmarksDatabaseFile: "/tmp/codetrail.bookmarks.sqlite",
+          userDataDir: "/tmp",
+        },
+        discovery: {
+          claudeRoot: "/Users/test/.claude/projects",
+          codexRoot: "/Users/test/.codex/sessions",
+          geminiRoot: "/Users/test/.gemini/tmp",
+          geminiHistoryRoot: "/Users/test/.gemini/history",
+          geminiProjectsPath: "/Users/test/.gemini/projects.json",
+          cursorRoot: "/Users/test/.cursor/projects",
+        },
+      };
+    }
+
+    throw new Error(`Unhandled IPC call: ${channel}`);
+  });
+
+  return { client, delayedBookmarks };
+}
+
 describe("App", () => {
   it("loads history, supports global search navigation, and opens settings", async () => {
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -1514,6 +1846,75 @@ describe("App", () => {
         screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.historyProjectSessions),
       ).toBeInTheDocument();
       expect(document.activeElement).toBe(sessionList());
+    });
+  });
+
+  it("waits to swap the sessions pane until bookmarks are loaded for the selected project", async () => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      value: () => undefined,
+      configurable: true,
+    });
+
+    const user = userEvent.setup();
+    const { client, delayedBookmarks } = createProjectSwitchBookmarksDelayClient();
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project one session")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText("Project Two"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Project Two")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Project two delayed bookmarks session")).toBeNull();
+    expect(screen.queryByText("Bookmarked Messages")).toBeNull();
+
+    delayedBookmarks.resolve({
+      projectId: "project_2",
+      totalCount: 1,
+      filteredCount: 1,
+      categoryCounts: {
+        user: 0,
+        assistant: 1,
+        tool_use: 0,
+        tool_edit: 0,
+        tool_result: 0,
+        thinking: 0,
+        system: 0,
+      },
+      results: [
+        {
+          projectId: "project_2",
+          sessionId: "session_2",
+          sessionTitle: "Project two delayed bookmarks session",
+          bookmarkedAt: "2026-03-01T11:01:00.000Z",
+          isOrphaned: false,
+          orphanedAt: null,
+          message: {
+            id: "project_2_bookmark",
+            sourceId: "project_2_bookmark_src",
+            sessionId: "session_2",
+            provider: "claude",
+            category: "assistant",
+            content: "Delayed project two bookmark",
+            createdAt: "2026-03-01T11:01:00.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+        },
+      ],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Project two delayed bookmarks session")).toBeInTheDocument();
+      expect(screen.getByText("Bookmarked Messages")).toBeInTheDocument();
     });
   });
 });

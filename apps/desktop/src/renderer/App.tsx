@@ -1111,24 +1111,34 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     () => sortedSessions.find((session) => session.id === selectedSessionId) ?? null,
     [selectedSessionId, sortedSessions],
   );
+  const allSessionsCount = useMemo(
+    () => sortedSessions.reduce((sum, session) => sum + session.messageCount, 0),
+    [sortedSessions],
+  );
+  const isSessionPaneReadyForSelectedProject =
+    !selectedProjectId ||
+    (sessionsLoadedProjectId === selectedProjectId && bookmarksLoadedProjectId === selectedProjectId);
+  const visibleSessionPaneSessions = isSessionPaneReadyForSelectedProject ? sortedSessions : [];
+  const visibleSessionPaneBookmarksCount = isSessionPaneReadyForSelectedProject
+    ? bookmarksResponse.totalCount
+    : 0;
+  const visibleSessionPaneAllSessionsCount = isSessionPaneReadyForSelectedProject
+    ? allSessionsCount
+    : 0;
   const sessionPaneNavigationItems = useMemo<SessionPaneNavigationItem[]>(() => {
     const next: SessionPaneNavigationItem[] = [{ id: PROJECT_ALL_NAV_ID, kind: "project_all" }];
-    if (bookmarksResponse.totalCount > 0) {
+    if (visibleSessionPaneBookmarksCount > 0) {
       next.push({ id: BOOKMARKS_NAV_ID, kind: "bookmarks" });
     }
     next.push(
-      ...sortedSessions.map((session) => ({
+      ...visibleSessionPaneSessions.map((session) => ({
         id: session.id,
         kind: "session" as const,
         sessionId: session.id,
       })),
     );
     return next;
-  }, [bookmarksResponse.totalCount, sortedSessions]);
-  const allSessionsCount = useMemo(
-    () => sortedSessions.reduce((sum, session) => sum + session.messageCount, 0),
-    [sortedSessions],
-  );
+  }, [visibleSessionPaneBookmarksCount, visibleSessionPaneSessions]);
   const messagePathRoots = useMemo(() => {
     if (!selectedProject?.path) {
       return [];
@@ -1813,13 +1823,13 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
             <div className="pane-resizer" onPointerDown={beginResize("project")} />
 
             <SessionPane
-              sortedSessions={sortedSessions}
+              sortedSessions={visibleSessionPaneSessions}
               selectedSessionId={selectedSessionId}
               listRef={sessionListRef}
               sortDirection={sessionSortDirection}
-              allSessionsCount={allSessionsCount}
+              allSessionsCount={visibleSessionPaneAllSessionsCount}
               allSessionsSelected={historyMode === "project_all"}
-              bookmarksCount={bookmarksResponse.totalCount}
+              bookmarksCount={visibleSessionPaneBookmarksCount}
               bookmarksSelected={historyMode === "bookmarks"}
               collapsed={sessionPaneCollapsed}
               canCopySession={historyMode === "session" && !!selectedSession}
