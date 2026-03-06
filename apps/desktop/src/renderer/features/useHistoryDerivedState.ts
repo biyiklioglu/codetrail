@@ -22,8 +22,8 @@ import type {
   SortDirection,
 } from "../app/types";
 import {
-  countProviders,
   compareRecent,
+  countProviders,
   deriveSessionTitle,
   formatDate,
   prettyCategory,
@@ -296,8 +296,8 @@ export function useHistoryDerivedState({
     workspaceStyle,
     selectedSummaryProvider:
       historyMode === "session"
-        ? selectedSession?.provider ?? null
-        : selectedProject?.provider ?? null,
+        ? (selectedSession?.provider ?? null)
+        : (selectedProject?.provider ?? null),
     selectedSummaryMessageCount:
       historyMode === "bookmarks"
         ? `${bookmarksResponse.filteredCount} of ${bookmarksResponse.totalCount} bookmarked messages`

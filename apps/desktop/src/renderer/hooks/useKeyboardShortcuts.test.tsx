@@ -101,9 +101,7 @@ describe("useKeyboardShortcuts", () => {
   it("handles escape and question-mark help shortcuts", () => {
     const setMainView = vi.fn();
 
-    const { rerender } = render(
-      <Harness {...createProps({ mainView: "search", setMainView })} />,
-    );
+    const { rerender } = render(<Harness {...createProps({ mainView: "search", setMainView })} />);
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(setMainView).toHaveBeenCalledWith("history");

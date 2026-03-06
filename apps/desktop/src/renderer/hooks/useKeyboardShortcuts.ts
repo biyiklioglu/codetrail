@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
 import type { MessageCategory } from "@codetrail/core";
+import { useEffect, useRef } from "react";
 
 type MainView = "history" | "search" | "settings" | "help";
 

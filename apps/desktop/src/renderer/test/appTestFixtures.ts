@@ -753,10 +753,11 @@ export function createHistoryNavigationClient() {
           provider: providers[sessionId as keyof typeof providers],
           filePath: filePaths[sessionId as keyof typeof filePaths],
           title: sessionTitles[sessionId as keyof typeof sessionTitles],
-          modelNames:
-            sessionId === "session_3" ? "gpt-5" : "claude-opus-4-1",
-          startedAt: sessionId === "session_2" ? "2026-03-01T09:00:00.000Z" : "2026-03-01T10:00:00.000Z",
-          endedAt: sessionId === "session_2" ? "2026-03-01T09:05:00.000Z" : "2026-03-01T10:05:00.000Z",
+          modelNames: sessionId === "session_3" ? "gpt-5" : "claude-opus-4-1",
+          startedAt:
+            sessionId === "session_2" ? "2026-03-01T09:00:00.000Z" : "2026-03-01T10:00:00.000Z",
+          endedAt:
+            sessionId === "session_2" ? "2026-03-01T09:05:00.000Z" : "2026-03-01T10:05:00.000Z",
           durationMs: 300000,
           gitBranch: "main",
           cwd: cwd[sessionId as keyof typeof cwd],
@@ -785,7 +786,8 @@ export function createHistoryNavigationClient() {
             provider: providers[sessionId as keyof typeof providers],
             category: "user",
             content: sessionMessages[sessionId as keyof typeof sessionMessages],
-            createdAt: sessionId === "session_2" ? "2026-03-01T09:05:00.000Z" : "2026-03-01T10:05:00.000Z",
+            createdAt:
+              sessionId === "session_2" ? "2026-03-01T09:05:00.000Z" : "2026-03-01T10:05:00.000Z",
             tokenInput: null,
             tokenOutput: null,
             operationDurationMs: null,
@@ -1004,7 +1006,8 @@ export function createProjectSwitchBookmarksDelayClient() {
           sessionId: request.projectId === "project_2" ? "session_2" : "session_1",
           provider: "claude",
           category: "user",
-          content: request.projectId === "project_2" ? "Project two message" : "Project one message",
+          content:
+            request.projectId === "project_2" ? "Project two message" : "Project one message",
           createdAt: "2026-03-01T10:00:05.000Z",
           tokenInput: null,
           tokenOutput: null,
@@ -1042,7 +1045,8 @@ export function createProjectSwitchBookmarksDelayClient() {
         endedAt: "2026-03-01T10:00:05.000Z",
         durationMs: 5000,
         gitBranch: "main",
-        cwd: request.sessionId === "session_2" ? "/workspace/project-two" : "/workspace/project-one",
+        cwd:
+          request.sessionId === "session_2" ? "/workspace/project-two" : "/workspace/project-one",
         messageCount: 1,
         tokenInputTotal: 4,
         tokenOutputTotal: 5,
@@ -1067,7 +1071,8 @@ export function createProjectSwitchBookmarksDelayClient() {
           sessionId: String(request.sessionId),
           provider: "claude",
           category: "user",
-          content: request.sessionId === "session_2" ? "Session two message" : "Session one message",
+          content:
+            request.sessionId === "session_2" ? "Session two message" : "Session one message",
           createdAt: "2026-03-01T10:00:05.000Z",
           tokenInput: null,
           tokenOutput: null,

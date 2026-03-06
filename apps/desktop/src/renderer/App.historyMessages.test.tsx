@@ -4,7 +4,11 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
-import { createAppClient, getFocusedHistoryMessageId, installScrollIntoViewMock } from "./test/appTestFixtures";
+import {
+  createAppClient,
+  getFocusedHistoryMessageId,
+  installScrollIntoViewMock,
+} from "./test/appTestFixtures";
 import { renderWithClient } from "./test/renderWithClient";
 
 describe("App history messages", () => {

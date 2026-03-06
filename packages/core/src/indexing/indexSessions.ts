@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { PROVIDER_VALUES, type MessageCategory, type Provider } from "../contracts/canonical";
+import { type MessageCategory, PROVIDER_VALUES, type Provider } from "../contracts/canonical";
 import {
   type SqliteDatabase,
   clearIndexedData,

@@ -23,6 +23,39 @@ export function ToolbarIcon({
     | "sortAsc"
     | "sortDesc";
 }) {
+  const title = (() => {
+    if (name === "closeFocus") {
+      return "Close focus";
+    }
+    if (name === "zoomIn") {
+      return "Zoom in";
+    }
+    if (name === "zoomOut") {
+      return "Zoom out";
+    }
+    if (name === "zoomReset") {
+      return "Reset zoom";
+    }
+    if (name === "expandAll") {
+      return "Expand all";
+    }
+    if (name === "collapseAll") {
+      return "Collapse all";
+    }
+    if (name === "chevronLeft") {
+      return "Back";
+    }
+    if (name === "folderOpen") {
+      return "Open folder";
+    }
+    if (name === "sortAsc") {
+      return "Sort ascending";
+    }
+    if (name === "sortDesc") {
+      return "Sort descending";
+    }
+    return `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+  })();
   const path = (() => {
     if (name === "history") {
       return "M4 3h16v4H4zM4 10h16v4H4zM4 17h16v4H4z";
@@ -86,6 +119,7 @@ export function ToolbarIcon({
 
   return (
     <svg className="toolbar-icon" viewBox="0 0 24 24" aria-hidden>
+      <title>{title}</title>
       <path d={path} />
     </svg>
   );

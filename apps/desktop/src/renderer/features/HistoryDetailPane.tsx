@@ -3,8 +3,8 @@ import type { Dispatch, SetStateAction } from "react";
 import type { MessageCategory } from "@codetrail/core";
 
 import { CATEGORIES } from "../app/constants";
-import { MessageCard } from "../components/messages/MessagePresentation";
 import { ToolbarIcon } from "../components/ToolbarIcon";
+import { MessageCard } from "../components/messages/MessagePresentation";
 import { SEARCH_PLACEHOLDERS } from "../lib/searchPlaceholders";
 import { toggleValue } from "../lib/viewUtils";
 import type { useHistoryController } from "./useHistoryController";
@@ -204,6 +204,7 @@ export function HistoryDetailPane({
               strokeWidth="2"
               aria-hidden
             >
+              <title>Advanced search syntax</title>
               <path d="M8 8l-4 4l4 4M16 8l4 4l-4 4M13 6l-2 12" />
             </svg>
           </button>
@@ -246,7 +247,9 @@ export function HistoryDetailPane({
               onToggleExpanded={history.handleToggleMessageExpanded}
               onToggleBookmark={history.handleToggleBookmark}
               onRevealInSession={history.handleRevealInSession}
-              cardRef={history.focusMessageId === message.id ? history.refs.focusedMessageRef : null}
+              cardRef={
+                history.focusMessageId === message.id ? history.refs.focusedMessageRef : null
+              }
             />
           ))
         ) : (

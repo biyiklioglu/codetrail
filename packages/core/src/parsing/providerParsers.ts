@@ -757,7 +757,6 @@ function analyzeGeminiAttachmentSection(section: string): GeminiAttachmentStats 
 
     if (line.includes(GEMINI_BINARY_PLACEHOLDER)) {
       binaryPlaceholderCount += 1;
-      continue;
     }
   }
 

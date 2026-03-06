@@ -6,29 +6,15 @@ import { getAdjacentItemId, getEdgeItemId, getFirstVisibleMessageId } from "./hi
 
 describe("historyNavigation", () => {
   it("falls back to the first item when there is no current selection", () => {
-    expect(
-      getAdjacentItemId(
-        [{ id: "first" }, { id: "second" }],
-        "",
-        "next",
-      ),
-    ).toBe("first");
+    expect(getAdjacentItemId([{ id: "first" }, { id: "second" }], "", "next")).toBe("first");
   });
 
   it("returns the adjacent item in the requested direction", () => {
     expect(
-      getAdjacentItemId(
-        [{ id: "first" }, { id: "second" }, { id: "third" }],
-        "second",
-        "next",
-      ),
+      getAdjacentItemId([{ id: "first" }, { id: "second" }, { id: "third" }], "second", "next"),
     ).toBe("third");
     expect(
-      getAdjacentItemId(
-        [{ id: "first" }, { id: "second" }, { id: "third" }],
-        "second",
-        "previous",
-      ),
+      getAdjacentItemId([{ id: "first" }, { id: "second" }, { id: "third" }], "second", "previous"),
     ).toBe("first");
   });
 

@@ -66,8 +66,7 @@ export function useSearchController({
     const response = await codetrail.invoke("search:query", {
       query: searchQuery,
       searchMode,
-      categories:
-        historyCategories.length === CATEGORIES.length ? undefined : historyCategories,
+      categories: historyCategories.length === CATEGORIES.length ? undefined : historyCategories,
       providers: searchProviders.length > 0 ? searchProviders : undefined,
       projectIds: searchProjectId ? [searchProjectId] : undefined,
       projectQuery: searchProjectQuery,

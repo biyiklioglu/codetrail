@@ -85,9 +85,7 @@ export function SessionPane({
                 className="collapse-btn sort-btn"
                 onClick={onToggleSortDirection}
                 aria-label={
-                  sortDirection === "asc"
-                    ? "Sort sessions descending"
-                    : "Sort sessions ascending"
+                  sortDirection === "asc" ? "Sort sessions descending" : "Sort sessions ascending"
                 }
                 title={sortTooltip}
               >
@@ -167,7 +165,9 @@ export function SessionPane({
           type="button"
           ref={allSessionsSelected ? selectedSessionRef : null}
           className={
-            allSessionsSelected ? "session-item all-sessions-item active" : "session-item all-sessions-item"
+            allSessionsSelected
+              ? "session-item all-sessions-item active"
+              : "session-item all-sessions-item"
           }
           onClick={onSelectAllSessions}
         >

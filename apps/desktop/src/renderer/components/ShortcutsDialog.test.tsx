@@ -13,8 +13,12 @@ describe("ShortcutsDialog", () => {
           { group: "Search & Navigation", shortcut: "Cmd/Ctrl+F", description: "Search messages" },
           { group: "System", shortcut: "Esc", description: "Return to history view" },
         ]}
-        commonSyntaxItems={[{ syntax: "term*", description: "Prefix wildcard", note: "Postfix only" }]}
-        advancedSyntaxItems={[{ syntax: "A OR B", description: "Boolean OR", note: "Advanced mode" }]}
+        commonSyntaxItems={[
+          { syntax: "term*", description: "Prefix wildcard", note: "Postfix only" },
+        ]}
+        advancedSyntaxItems={[
+          { syntax: "A OR B", description: "Boolean OR", note: "Advanced mode" },
+        ]}
       />,
     );
 

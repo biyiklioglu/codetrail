@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, UIEvent as ReactUIEvent } from "react";
+import type {
+  Dispatch,
+  KeyboardEvent as ReactKeyboardEvent,
+  UIEvent as ReactUIEvent,
+  SetStateAction,
+} from "react";
 
-import type { MessageCategory, Provider, SearchMode, SystemMessageRegexRules } from "@codetrail/core";
+import type {
+  MessageCategory,
+  Provider,
+  SearchMode,
+  SystemMessageRegexRules,
+} from "@codetrail/core";
 
 import {
   BOOKMARKS_NAV_ID,
@@ -54,15 +63,15 @@ import {
   sessionActivityOf,
   toggleValue,
 } from "../lib/viewUtils";
-import { useHistoryDataEffects } from "./useHistoryDataEffects";
-import { useHistoryDerivedState } from "./useHistoryDerivedState";
-import { useHistoryInteractions } from "./useHistoryInteractions";
 import {
   type AppearanceState,
   focusHistoryList,
   formatDuration,
   scrollFocusedHistoryMessageIntoView,
 } from "./historyControllerShared";
+import { useHistoryDataEffects } from "./useHistoryDataEffects";
+import { useHistoryDerivedState } from "./useHistoryDerivedState";
+import { useHistoryInteractions } from "./useHistoryInteractions";
 
 export function useHistoryController({
   initialPaneState,
@@ -285,30 +294,24 @@ export function useHistoryController({
     ],
   );
 
-  const setSelectedProjectIdForPaneStateSync = useCallback(
-    (value: SetStateAction<string>) => {
-      setHistorySelection((selectionState) =>
-        typeof value === "function"
-          ? setHistorySelectionProjectId(selectionState, value(selectionState.projectId))
-          : setHistorySelectionProjectId(selectionState, value),
-      );
-    },
-    [],
-  );
+  const setSelectedProjectIdForPaneStateSync = useCallback((value: SetStateAction<string>) => {
+    setHistorySelection((selectionState) =>
+      typeof value === "function"
+        ? setHistorySelectionProjectId(selectionState, value(selectionState.projectId))
+        : setHistorySelectionProjectId(selectionState, value),
+    );
+  }, []);
 
-  const setSelectedSessionIdForPaneStateSync = useCallback(
-    (value: SetStateAction<string>) => {
-      setHistorySelection((selectionState) =>
-        typeof value === "function"
-          ? setHistorySelectionSessionId(
-              selectionState,
-              value(selectionState.mode === "session" ? selectionState.sessionId : ""),
-            )
-          : setHistorySelectionSessionId(selectionState, value),
-      );
-    },
-    [],
-  );
+  const setSelectedSessionIdForPaneStateSync = useCallback((value: SetStateAction<string>) => {
+    setHistorySelection((selectionState) =>
+      typeof value === "function"
+        ? setHistorySelectionSessionId(
+            selectionState,
+            value(selectionState.mode === "session" ? selectionState.sessionId : ""),
+          )
+        : setHistorySelectionSessionId(selectionState, value),
+    );
+  }, []);
 
   const setHistoryModeForPaneStateSync = useCallback(
     (value: SetStateAction<HistorySelection["mode"]>) => {

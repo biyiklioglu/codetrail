@@ -4,8 +4,8 @@ import { PROVIDERS } from "../app/constants";
 import { ProjectPane } from "../components/history/ProjectPane";
 import { SessionPane } from "../components/history/SessionPane";
 import { openInFileManager, openPath } from "../lib/pathActions";
-import type { useHistoryController } from "./useHistoryController";
 import { HistoryDetailPane } from "./HistoryDetailPane";
+import type { useHistoryController } from "./useHistoryController";
 
 type HistoryController = ReturnType<typeof useHistoryController>;
 
@@ -59,11 +59,13 @@ export function HistoryLayout({
           if (!history.selectedProject?.path?.trim()) {
             return;
           }
-          void openInFileManager(history.sortedProjects, history.selectedProjectId).then((result) => {
-            if (!result.ok) {
-              logError("Failed opening project location", result.error ?? "Unknown error");
-            }
-          });
+          void openInFileManager(history.sortedProjects, history.selectedProjectId).then(
+            (result) => {
+              if (!result.ok) {
+                logError("Failed opening project location", result.error ?? "Unknown error");
+              }
+            },
+          );
         }}
         canCopyProjectDetails={Boolean(history.selectedProject)}
         canOpenProjectLocation={Boolean(history.selectedProject?.path?.trim())}

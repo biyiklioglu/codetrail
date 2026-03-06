@@ -2,9 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { MessageCategory, Provider, SearchMode } from "@codetrail/core";
 
-import { ShortcutsDialog } from "./components/ShortcutsDialog";
-import { SettingsView } from "./components/SettingsView";
-import { TopBar } from "./components/TopBar";
 import {
   ADVANCED_SYNTAX_ITEMS,
   COMMON_SYNTAX_ITEMS,
@@ -12,15 +9,18 @@ import {
   SHORTCUT_ITEMS,
 } from "./app/constants";
 import type { MainView, PaneStateSnapshot } from "./app/types";
-import { isMissingCodetrailClient, useCodetrailClient } from "./lib/codetrailClient";
-import { toErrorMessage, toggleValue } from "./lib/viewUtils";
-import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { SettingsView } from "./components/SettingsView";
+import { ShortcutsDialog } from "./components/ShortcutsDialog";
+import { TopBar } from "./components/TopBar";
 import { HistoryDetailPane } from "./features/HistoryDetailPane";
 import { HistoryLayout } from "./features/HistoryLayout";
 import { SearchView } from "./features/SearchView";
 import { useAppearanceController } from "./features/useAppearanceController";
 import { useHistoryController } from "./features/useHistoryController";
 import { useSearchController } from "./features/useSearchController";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { isMissingCodetrailClient, useCodetrailClient } from "./lib/codetrailClient";
+import { toErrorMessage, toggleValue } from "./lib/viewUtils";
 
 export function App({ initialPaneState = null }: { initialPaneState?: PaneStateSnapshot | null }) {
   const codetrail = useCodetrailClient();
@@ -69,7 +69,10 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   }, [appearance.loadSettingsInfo, appearance.settingsInfo, appearance.settingsLoading, mainView]);
 
   useEffect(() => {
-    if (search.searchProjectId && !history.sortedProjects.some((project) => project.id === search.searchProjectId)) {
+    if (
+      search.searchProjectId &&
+      !history.sortedProjects.some((project) => project.id === search.searchProjectId)
+    ) {
       search.setSearchProjectId("");
     }
   }, [history.sortedProjects, search]);

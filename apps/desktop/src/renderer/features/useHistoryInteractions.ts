@@ -1,14 +1,17 @@
 import { useCallback } from "react";
-import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, UIEvent as ReactUIEvent } from "react";
+import type {
+  Dispatch,
+  MutableRefObject,
+  KeyboardEvent as ReactKeyboardEvent,
+  UIEvent as ReactUIEvent,
+  RefObject,
+  SetStateAction,
+} from "react";
 
 import type { MessageCategory } from "@codetrail/core";
 
 import { BOOKMARKS_NAV_ID, PAGE_SIZE, PROJECT_ALL_NAV_ID, PROVIDERS } from "../app/constants";
-import {
-  createHistorySelection,
-  setHistorySelectionProjectId,
-} from "../app/historySelection";
+import { createHistorySelection, setHistorySelectionProjectId } from "../app/historySelection";
 import type {
   BulkExpandScope,
   HistoryMessage,
@@ -78,12 +81,15 @@ export function useHistoryInteractions({
   prettyProvider,
 }: {
   codetrail: {
-    invoke: (channel: "bookmarks:toggle", payload: {
-      projectId: string;
-      sessionId: string;
-      messageId: string;
-      messageSourceId: string;
-    }) => Promise<unknown>;
+    invoke: (
+      channel: "bookmarks:toggle",
+      payload: {
+        projectId: string;
+        sessionId: string;
+        messageId: string;
+        messageSourceId: string;
+      },
+    ) => Promise<unknown>;
   };
   logError: (context: string, error: unknown) => void;
   scopedMessages: HistoryMessage[];
@@ -256,19 +262,22 @@ export function useHistoryInteractions({
     [sessionScrollSyncTimerRef, sessionScrollTopRef, setSessionScrollTop],
   );
 
-  const handleHistorySearchKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== "Escape") {
-      return;
-    }
-    event.preventDefault();
-    const focusTarget =
-      messageListRef.current?.querySelector<HTMLElement>(
-        ".message.focused .message-toggle-button",
-      ) ??
-      messageListRef.current?.querySelector<HTMLElement>(".message .message-toggle-button") ??
-      messageListRef.current?.querySelector<HTMLElement>(".message .message-header");
-    focusTarget?.focus();
-  }, [messageListRef]);
+  const handleHistorySearchKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      const focusTarget =
+        messageListRef.current?.querySelector<HTMLElement>(
+          ".message.focused .message-toggle-button",
+        ) ??
+        messageListRef.current?.querySelector<HTMLElement>(".message .message-toggle-button") ??
+        messageListRef.current?.querySelector<HTMLElement>(".message .message-header");
+      focusTarget?.focus();
+    },
+    [messageListRef],
+  );
 
   const resetHistorySelectionState = useCallback(() => {
     setPendingSearchNavigation(null);
@@ -452,7 +461,14 @@ export function useHistoryInteractions({
     if (!copied) {
       logError("Failed copying session details", "Clipboard API unavailable");
     }
-  }, [logError, selectedProject, selectedSession, sessionDetailTotalCount, sessionPage]);
+  }, [
+    logError,
+    prettyProvider,
+    selectedProject,
+    selectedSession,
+    sessionDetailTotalCount,
+    sessionPage,
+  ]);
 
   const handleCopyProjectDetails = useCallback(async () => {
     if (!selectedProject) {

@@ -1,6 +1,6 @@
+import type { IpcResponse } from "@codetrail/core";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { IpcResponse } from "@codetrail/core";
 
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/500.css";

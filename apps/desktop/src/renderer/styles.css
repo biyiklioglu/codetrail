@@ -723,7 +723,6 @@ body.platform-macos .titlebar-left {
   color: var(--accent-blue);
 }
 
-
 .search-mode-glyph {
   width: 14px;
   height: 14px;
@@ -3049,7 +3048,6 @@ mark {
   color: var(--help-accent);
   font-weight: 650;
 }
-
 
 @media (max-width: 1450px) {
   .history-layout {

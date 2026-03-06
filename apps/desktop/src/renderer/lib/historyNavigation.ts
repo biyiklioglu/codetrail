@@ -28,10 +28,7 @@ export function getAdjacentItemId<T extends ItemLike>(
   return items[nextIndex]?.id ?? null;
 }
 
-export function getEdgeItemId<T extends ItemLike>(
-  items: T[],
-  direction: Direction,
-): string | null {
+export function getEdgeItemId<T extends ItemLike>(items: T[], direction: Direction): string | null {
   if (items.length === 0) {
     return null;
   }
@@ -44,9 +41,7 @@ export function getFirstVisibleMessageId(container: HTMLElement | null): string 
     return "";
   }
 
-  const messageElements = Array.from(
-    container.querySelectorAll<HTMLElement>(MESSAGE_SELECTOR),
-  );
+  const messageElements = Array.from(container.querySelectorAll<HTMLElement>(MESSAGE_SELECTOR));
   if (messageElements.length === 0) {
     return "";
   }

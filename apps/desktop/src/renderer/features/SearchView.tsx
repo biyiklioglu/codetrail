@@ -2,8 +2,8 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { CATEGORIES, PROVIDERS } from "../app/constants";
 import type { ProjectSummary } from "../app/types";
-import { HighlightedText } from "../components/messages/MessagePresentation";
 import { ToolbarIcon } from "../components/ToolbarIcon";
+import { HighlightedText } from "../components/messages/MessagePresentation";
 import { SEARCH_PLACEHOLDERS } from "../lib/searchPlaceholders";
 import { formatDate, prettyCategory, prettyProvider, toggleValue } from "../lib/viewUtils";
 import type { useSearchController } from "./useSearchController";
@@ -69,6 +69,7 @@ export function SearchView({
                 strokeWidth="2"
                 aria-hidden
               >
+                <title>Advanced search syntax</title>
                 <path d="M8 8l-4 4l4 4M16 8l4 4l-4 4M13 6l-2 12" />
               </svg>
             </button>
@@ -97,7 +98,8 @@ export function SearchView({
             <option value="">All projects</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
-                {prettyProvider(project.provider)}: {project.name || project.path || "(unknown project)"}
+                {prettyProvider(project.provider)}:{" "}
+                {project.name || project.path || "(unknown project)"}
               </option>
             ))}
           </select>

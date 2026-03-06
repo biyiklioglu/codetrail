@@ -1,7 +1,8 @@
 import type { MessageCategory, SystemMessageRegexRules } from "@codetrail/core";
 
-import type { MonoFontFamily, RegularFontFamily } from "../../shared/uiPreferences";
 import {
+  type MonoFontFamily,
+  type RegularFontFamily,
   UI_MESSAGE_CATEGORY_VALUES,
   UI_PROVIDER_VALUES,
 } from "../../shared/uiPreferences";

@@ -42,10 +42,7 @@ export type SearchQueryPlan = {
   error: string | null;
 };
 
-export function buildSearchQueryPlan(
-  query: string,
-  mode: SearchMode = "simple",
-): SearchQueryPlan {
+export function buildSearchQueryPlan(query: string, mode: SearchMode = "simple"): SearchQueryPlan {
   const normalizedQuery = query.trim();
   if (normalizedQuery.length === 0) {
     return buildEmptyPlan(normalizedQuery, mode);
@@ -371,7 +368,10 @@ function classifyOperator(raw: string): "and" | "or" | "not" | null {
   return null;
 }
 
-function parseAdvancedQuery(tokens: AdvancedToken[]): { root: AdvancedNode | null; error: string | null } {
+function parseAdvancedQuery(tokens: AdvancedToken[]): {
+  root: AdvancedNode | null;
+  error: string | null;
+} {
   if (tokens.length === 0) {
     return { root: null, error: null };
   }
@@ -444,9 +444,10 @@ function parseAdvancedQuery(tokens: AdvancedToken[]): { root: AdvancedNode | nul
       if (!right.node) {
         return {
           node: null,
-          error: operator === "and"
-            ? "AND must be followed by a term, phrase, or sub-expression."
-            : "NOT must be followed by a term, phrase, or sub-expression.",
+          error:
+            operator === "and"
+              ? "AND must be followed by a term, phrase, or sub-expression."
+              : "NOT must be followed by a term, phrase, or sub-expression.",
         };
       }
 

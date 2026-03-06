@@ -1,5 +1,4 @@
-import type { PaneStateSnapshot } from "./types";
-import type { HistorySelection, HistorySelectionMode } from "./types";
+import type { HistorySelection, HistorySelectionMode, PaneStateSnapshot } from "./types";
 
 export function createHistorySelection(
   mode: HistorySelectionMode,

@@ -250,7 +250,7 @@ export function SettingsView({
         <section className="settings-section">
           <div className="settings-section-header">
             <div className="settings-section-icon settings-section-icon-rules" aria-hidden>
-              //
+              {"//"}
             </div>
             <div>
               <h3>System Message Rules</h3>
@@ -284,8 +284,14 @@ export function SettingsView({
                   ) : (
                     <div className="settings-rule-list">
                       {patterns.map((pattern, index) => {
+                        const duplicateCount = patterns
+                          .slice(0, index)
+                          .filter((existingPattern) => existingPattern === pattern).length;
                         return (
-                          <div key={`${provider}-rule-${index}`} className="settings-rule-row">
+                          <div
+                            key={`${provider}-rule-${pattern}-${duplicateCount}`}
+                            className="settings-rule-row"
+                          >
                             <input
                               className="settings-rule-input"
                               type="text"

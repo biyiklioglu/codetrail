@@ -288,12 +288,7 @@ function buildMarkdownComponents(
         }
         return (
           <code>
-            {renderChildrenWithHighlights(
-              children,
-              query,
-              "inline-code",
-              highlightPatterns,
-            )}
+            {renderChildrenWithHighlights(children, query, "inline-code", highlightPatterns)}
           </code>
         );
       }
@@ -603,12 +598,7 @@ function renderChildrenWithHighlights(
       cloneElement(
         child,
         undefined,
-        renderChildrenWithHighlights(
-          props.children,
-          query,
-          `${childKey}:child`,
-          highlightPatterns,
-        ),
+        renderChildrenWithHighlights(props.children, query, `${childKey}:child`, highlightPatterns),
       ),
     );
   }
@@ -939,17 +929,17 @@ export function DiffBlock({
                   highlightPatterns,
                 )
               : (() => {
-              let leftCursor = 0;
-              return inlineDiff.left.map((part) => {
-                const key = `${lineKey}:l:${leftCursor}:${part.changed ? "1" : "0"}`;
-                leftCursor += part.text.length;
-                return (
-                  <span key={key} className={part.changed ? "diff-word-remove" : undefined}>
-                    {part.text}
-                  </span>
-                );
-              });
-            })()}
+                  let leftCursor = 0;
+                  return inlineDiff.left.map((part) => {
+                    const key = `${lineKey}:l:${leftCursor}:${part.changed ? "1" : "0"}`;
+                    leftCursor += part.text.length;
+                    return (
+                      <span key={key} className={part.changed ? "diff-word-remove" : undefined}>
+                        {part.text}
+                      </span>
+                    );
+                  });
+                })()}
           </span>
         </div>,
       );
@@ -965,17 +955,17 @@ export function DiffBlock({
                   highlightPatterns,
                 )
               : (() => {
-              let rightCursor = 0;
-              return inlineDiff.right.map((part) => {
-                const key = `${lineKey}:r:${rightCursor}:${part.changed ? "1" : "0"}`;
-                rightCursor += part.text.length;
-                return (
-                  <span key={key} className={part.changed ? "diff-word-add" : undefined}>
-                    {part.text}
-                  </span>
-                );
-              });
-            })()}
+                  let rightCursor = 0;
+                  return inlineDiff.right.map((part) => {
+                    const key = `${lineKey}:r:${rightCursor}:${part.changed ? "1" : "0"}`;
+                    rightCursor += part.text.length;
+                    return (
+                      <span key={key} className={part.changed ? "diff-word-add" : undefined}>
+                        {part.text}
+                      </span>
+                    );
+                  });
+                })()}
           </span>
         </div>,
       );

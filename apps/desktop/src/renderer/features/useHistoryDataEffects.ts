@@ -238,7 +238,13 @@ export function useHistoryDataEffects({
         setHistorySelectionProjectId(selectionState, sortedProjects[0]?.id ?? ""),
       );
     }
-  }, [pendingSearchNavigation, projectsLoaded, rawSelectedProjectId, setHistorySelection, sortedProjects]);
+  }, [
+    pendingSearchNavigation,
+    projectsLoaded,
+    rawSelectedProjectId,
+    setHistorySelection,
+    sortedProjects,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -348,7 +354,9 @@ export function useHistoryDataEffects({
     if (bookmarksResponse.totalCount > 0) {
       return;
     }
-    setHistorySelection((selectionState) => createHistorySelection("project_all", selectionState.projectId));
+    setHistorySelection((selectionState) =>
+      createHistorySelection("project_all", selectionState.projectId),
+    );
   }, [
     bookmarksLoadedProjectId,
     bookmarksResponse.totalCount,

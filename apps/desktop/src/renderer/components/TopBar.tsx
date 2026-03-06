@@ -78,9 +78,7 @@ export function TopBar({
           disabled={focusDisabled}
           aria-label={focusMode ? "Exit focus mode" : "Enter focus mode"}
           title={
-            focusMode
-              ? "Exit focus mode (Cmd/Ctrl+Shift+M)"
-              : "Enter focus mode (Cmd/Ctrl+Shift+M)"
+            focusMode ? "Exit focus mode (Cmd/Ctrl+Shift+M)" : "Enter focus mode (Cmd/Ctrl+Shift+M)"
           }
         >
           <ToolbarIcon name={focusMode ? "closeFocus" : "focus"} />

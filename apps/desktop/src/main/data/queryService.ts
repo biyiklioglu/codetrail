@@ -414,8 +414,7 @@ function getProjectCombinedDetailWithDatabase(
       "SELECT m.id, m.created_at FROM messages m JOIN sessions s ON s.id = m.session_id WHERE s.project_id = ? AND m.source_id = ? ORDER BY m.created_at ASC, m.id ASC LIMIT 1",
     bySourceIdParams: request.focusSourceId ? [request.projectId, request.focusSourceId] : [],
   });
-  let focusIndex: number | null;
-  ({ page, focusIndex } = resolveFocusIndexAndPage({
+  const resolvedFocus = resolveFocusIndexAndPage({
     db,
     fromSql: `FROM messages m
               JOIN sessions s ON s.id = m.session_id`,
@@ -425,7 +424,9 @@ function getProjectCombinedDetailWithDatabase(
     focusTarget,
     page,
     pageSize,
-  }));
+  });
+  page = resolvedFocus.page;
+  const focusIndex = resolvedFocus.focusIndex;
 
   if (totalCount > 0 && page * pageSize >= totalCount) {
     page = Math.floor((totalCount - 1) / pageSize);
@@ -581,8 +582,7 @@ function getSessionDetailWithDatabase(
       "SELECT id, created_at FROM messages WHERE session_id = ? AND source_id = ? ORDER BY created_at ASC, id ASC LIMIT 1",
     bySourceIdParams: request.focusSourceId ? [request.sessionId, request.focusSourceId] : [],
   });
-  let focusIndex: number | null;
-  ({ page, focusIndex } = resolveFocusIndexAndPage({
+  const resolvedFocus = resolveFocusIndexAndPage({
     db,
     fromSql: "FROM messages m",
     whereClause,
@@ -591,7 +591,9 @@ function getSessionDetailWithDatabase(
     focusTarget,
     page,
     pageSize,
-  }));
+  });
+  page = resolvedFocus.page;
+  const focusIndex = resolvedFocus.focusIndex;
 
   if (totalCount > 0 && page * pageSize >= totalCount) {
     page = Math.floor((totalCount - 1) / pageSize);

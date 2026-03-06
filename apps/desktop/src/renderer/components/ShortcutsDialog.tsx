@@ -58,9 +58,9 @@ export function ShortcutsDialog({
                       <span className="help-shortcut-description">{item.description}</span>
                       <div className="help-shortcut-keys">
                         {shortcutParts(item.shortcut).map((part, index) => (
-                          <span key={`${item.shortcut}-${part}-${index}`} className="help-key-fragment">
+                          <span key={`${item.shortcut}-${part.key}`} className="help-key-fragment">
                             {index > 0 ? <span className="help-key-separator">+</span> : null}
-                            <kbd className="help-key">{part}</kbd>
+                            <kbd className="help-key">{part.label}</kbd>
                           </span>
                         ))}
                       </div>
@@ -90,7 +90,10 @@ export function ShortcutsDialog({
                   <span className="help-syntax-tag common">Normal + Advanced</span>
                 </div>
                 {commonSyntaxItems.map((item) => (
-                  <div key={`syntax-common-${item.syntax}-${item.description}`} className="help-syntax-row">
+                  <div
+                    key={`syntax-common-${item.syntax}-${item.description}`}
+                    className="help-syntax-row"
+                  >
                     <span className="help-syntax-token">{renderSyntaxToken(item.syntax)}</span>
                     <div>
                       <div className="help-syntax-description">{item.description}</div>
@@ -149,67 +152,90 @@ function groupShortcuts(shortcuts: ShortcutItem[]): Array<{ name: string; items:
   return Array.from(map.entries()).map(([name, items]) => ({ name, items }));
 }
 
-function shortcutParts(shortcut: string): string[] {
-  const normalized = shortcut.endsWith("++")
-    ? `${shortcut.slice(0, -2)}+Plus`
-    : shortcut;
-  return normalized
+function shortcutParts(shortcut: string): Array<{ key: string; label: string }> {
+  const normalized = shortcut.endsWith("++") ? `${shortcut.slice(0, -2)}+Plus` : shortcut;
+  const rawParts = normalized
     .split("+")
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
+  const parts: Array<{ key: string; label: string }> = [];
+  let cursor = 0;
+  for (const part of rawParts) {
+    const start = normalized.indexOf(part, cursor);
+    const position = start >= 0 ? start : cursor;
+    parts.push({
+      key: `${part}-${position}`,
+      label: part,
+    });
+    cursor = position + part.length;
+  }
+  return parts;
 }
 
 function renderSyntaxToken(syntax: string) {
   const parts = syntax.split(/(AND|OR|NOT|and|or|not|"|[+*()\/-]|\s+)/g).filter(Boolean);
-  return parts.map((part, index) => {
+  const nodes = [];
+  let cursor = 0;
+  for (const part of parts) {
+    const start = syntax.indexOf(part, cursor);
+    const position = start >= 0 ? start : cursor;
+    const key = `${part}-${position}`;
+    cursor = position + part.length;
     if (/^\s+$/.test(part)) {
-      return <span key={`token-space-${index}`}>{part}</span>;
+      nodes.push(<span key={key}>{part}</span>);
+      continue;
     }
 
     if (part === "AND" || part === "OR" || part === "NOT") {
-      return (
-        <span key={`token-op-${index}`} className="help-syntax-part op">
+      nodes.push(
+        <span key={key} className="help-syntax-part op">
           {part}
-        </span>
+        </span>,
       );
+      continue;
     }
 
     if (part === "and" || part === "or" || part === "not") {
-      return (
-        <span key={`token-meta-${index}`} className="help-syntax-part meta">
+      nodes.push(
+        <span key={key} className="help-syntax-part meta">
           {part}
-        </span>
+        </span>,
       );
+      continue;
     }
 
     if (part === '"') {
-      return (
-        <span key={`token-quote-${index}`} className="help-syntax-part quote">
+      nodes.push(
+        <span key={key} className="help-syntax-part quote">
           {part}
-        </span>
+        </span>,
       );
+      continue;
     }
 
     if (part === "/") {
-      return (
-        <span key={`token-sep-${index}`} className="help-syntax-part separator">
+      nodes.push(
+        <span key={key} className="help-syntax-part separator">
           {part}
-        </span>
+        </span>,
       );
+      continue;
     }
 
     if (part === "+" || part === "*" || part === "-" || part === "(" || part === ")") {
-      return (
-        <span key={`token-symbol-${index}`} className="help-syntax-part symbol">
+      nodes.push(
+        <span key={key} className="help-syntax-part symbol">
           {part}
-        </span>
+        </span>,
       );
+      continue;
     }
 
-    return (
-      <span key={`token-literal-${index}`} className="help-syntax-part literal">
+    nodes.push(
+      <span key={key} className="help-syntax-part literal">
         {part}
-      </span>
+      </span>,
     );
-  });
+  }
+  return nodes;
 }
