@@ -165,6 +165,29 @@ describe("AppStateStore", () => {
     expect(store.getWindowState()).toBeNull();
   });
 
+  it("filters unknown provider and category values instead of dropping the whole array", () => {
+    const filePath = "/tmp/codetrail-filter-ui-state.json";
+    const fs = createMemoryFs({
+      [filePath]: JSON.stringify({
+        pane: {
+          projectPaneWidth: 300,
+          sessionPaneWidth: 360,
+          projectProviders: ["claude", "future-provider", "claude", 42],
+          historyCategories: ["assistant", "future-category", "assistant", null],
+        },
+      }),
+    });
+
+    const store = new AppStateStore(filePath, { fs });
+
+    expect(store.getPaneState()).toEqual({
+      projectPaneWidth: 300,
+      sessionPaneWidth: 360,
+      projectProviders: ["claude", "codex", "gemini", "cursor"],
+      historyCategories: ["assistant"],
+    });
+  });
+
   it("sanitizes invalid fields and ignores invalid widths", () => {
     const filePath = "/tmp/codetrail-sanitize-ui-state.json";
     const fs = createMemoryFs();

@@ -111,7 +111,7 @@ export function ensureDatabaseSchema(db: SqliteDatabase): DatabaseBootstrapResul
     recreateSchema(db);
     schemaRebuilt = true;
   } else {
-    for (const statement of tableStatements) {
+    for (const statement of tableStatements.slice(1)) {
       db.exec(statement);
     }
     for (const statement of indexStatements) {

@@ -5,6 +5,115 @@ import remarkGfm from "remark-gfm";
 import { buildSearchHighlightRegex } from "../../lib/searchQuery";
 import { tryParseJsonRecord } from "./toolParsing";
 
+const EMPTY_KEYWORDS = new Set<string>();
+const JS_KEYWORDS = new Set([
+  "const",
+  "let",
+  "var",
+  "function",
+  "return",
+  "if",
+  "else",
+  "for",
+  "while",
+  "switch",
+  "case",
+  "break",
+  "continue",
+  "class",
+  "extends",
+  "new",
+  "import",
+  "from",
+  "export",
+  "default",
+  "async",
+  "await",
+  "try",
+  "catch",
+  "finally",
+  "throw",
+  "type",
+  "interface",
+]);
+const PYTHON_KEYWORDS = new Set([
+  "def",
+  "class",
+  "if",
+  "elif",
+  "else",
+  "for",
+  "while",
+  "return",
+  "import",
+  "from",
+  "as",
+  "try",
+  "except",
+  "finally",
+  "with",
+  "lambda",
+  "pass",
+  "raise",
+  "yield",
+  "async",
+  "await",
+]);
+const SQL_KEYWORDS = new Set([
+  "SELECT",
+  "FROM",
+  "WHERE",
+  "JOIN",
+  "LEFT",
+  "RIGHT",
+  "INNER",
+  "OUTER",
+  "ON",
+  "GROUP",
+  "BY",
+  "ORDER",
+  "LIMIT",
+  "OFFSET",
+  "INSERT",
+  "UPDATE",
+  "DELETE",
+  "INTO",
+  "VALUES",
+  "AND",
+  "OR",
+  "NOT",
+  "AS",
+]);
+const JSON_KEYWORDS = new Set(["true", "false", "null"]);
+const SHELL_KEYWORDS = new Set([
+  "if",
+  "then",
+  "else",
+  "fi",
+  "for",
+  "in",
+  "do",
+  "done",
+  "case",
+  "esac",
+]);
+const LANGUAGE_KEYWORDS: Record<string, Set<string>> = {
+  js: JS_KEYWORDS,
+  jsx: JS_KEYWORDS,
+  ts: JS_KEYWORDS,
+  tsx: JS_KEYWORDS,
+  javascript: JS_KEYWORDS,
+  typescript: JS_KEYWORDS,
+  py: PYTHON_KEYWORDS,
+  python: PYTHON_KEYWORDS,
+  sql: SQL_KEYWORDS,
+  json: JSON_KEYWORDS,
+  bash: SHELL_KEYWORDS,
+  sh: SHELL_KEYWORDS,
+  zsh: SHELL_KEYWORDS,
+  shell: SHELL_KEYWORDS,
+};
+
 export function renderRichText(
   value: string,
   query: string,
@@ -98,23 +207,23 @@ function buildMarkdownComponents(
     },
     h4({ children }) {
       return (
-        <h5 className="md-h3">
+        <h6 className="md-h3">
           {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h4", highlightPatterns)}
-        </h5>
+        </h6>
       );
     },
     h5({ children }) {
       return (
-        <h5 className="md-h3">
+        <h6 className="md-h3">
           {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h5", highlightPatterns)}
-        </h5>
+        </h6>
       );
     },
     h6({ children }) {
       return (
-        <h5 className="md-h3">
+        <h6 className="md-h3">
           {renderChildrenWithLocalPathLinks(children, query, pathRoots, "h6", highlightPatterns)}
-        </h5>
+        </h6>
       );
     },
     p({ children }) {
@@ -403,7 +512,12 @@ function renderTextWithLocalPathLinks(
       cursor = tokenEnd + (bracketWrapped ? 1 : 0);
     } else {
       nodes.push(
-        ...buildHighlightedTextNodes(rawToken, query, `${keyPrefix}:${index}:raw`, highlightPatterns),
+        ...buildHighlightedTextNodes(
+          rawToken,
+          query,
+          `${keyPrefix}:${index}:raw`,
+          highlightPatterns,
+        ),
       );
       cursor = tokenEnd;
     }
@@ -891,104 +1005,7 @@ function tokenizeCodeLine(
 }
 
 function languageKeywords(language: string): Set<string> {
-  if (
-    language === "js" ||
-    language === "jsx" ||
-    language === "ts" ||
-    language === "tsx" ||
-    language === "javascript" ||
-    language === "typescript"
-  ) {
-    return new Set([
-      "const",
-      "let",
-      "var",
-      "function",
-      "return",
-      "if",
-      "else",
-      "for",
-      "while",
-      "switch",
-      "case",
-      "break",
-      "continue",
-      "class",
-      "extends",
-      "new",
-      "import",
-      "from",
-      "export",
-      "default",
-      "async",
-      "await",
-      "try",
-      "catch",
-      "finally",
-      "throw",
-      "type",
-      "interface",
-    ]);
-  }
-  if (language === "py" || language === "python") {
-    return new Set([
-      "def",
-      "class",
-      "if",
-      "elif",
-      "else",
-      "for",
-      "while",
-      "return",
-      "import",
-      "from",
-      "as",
-      "try",
-      "except",
-      "finally",
-      "with",
-      "lambda",
-      "pass",
-      "raise",
-      "yield",
-      "async",
-      "await",
-    ]);
-  }
-  if (language === "sql") {
-    return new Set([
-      "SELECT",
-      "FROM",
-      "WHERE",
-      "JOIN",
-      "LEFT",
-      "RIGHT",
-      "INNER",
-      "OUTER",
-      "ON",
-      "GROUP",
-      "BY",
-      "ORDER",
-      "LIMIT",
-      "OFFSET",
-      "INSERT",
-      "UPDATE",
-      "DELETE",
-      "INTO",
-      "VALUES",
-      "AND",
-      "OR",
-      "NOT",
-      "AS",
-    ]);
-  }
-  if (language === "json") {
-    return new Set(["true", "false", "null"]);
-  }
-  if (language === "bash" || language === "sh" || language === "zsh" || language === "shell") {
-    return new Set(["if", "then", "else", "fi", "for", "in", "do", "done", "case", "esac"]);
-  }
-  return new Set();
+  return LANGUAGE_KEYWORDS[language] ?? EMPTY_KEYWORDS;
 }
 
 export function detectLanguageFromContent(value: string): string {

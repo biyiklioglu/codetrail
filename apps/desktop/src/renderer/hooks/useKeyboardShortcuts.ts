@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { MessageCategory } from "@codetrail/core";
 
 type MainView = "history" | "search" | "settings" | "help";
@@ -27,37 +27,43 @@ export function useKeyboardShortcuts(args: {
   goToNextSearchPage: () => void;
   applyZoomAction: (action: "in" | "out" | "reset") => Promise<void>;
 }): void {
-  const {
-    mainView,
-    hasFocusedHistoryMessage,
-    setMainView,
-    clearFocusedHistoryMessage,
-    focusGlobalSearch,
-    focusSessionSearch,
-    toggleFocusMode,
-    toggleScopedMessagesExpanded,
-    toggleHistoryCategory,
-    toggleProjectPaneCollapsed,
-    toggleSessionPaneCollapsed,
-    focusPreviousHistoryMessage,
-    focusNextHistoryMessage,
-    selectPreviousSession,
-    selectNextSession,
-    selectPreviousProject,
-    selectNextProject,
-    goToPreviousHistoryPage,
-    goToNextHistoryPage,
-    goToPreviousSearchPage,
-    goToNextSearchPage,
-    applyZoomAction,
-  } = args;
+  const latestArgs = useRef(args);
+
+  useEffect(() => {
+    latestArgs.current = args;
+  });
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const {
+        mainView,
+        hasFocusedHistoryMessage,
+        setMainView,
+        clearFocusedHistoryMessage,
+        focusGlobalSearch,
+        focusSessionSearch,
+        toggleFocusMode,
+        toggleScopedMessagesExpanded,
+        toggleHistoryCategory,
+        toggleProjectPaneCollapsed,
+        toggleSessionPaneCollapsed,
+        focusPreviousHistoryMessage,
+        focusNextHistoryMessage,
+        selectPreviousSession,
+        selectNextSession,
+        selectPreviousProject,
+        selectNextProject,
+        goToPreviousHistoryPage,
+        goToNextHistoryPage,
+        goToPreviousSearchPage,
+        goToNextSearchPage,
+        applyZoomAction,
+      } = latestArgs.current;
       const command = event.metaKey || event.ctrlKey;
       const shift = event.shiftKey;
       const key = event.key.toLowerCase();
-      const isHistoryArrowNavigation = mainView === "history" && !shift && !isEditableTarget(event.target);
+      const isHistoryArrowNavigation =
+        mainView === "history" && !shift && !isEditableTarget(event.target);
       if (event.defaultPrevented) {
         return;
       }
@@ -209,30 +215,7 @@ export function useKeyboardShortcuts(args: {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [
-    applyZoomAction,
-    clearFocusedHistoryMessage,
-    focusGlobalSearch,
-    focusSessionSearch,
-    hasFocusedHistoryMessage,
-    mainView,
-    setMainView,
-    goToNextHistoryPage,
-    goToPreviousHistoryPage,
-    goToNextSearchPage,
-    goToPreviousSearchPage,
-    toggleFocusMode,
-    toggleHistoryCategory,
-    toggleProjectPaneCollapsed,
-    toggleScopedMessagesExpanded,
-    toggleSessionPaneCollapsed,
-    focusPreviousHistoryMessage,
-    focusNextHistoryMessage,
-    selectPreviousSession,
-    selectNextSession,
-    selectPreviousProject,
-    selectNextProject,
-  ]);
+  }, []);
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

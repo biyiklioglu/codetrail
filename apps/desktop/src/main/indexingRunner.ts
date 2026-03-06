@@ -134,7 +134,8 @@ async function runIndexingJob(args: {
       },
       args.createWorker,
     );
-  } catch {
+  } catch (error) {
+    console.error("[codetrail] indexing worker failed; falling back to in-process indexing", error);
     args.runIncrementalIndexing({
       dbPath: args.dbPath,
       forceReindex: args.forceReindex,
@@ -189,11 +190,6 @@ function runIndexingInWorker(
 }
 
 function resolveIndexingWorkerUrl(): URL | null {
-  const candidates = [new URL("./indexingWorker.js", import.meta.url)];
-  for (const candidate of candidates) {
-    if (existsSync(fileURLToPath(candidate))) {
-      return candidate;
-    }
-  }
-  return null;
+  const workerUrl = new URL("./indexingWorker.js", import.meta.url);
+  return existsSync(fileURLToPath(workerUrl)) ? workerUrl : null;
 }

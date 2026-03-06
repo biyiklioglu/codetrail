@@ -86,6 +86,7 @@ function createBookmarkStoreHarness() {
   const close = vi.fn();
   const createBookmarkStore = vi.fn(() => ({
     listProjectBookmarks: vi.fn(),
+    countProjectBookmarks: vi.fn(() => 0),
     getBookmark: vi.fn(() => null),
     upsertBookmark: vi.fn(),
     removeBookmark: vi.fn(() => false),
@@ -183,21 +184,30 @@ describe("WorkerIndexingRunner", () => {
     const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
     const controller = createWorkerController();
     const bookmarkHarness = createBookmarkStoreHarness();
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
-      runIncrementalIndexing,
-      resolveWorkerUrl: () => new URL("file:///tmp/indexingWorker.js"),
-      createWorker: () => controller.worker,
-      createBookmarkStore: bookmarkHarness.createBookmarkStore,
-    });
+    try {
+      const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
+        runIncrementalIndexing,
+        resolveWorkerUrl: () => new URL("file:///tmp/indexingWorker.js"),
+        createWorker: () => controller.worker,
+        createBookmarkStore: bookmarkHarness.createBookmarkStore,
+      });
 
-    const job = runner.enqueue({ force: false });
-    await Promise.resolve();
-    controller.emitMessage({ ok: false, message: "worker failed" });
+      const job = runner.enqueue({ force: false });
+      await Promise.resolve();
+      controller.emitMessage({ ok: false, message: "worker failed" });
 
-    await expect(job).resolves.toEqual({ jobId: "refresh-1" });
-    expect(runIncrementalIndexing).toHaveBeenCalledTimes(1);
-    expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledWith("/tmp/codetrail.db");
+      await expect(job).resolves.toEqual({ jobId: "refresh-1" });
+      expect(runIncrementalIndexing).toHaveBeenCalledTimes(1);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "[codetrail] indexing worker failed; falling back to in-process indexing",
+        expect.any(Error),
+      );
+      expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledWith("/tmp/codetrail.db");
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 
   it("falls back to direct indexing when worker exits non-zero", async () => {

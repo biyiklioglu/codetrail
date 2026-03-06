@@ -10,7 +10,7 @@ import {
   statSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, extname, join } from "node:path";
+import { basename, extname, join } from "node:path";
 
 import { asRecord, readString } from "../parsing/helpers";
 
@@ -747,18 +747,40 @@ function resolveDiscoveryDependencies(
 }
 
 function geminiContainerDir(filePath: string): string {
-  const parts = filePath.split("/");
+  const separator = filePath.includes("\\") ? "\\" : "/";
+  const hasLeadingSeparator = filePath.startsWith("/") || filePath.startsWith("\\");
+  const parts = filePath.split(/[\\/]+/).filter((part) => part.length > 0);
   const sessionsIndex = parts.lastIndexOf("sessions");
   if (sessionsIndex > 0) {
-    return parts.slice(0, sessionsIndex).join("/") || "/";
+    return joinPathSegments(parts.slice(0, sessionsIndex), separator, hasLeadingSeparator);
   }
 
   const chatsIndex = parts.lastIndexOf("chats");
   if (chatsIndex > 0) {
-    return parts.slice(0, chatsIndex).join("/") || "/";
+    return joinPathSegments(parts.slice(0, chatsIndex), separator, hasLeadingSeparator);
   }
 
-  return dirname(dirname(dirname(filePath)));
+  return joinPathSegments(
+    parts.slice(0, Math.max(0, parts.length - 3)),
+    separator,
+    hasLeadingSeparator,
+  );
+}
+
+function joinPathSegments(
+  parts: string[],
+  separator: "/" | "\\",
+  hasLeadingSeparator: boolean,
+): string {
+  if (parts.length === 0) {
+    return hasLeadingSeparator ? separator : "";
+  }
+
+  const joined = parts.join(separator);
+  if (hasLeadingSeparator && !joined.includes(":")) {
+    return `${separator}${joined}`;
+  }
+  return joined;
 }
 
 function decodeClaudeProjectId(projectId: string): string {

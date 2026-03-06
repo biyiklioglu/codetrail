@@ -41,12 +41,14 @@ export type ParsedProviderMessage = {
   operationDurationConfidence: OperationDurationConfidence | null;
 };
 
-export function parseProviderPayload(args: {
+type ParseProviderPayloadArgs = {
   provider: Provider;
   sessionId: string;
   payload: unknown;
   diagnostics: ParserDiagnostic[];
-}): ParsedProviderMessage[] {
+};
+
+export function parseProviderPayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
   const { provider } = args;
 
   if (provider === "claude") {
@@ -64,12 +66,7 @@ export function parseProviderPayload(args: {
   return parseGeminiPayload(args);
 }
 
-function parseClaudePayload(args: {
-  provider: Provider;
-  sessionId: string;
-  payload: unknown;
-  diagnostics: ParserDiagnostic[];
-}): ParsedProviderMessage[] {
+function parseClaudePayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
   const { provider, sessionId, payload, diagnostics } = args;
   const events = extractEvents(payload);
   const output: ParsedProviderMessage[] = [];
@@ -141,12 +138,7 @@ function parseClaudePayload(args: {
   return output;
 }
 
-function parseCodexPayload(args: {
-  provider: Provider;
-  sessionId: string;
-  payload: unknown;
-  diagnostics: ParserDiagnostic[];
-}): ParsedProviderMessage[] {
+function parseCodexPayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
   const { provider, sessionId, payload, diagnostics } = args;
   const events = extractEvents(payload);
   const output: ParsedProviderMessage[] = [];
@@ -227,12 +219,7 @@ function parseCodexPayload(args: {
   return output;
 }
 
-function parseGeminiPayload(args: {
-  provider: Provider;
-  sessionId: string;
-  payload: unknown;
-  diagnostics: ParserDiagnostic[];
-}): ParsedProviderMessage[] {
+function parseGeminiPayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
   const { provider, sessionId, payload, diagnostics } = args;
   const events = extractGeminiEvents(payload);
   const output: ParsedProviderMessage[] = [];
@@ -303,12 +290,7 @@ function parseGeminiPayload(args: {
   return output;
 }
 
-function parseCursorPayload(args: {
-  provider: Provider;
-  sessionId: string;
-  payload: unknown;
-  diagnostics: ParserDiagnostic[];
-}): ParsedProviderMessage[] {
+function parseCursorPayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
   const { provider, sessionId, payload, diagnostics } = args;
   const events = extractEvents(payload);
   const output: ParsedProviderMessage[] = [];
@@ -374,10 +356,7 @@ function parseCursorPayload(args: {
   return output;
 }
 
-function parseCursorSegments(
-  role: string | null,
-  event: Record<string, unknown>,
-): EventSegment[] {
+function parseCursorSegments(role: string | null, event: Record<string, unknown>): EventSegment[] {
   const segments: EventSegment[] = [];
   const contentBlocks = asArray(event.content);
 
@@ -421,7 +400,9 @@ function parseCursorSegments(
     }
 
     if (blockType === "tool_result" || blockType === "tool_response") {
-      const resultText = extractText(blockRecord.content ?? blockRecord).join("\n").trim();
+      const resultText = extractText(blockRecord.content ?? blockRecord)
+        .join("\n")
+        .trim();
       segments.push({
         category: "tool_result",
         content: resultText || serializeUnknown(blockRecord),
@@ -449,10 +430,7 @@ function parseCursorSegments(
   return segments;
 }
 
-function cursorRoleCategory(
-  role: string | null,
-  fallback: MessageCategory,
-): MessageCategory {
+function cursorRoleCategory(role: string | null, fallback: MessageCategory): MessageCategory {
   if (role === "user") {
     return "user";
   }
@@ -469,7 +447,10 @@ function stripCursorWrapperTags(text: string): string {
   result = result.replace(/<agent_skills>[\s\S]*?<\/agent_skills>/g, "");
   result = result.replace(/<available_skills[\s\S]*?<\/available_skills>/g, "");
   result = result.replace(/<user_info>[\s\S]*?<\/user_info>/g, "");
-  result = result.replace(/<open_and_recently_viewed_files>[\s\S]*?<\/open_and_recently_viewed_files>/g, "");
+  result = result.replace(
+    /<open_and_recently_viewed_files>[\s\S]*?<\/open_and_recently_viewed_files>/g,
+    "",
+  );
   result = result.replace(/<agent_transcripts>[\s\S]*?<\/agent_transcripts>/g, "");
   return result.trim();
 }
@@ -568,71 +549,17 @@ function parseCodexSegments(
     return textParts.map((text) => ({ category: "assistant", content: text }));
   }
 
-  if (payloadType === "function_call") {
-    const toolName = readString(payloadRecord.name) ?? "tool";
-    const callId = readString(payloadRecord.call_id) ?? `${sessionId}:tool:${sequence}`;
-    const argsJson = safeJsonString(payloadRecord.arguments);
-    const input = parseMaybeJson(argsJson);
-    return [
-      {
-        category: "tool_use",
-        content: serializeUnknown({
-          type: "tool_use",
-          id: callId,
-          name: toolName,
-          input,
-        }),
-      },
-    ];
+  if (payloadType === "function_call" || payloadType === "custom_tool_call") {
+    return buildCodexToolUseSegment(
+      sessionId,
+      sequence,
+      payloadRecord,
+      payloadType === "function_call" ? payloadRecord.arguments : payloadRecord.input,
+    );
   }
 
-  if (payloadType === "custom_tool_call") {
-    const toolName = readString(payloadRecord.name) ?? "tool";
-    const callId = readString(payloadRecord.call_id) ?? `${sessionId}:tool:${sequence}`;
-    const input = parseMaybeJson(safeJsonString(payloadRecord.input));
-    return [
-      {
-        category: "tool_use",
-        content: serializeUnknown({
-          type: "tool_use",
-          id: callId,
-          name: toolName,
-          input,
-        }),
-      },
-    ];
-  }
-
-  if (payloadType === "function_call_output") {
-    const operationDurationMs = extractCodexNativeDurationMs(payloadRecord.output);
-    const output = extractCodexFunctionOutput(payloadRecord.output);
-    return output.length > 0
-      ? [
-          {
-            category: "tool_result",
-            content: output,
-            operationDurationMs,
-            operationDurationSource: operationDurationMs === null ? null : "native",
-            operationDurationConfidence: operationDurationMs === null ? null : "high",
-          },
-        ]
-      : [];
-  }
-
-  if (payloadType === "custom_tool_call_output") {
-    const operationDurationMs = extractCodexNativeDurationMs(payloadRecord.output);
-    const output = extractCodexFunctionOutput(payloadRecord.output);
-    return output.length > 0
-      ? [
-          {
-            category: "tool_result",
-            content: output,
-            operationDurationMs,
-            operationDurationSource: operationDurationMs === null ? null : "native",
-            operationDurationConfidence: operationDurationMs === null ? null : "high",
-          },
-        ]
-      : [];
+  if (payloadType === "function_call_output" || payloadType === "custom_tool_call_output") {
+    return buildCodexToolResultSegment(payloadRecord.output);
   }
 
   if (payloadType === "reasoning") {
@@ -756,9 +683,9 @@ const GEMINI_ATTACHMENT_MARKER = "--- Content from referenced files ---";
 const GEMINI_BINARY_PLACEHOLDER = "Cannot display content of binary file";
 const MIN_GEMINI_ATTACHMENT_LINES = 8;
 
-function summarizeGeminiAttachmentDump(content: string):
-  | { leadingText: string; summaryText: string }
-  | null {
+function summarizeGeminiAttachmentDump(
+  content: string,
+): { leadingText: string; summaryText: string } | null {
   const normalized = content.trim();
   if (normalized.length === 0) {
     return null;
@@ -821,7 +748,7 @@ function analyzeGeminiAttachmentSection(section: string): GeminiAttachmentStats 
     const headerMatch = /^Content from\s+(.+?)(?:\s*:)?$/i.exec(line);
     if (headerMatch) {
       referencedItemCount += 1;
-      const path = headerMatch[1].trim();
+      const path = headerMatch[1]?.trim() ?? "";
       if (path.length > 0 && samplePaths.length < 3 && !samplePaths.includes(path)) {
         samplePaths.push(path);
       }
@@ -871,9 +798,7 @@ function buildGeminiAttachmentSummary(
   }
 
   const exampleSuffix =
-    stats.samplePaths.length > 0
-      ? ` Examples: ${stats.samplePaths.join(", ")}`
-      : "";
+    stats.samplePaths.length > 0 ? ` Examples: ${stats.samplePaths.join(", ")}` : "";
 
   const markerContext = hasExplicitMarker ? " dump" : "";
   const omissionReason =
@@ -1015,6 +940,44 @@ function parseSyntheticCodexSegments(
   }
 
   return [];
+}
+
+function buildCodexToolUseSegment(
+  sessionId: string,
+  sequence: number,
+  payloadRecord: Record<string, unknown>,
+  rawInput: unknown,
+): EventSegment[] {
+  const toolName = readString(payloadRecord.name) ?? "tool";
+  const callId = readString(payloadRecord.call_id) ?? `${sessionId}:tool:${sequence}`;
+  const input = parseMaybeJson(safeJsonString(rawInput));
+  return [
+    {
+      category: "tool_use",
+      content: serializeUnknown({
+        type: "tool_use",
+        id: callId,
+        name: toolName,
+        input,
+      }),
+    },
+  ];
+}
+
+function buildCodexToolResultSegment(rawOutput: unknown): EventSegment[] {
+  const operationDurationMs = extractCodexNativeDurationMs(rawOutput);
+  const output = extractCodexFunctionOutput(rawOutput);
+  return output.length > 0
+    ? [
+        {
+          category: "tool_result",
+          content: output,
+          operationDurationMs,
+          operationDurationSource: operationDurationMs === null ? null : "native",
+          operationDurationConfidence: operationDurationMs === null ? null : "high",
+        },
+      ]
+    : [];
 }
 
 function extractCodexFunctionOutput(value: unknown): string {

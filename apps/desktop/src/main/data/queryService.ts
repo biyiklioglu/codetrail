@@ -1,6 +1,7 @@
 import {
   type IpcRequest,
   type IpcResponse,
+  type MessageCategory,
   type Provider,
   type SearchQueryPlan,
   buildSearchQueryPlan,
@@ -75,6 +76,14 @@ type BookmarkMessageLookupRow = MessageRow & {
   project_id: string;
   session_title: string;
 };
+
+type MessageSortDirection = "asc" | "desc";
+type FocusTargetRow = {
+  id: string;
+  created_at: string;
+};
+
+const MESSAGE_CREATED_AT_ORDER_EXPR = "COALESCE(unixepoch(m.created_at), -9223372036854775808)";
 
 export type QueryService = {
   listProjects: (request: IpcRequest<"projects:list">) => IpcResponse<"projects:list">;
@@ -329,26 +338,7 @@ function getProjectCombinedDetailWithDatabase(
   db: DatabaseHandle,
   request: IpcRequest<"projects:getCombinedDetail">,
 ): IpcResponse<"projects:getCombinedDetail"> {
-  const createdAtOrderExpr = "COALESCE(unixepoch(m.created_at), -9223372036854775808)";
-  const isAscending = request.sortDirection === "asc";
-  const messageOrder = isAscending
-    ? `${createdAtOrderExpr} ASC, m.created_at ASC, m.id ASC`
-    : `${createdAtOrderExpr} DESC, m.created_at DESC, m.id DESC`;
-  const focusComparison = isAscending
-    ? `(
-         ${createdAtOrderExpr} < COALESCE(unixepoch(?), -9223372036854775808)
-         OR (
-           ${createdAtOrderExpr} = COALESCE(unixepoch(?), -9223372036854775808)
-           AND (m.created_at < ? OR (m.created_at = ? AND m.id <= ?))
-         )
-       )`
-    : `(
-         ${createdAtOrderExpr} > COALESCE(unixepoch(?), -9223372036854775808)
-         OR (
-           ${createdAtOrderExpr} = COALESCE(unixepoch(?), -9223372036854775808)
-           AND (m.created_at > ? OR (m.created_at = ? AND m.id >= ?))
-         )
-       )`;
+  const { messageOrder, focusComparison } = buildMessageSortSql(request.sortDirection);
   const pageSize = request.pageSize;
   let page = request.page;
   const normalizedQuery = request.query.trim();
@@ -403,74 +393,39 @@ function getProjectCombinedDetailWithDatabase(
     )
     .get(...params) as { cnt: number } | undefined;
   const totalCount = Number(totalRow?.cnt ?? 0);
-  const categoryCounts = makeEmptyCategoryCounts();
-
   const queryOnlyFilter = buildProjectMessageFilters({
     projectId: request.projectId,
     queryPlan,
   });
-  const categoryRows = db
-    .prepare(
-      `SELECT m.category as category, COUNT(*) as cnt
-       FROM messages m
-       JOIN sessions s ON s.id = m.session_id
-       WHERE ${queryOnlyFilter.whereClause}
-       GROUP BY m.category`,
-    )
-    .all(...queryOnlyFilter.params) as Array<{ category: string; cnt: number }>;
-
-  for (const row of categoryRows) {
-    categoryCounts[normalizeMessageCategory(row.category)] += Number(row.cnt ?? 0);
-  }
-
-  let focusIndex: number | null = null;
-  if (request.focusMessageId || request.focusSourceId) {
-    const focusTarget = request.focusMessageId
-      ? ((db
-          .prepare(
-            "SELECT m.id, m.created_at FROM messages m JOIN sessions s ON s.id = m.session_id WHERE s.project_id = ? AND m.id = ?",
-          )
-          .get(request.projectId, request.focusMessageId) as
-          | {
-              id: string;
-              created_at: string;
-            }
-          | undefined) ?? undefined)
-      : ((db
-          .prepare(
-            "SELECT m.id, m.created_at FROM messages m JOIN sessions s ON s.id = m.session_id WHERE s.project_id = ? AND m.source_id = ? ORDER BY m.created_at ASC, m.id ASC LIMIT 1",
-          )
-          .get(request.projectId, request.focusSourceId) as
-          | {
-              id: string;
-              created_at: string;
-            }
-          | undefined) ?? undefined);
-
-    if (focusTarget) {
-      const focusRow = db
-        .prepare(
-          `SELECT COUNT(*) as cnt
-           FROM messages m
-           JOIN sessions s ON s.id = m.session_id
-           WHERE ${whereClause}
-           AND ${focusComparison}`,
-        )
-        .get(
-          ...params,
-          focusTarget.created_at,
-          focusTarget.created_at,
-          focusTarget.created_at,
-          focusTarget.created_at,
-          focusTarget.id,
-        ) as { cnt: number } | undefined;
-      const countBefore = Number(focusRow?.cnt ?? 0);
-      if (countBefore > 0) {
-        focusIndex = countBefore - 1;
-        page = Math.floor(focusIndex / pageSize);
-      }
-    }
-  }
+  const categoryCounts = loadCategoryCounts(
+    db,
+    `FROM messages m
+     JOIN sessions s ON s.id = m.session_id`,
+    queryOnlyFilter.whereClause,
+    queryOnlyFilter.params,
+  );
+  const focusTarget = resolveFocusTarget(db, {
+    focusMessageId: request.focusMessageId,
+    focusSourceId: request.focusSourceId,
+    byMessageIdSql:
+      "SELECT m.id, m.created_at FROM messages m JOIN sessions s ON s.id = m.session_id WHERE s.project_id = ? AND m.id = ?",
+    byMessageIdParams: request.focusMessageId ? [request.projectId, request.focusMessageId] : [],
+    bySourceIdSql:
+      "SELECT m.id, m.created_at FROM messages m JOIN sessions s ON s.id = m.session_id WHERE s.project_id = ? AND m.source_id = ? ORDER BY m.created_at ASC, m.id ASC LIMIT 1",
+    bySourceIdParams: request.focusSourceId ? [request.projectId, request.focusSourceId] : [],
+  });
+  let focusIndex: number | null;
+  ({ page, focusIndex } = resolveFocusIndexAndPage({
+    db,
+    fromSql: `FROM messages m
+              JOIN sessions s ON s.id = m.session_id`,
+    whereClause,
+    params,
+    focusComparison,
+    focusTarget,
+    page,
+    pageSize,
+  }));
 
   if (totalCount > 0 && page * pageSize >= totalCount) {
     page = Math.floor((totalCount - 1) / pageSize);
@@ -521,26 +476,7 @@ function getSessionDetailWithDatabase(
   db: DatabaseHandle,
   request: IpcRequest<"sessions:getDetail">,
 ): IpcResponse<"sessions:getDetail"> {
-  const createdAtOrderExpr = "COALESCE(unixepoch(m.created_at), -9223372036854775808)";
-  const isAscending = request.sortDirection === "asc";
-  const messageOrder = isAscending
-    ? `${createdAtOrderExpr} ASC, m.created_at ASC, m.id ASC`
-    : `${createdAtOrderExpr} DESC, m.created_at DESC, m.id DESC`;
-  const focusComparison = isAscending
-    ? `(
-         ${createdAtOrderExpr} < COALESCE(unixepoch(?), -9223372036854775808)
-         OR (
-           ${createdAtOrderExpr} = COALESCE(unixepoch(?), -9223372036854775808)
-           AND (m.created_at < ? OR (m.created_at = ? AND m.id <= ?))
-         )
-       )`
-    : `(
-         ${createdAtOrderExpr} > COALESCE(unixepoch(?), -9223372036854775808)
-         OR (
-           ${createdAtOrderExpr} = COALESCE(unixepoch(?), -9223372036854775808)
-           AND (m.created_at > ? OR (m.created_at = ? AND m.id >= ?))
-         )
-       )`;
+  const { messageOrder, focusComparison } = buildMessageSortSql(request.sortDirection);
   const sessionRow = db
     .prepare(
       `SELECT
@@ -626,70 +562,36 @@ function getSessionDetailWithDatabase(
     .prepare(`SELECT COUNT(*) as cnt FROM messages m WHERE ${whereClause}`)
     .get(...params) as { cnt: number } | undefined;
   const totalCount = Number(totalRow?.cnt ?? 0);
-  const categoryCounts = makeEmptyCategoryCounts();
-
   const queryOnlyFilter = buildMessageFilters({
     sessionId: request.sessionId,
     queryPlan,
   });
-  const categoryRows = db
-    .prepare(
-      `SELECT m.category as category, COUNT(*) as cnt
-       FROM messages m
-       WHERE ${queryOnlyFilter.whereClause}
-       GROUP BY m.category`,
-    )
-    .all(...queryOnlyFilter.params) as Array<{ category: string; cnt: number }>;
-
-  for (const row of categoryRows) {
-    categoryCounts[normalizeMessageCategory(row.category)] += Number(row.cnt ?? 0);
-  }
-
-  let focusIndex: number | null = null;
-  if (request.focusMessageId || request.focusSourceId) {
-    const focusTarget = request.focusMessageId
-      ? ((db
-          .prepare("SELECT id, created_at FROM messages WHERE session_id = ? AND id = ?")
-          .get(request.sessionId, request.focusMessageId) as
-          | {
-              id: string;
-              created_at: string;
-            }
-          | undefined) ?? undefined)
-      : ((db
-          .prepare(
-            "SELECT id, created_at FROM messages WHERE session_id = ? AND source_id = ? ORDER BY created_at ASC, id ASC LIMIT 1",
-          )
-          .get(request.sessionId, request.focusSourceId) as
-          | {
-              id: string;
-              created_at: string;
-            }
-          | undefined) ?? undefined);
-
-    if (focusTarget) {
-      const focusRow = db
-        .prepare(
-          `SELECT COUNT(*) as cnt
-           FROM messages m
-           WHERE ${whereClause}
-           AND ${focusComparison}`,
-        )
-        .get(
-          ...params,
-          focusTarget.created_at,
-          focusTarget.created_at,
-          focusTarget.created_at,
-          focusTarget.created_at,
-          focusTarget.id,
-        ) as { cnt: number } | undefined;
-      const countBefore = Number(focusRow?.cnt ?? 0);
-      if (countBefore > 0) {
-        focusIndex = countBefore - 1;
-        page = Math.floor(focusIndex / pageSize);
-      }
-    }
-  }
+  const categoryCounts = loadCategoryCounts(
+    db,
+    "FROM messages m",
+    queryOnlyFilter.whereClause,
+    queryOnlyFilter.params,
+  );
+  const focusTarget = resolveFocusTarget(db, {
+    focusMessageId: request.focusMessageId,
+    focusSourceId: request.focusSourceId,
+    byMessageIdSql: "SELECT id, created_at FROM messages WHERE session_id = ? AND id = ?",
+    byMessageIdParams: request.focusMessageId ? [request.sessionId, request.focusMessageId] : [],
+    bySourceIdSql:
+      "SELECT id, created_at FROM messages WHERE session_id = ? AND source_id = ? ORDER BY created_at ASC, id ASC LIMIT 1",
+    bySourceIdParams: request.focusSourceId ? [request.sessionId, request.focusSourceId] : [],
+  });
+  let focusIndex: number | null;
+  ({ page, focusIndex } = resolveFocusIndexAndPage({
+    db,
+    fromSql: "FROM messages m",
+    whereClause,
+    params,
+    focusComparison,
+    focusTarget,
+    page,
+    pageSize,
+  }));
 
   if (totalCount > 0 && page * pageSize >= totalCount) {
     page = Math.floor((totalCount - 1) / pageSize);
@@ -735,15 +637,22 @@ function listProjectBookmarksWithStore(
   bookmarkStore: BookmarkStore,
   request: IpcRequest<"bookmarks:listProject">,
 ): IpcResponse<"bookmarks:listProject"> {
-  const allStoredRows = bookmarkStore.listProjectBookmarks(request.projectId);
   const hasQuery = (request.query?.trim().length ?? 0) > 0;
   const queryPlan = hasQuery
     ? buildSearchQueryPlan(request.query ?? "", request.searchMode ?? "simple")
     : buildSearchQueryPlan("", request.searchMode ?? "simple");
+  const storedRows = bookmarkStore.listProjectBookmarks(
+    request.projectId,
+    hasQuery ? request.query : undefined,
+    request.searchMode ?? "simple",
+  );
+  const totalCount = hasQuery
+    ? bookmarkStore.countProjectBookmarks(request.projectId)
+    : storedRows.length;
   if (queryPlan.error) {
     return {
       projectId: request.projectId,
-      totalCount: allStoredRows.length,
+      totalCount,
       filteredCount: 0,
       categoryCounts: makeEmptyCategoryCounts(),
       queryError: queryPlan.error,
@@ -751,13 +660,6 @@ function listProjectBookmarksWithStore(
       results: [],
     };
   }
-  const storedRows = hasQuery
-    ? bookmarkStore.listProjectBookmarks(
-        request.projectId,
-        request.query,
-        request.searchMode ?? "simple",
-      )
-    : allStoredRows;
   const liveRowsByMessageId = listLiveBookmarkMessagesById(
     db,
     request.projectId,
@@ -805,13 +707,126 @@ function listProjectBookmarksWithStore(
 
   return {
     projectId: request.projectId,
-    totalCount: allStoredRows.length,
+    totalCount,
     filteredCount: results.length,
     categoryCounts,
     queryError: null,
     highlightPatterns: queryPlan.highlightPatterns,
     results,
   };
+}
+
+function buildMessageSortSql(sortDirection: MessageSortDirection): {
+  messageOrder: string;
+  focusComparison: string;
+} {
+  const isAscending = sortDirection === "asc";
+  return {
+    messageOrder: isAscending
+      ? `${MESSAGE_CREATED_AT_ORDER_EXPR} ASC, m.created_at ASC, m.id ASC`
+      : `${MESSAGE_CREATED_AT_ORDER_EXPR} DESC, m.created_at DESC, m.id DESC`,
+    focusComparison: isAscending
+      ? `(
+           ${MESSAGE_CREATED_AT_ORDER_EXPR} < COALESCE(unixepoch(?), -9223372036854775808)
+           OR (
+             ${MESSAGE_CREATED_AT_ORDER_EXPR} = COALESCE(unixepoch(?), -9223372036854775808)
+             AND (m.created_at < ? OR (m.created_at = ? AND m.id <= ?))
+           )
+         )`
+      : `(
+           ${MESSAGE_CREATED_AT_ORDER_EXPR} > COALESCE(unixepoch(?), -9223372036854775808)
+           OR (
+             ${MESSAGE_CREATED_AT_ORDER_EXPR} = COALESCE(unixepoch(?), -9223372036854775808)
+             AND (m.created_at > ? OR (m.created_at = ? AND m.id >= ?))
+           )
+         )`,
+  };
+}
+
+function loadCategoryCounts(
+  db: DatabaseHandle,
+  fromSql: string,
+  whereClause: string,
+  params: readonly unknown[],
+): Record<MessageCategory, number> {
+  const categoryCounts = makeEmptyCategoryCounts();
+  const categoryRows = db
+    .prepare(
+      `SELECT m.category as category, COUNT(*) as cnt
+       ${fromSql}
+       WHERE ${whereClause}
+       GROUP BY m.category`,
+    )
+    .all(...params) as Array<{ category: string; cnt: number }>;
+
+  for (const row of categoryRows) {
+    categoryCounts[normalizeMessageCategory(row.category)] += Number(row.cnt ?? 0);
+  }
+
+  return categoryCounts;
+}
+
+function resolveFocusTarget(
+  db: DatabaseHandle,
+  args: {
+    focusMessageId: string | undefined;
+    focusSourceId: string | undefined;
+    byMessageIdSql: string;
+    byMessageIdParams: readonly unknown[];
+    bySourceIdSql: string;
+    bySourceIdParams: readonly unknown[];
+  },
+): FocusTargetRow | undefined {
+  if (args.focusMessageId) {
+    return db.prepare(args.byMessageIdSql).get(...args.byMessageIdParams) as
+      | FocusTargetRow
+      | undefined;
+  }
+  if (args.focusSourceId) {
+    return db.prepare(args.bySourceIdSql).get(...args.bySourceIdParams) as
+      | FocusTargetRow
+      | undefined;
+  }
+  return undefined;
+}
+
+function resolveFocusIndexAndPage(args: {
+  db: DatabaseHandle;
+  fromSql: string;
+  whereClause: string;
+  params: readonly unknown[];
+  focusComparison: string;
+  focusTarget: FocusTargetRow | undefined;
+  page: number;
+  pageSize: number;
+}): { page: number; focusIndex: number | null } {
+  let { page } = args;
+  let focusIndex: number | null = null;
+  if (!args.focusTarget) {
+    return { page, focusIndex };
+  }
+
+  const focusRow = args.db
+    .prepare(
+      `SELECT COUNT(*) as cnt
+       ${args.fromSql}
+       WHERE ${args.whereClause}
+       AND ${args.focusComparison}`,
+    )
+    .get(
+      ...args.params,
+      args.focusTarget.created_at,
+      args.focusTarget.created_at,
+      args.focusTarget.created_at,
+      args.focusTarget.created_at,
+      args.focusTarget.id,
+    ) as { cnt: number } | undefined;
+  const countBefore = Number(focusRow?.cnt ?? 0);
+  if (countBefore > 0) {
+    focusIndex = countBefore - 1;
+    page = Math.floor(focusIndex / args.pageSize);
+  }
+  return { page, focusIndex };
 }
 
 function listLiveBookmarkMessagesById(

@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
-import type { IpcRequest, IpcResponse, MessageCategory, Provider } from "@codetrail/core";
+import type {
+  IpcRequest,
+  IpcResponse,
+  MessageCategory,
+  Provider,
+  SystemMessageRegexRules,
+} from "@codetrail/core";
 
 import type {
   MonoFontFamily,
@@ -20,7 +26,6 @@ type RestoredScrollTarget = {
 };
 
 type HistoryMode = "session" | "bookmarks" | "project_all";
-type SystemMessageRegexRules = Record<Provider, string[]>;
 type SortDirection = "asc" | "desc";
 type PaneStateSnapshot = IpcResponse<"ui:getState">;
 type PaneStatePersistRequest = IpcRequest<"ui:setState">;

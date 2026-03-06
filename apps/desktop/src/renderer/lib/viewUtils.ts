@@ -1,5 +1,11 @@
 import type { MessageCategory, Provider } from "@codetrail/core";
 
+const TODAY_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
 export const PROVIDER_LABELS: Record<Provider, string> = {
   claude: "Claude",
   codex: "Codex",
@@ -62,11 +68,9 @@ export function formatDate(value: string | null): string {
     date.getMonth() === today.getMonth() &&
     date.getDate() === today.getDate();
   if (isToday) {
-    return `Today ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(date)}`;
+    return `Today ${TODAY_TIME_FORMATTER.format(date)}`;
   }
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
-    date,
-  );
+  return DATE_TIME_FORMATTER.format(date);
 }
 
 export function prettyCategory(category: MessageCategory): string {

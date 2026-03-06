@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import type { MessageCategory, Provider } from "../contracts/canonical";
+import { PROVIDER_VALUES, type MessageCategory, type Provider } from "../contracts/canonical";
 import {
   type SqliteDatabase,
   clearIndexedData,
@@ -72,7 +72,6 @@ type SessionFileRow = {
 type IndexedMessage = ReturnType<typeof parseSession>["messages"][number];
 
 const MAX_DERIVED_DURATION_MS = 15 * 60 * 1000;
-const PROVIDERS: Provider[] = ["claude", "codex", "gemini", "cursor"];
 
 export function runIncrementalIndexing(
   config: IndexingConfig,
@@ -741,7 +740,7 @@ function compileSystemMessageRules(overrides?: SystemMessageRegexRuleOverrides):
   };
 
   let invalidCount = 0;
-  for (const provider of PROVIDERS) {
+  for (const provider of PROVIDER_VALUES) {
     const compiled: RegExp[] = [];
     for (const pattern of resolved[provider]) {
       const normalized = pattern.trim();

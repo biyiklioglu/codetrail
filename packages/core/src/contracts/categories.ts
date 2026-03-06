@@ -21,26 +21,9 @@ export function normalizeMessageCategory(value: string): MessageCategory {
   if (aliased) {
     return aliased;
   }
-
-  if (normalized === "user") {
-    return "user";
-  }
-  if (normalized === "assistant") {
-    return "assistant";
-  }
-  if (normalized === "tool_use") {
-    return "tool_use";
-  }
-  if (normalized === "tool_edit") {
-    return "tool_edit";
-  }
-  if (normalized === "tool_result") {
-    return "tool_result";
-  }
-  if (normalized === "thinking") {
-    return "thinking";
-  }
-  return "system";
+  return (MESSAGE_CATEGORY_KEYS as readonly string[]).includes(normalized)
+    ? (normalized as MessageCategory)
+    : "system";
 }
 
 export function normalizeMessageCategories(values: string[]): MessageCategory[] {

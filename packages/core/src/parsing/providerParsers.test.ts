@@ -51,11 +51,11 @@ describe("parseProviderPayload (Gemini attachment normalization)", () => {
     });
 
     expect(messages).toHaveLength(2);
-    expect(messages[0].category).toBe("user");
-    expect(messages[0].content).toContain("Do the task described below.");
-    expect(messages[1].category).toBe("system");
-    expect(messages[1].content).toContain("Gemini attachment dump truncated");
-    expect(messages[1].content).toContain("@src/README.md");
+    expect(messages[0]?.category).toBe("user");
+    expect(messages[0]?.content).toContain("Do the task described below.");
+    expect(messages[1]?.category).toBe("system");
+    expect(messages[1]?.content).toContain("Gemini attachment dump truncated");
+    expect(messages[1]?.content).toContain("@src/README.md");
     expect(messages.map((msg) => msg.content).join("\n")).not.toContain(
       "Cannot display content of binary file",
     );
@@ -89,7 +89,7 @@ describe("parseProviderPayload (Gemini attachment normalization)", () => {
     });
 
     expect(messages).toHaveLength(1);
-    expect(messages[0].category).toBe("user");
-    expect(messages[0].content).toContain("Content from @src/small.txt:");
+    expect(messages[0]?.category).toBe("user");
+    expect(messages[0]?.content).toContain("Content from @src/small.txt:");
   });
 });

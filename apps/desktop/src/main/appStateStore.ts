@@ -261,9 +261,18 @@ function sanitizePaneState(value: unknown): PaneState | null {
   const selectedProjectId = sanitizeOptionalNonEmptyString(record.selectedProjectId);
   const selectedSessionId = sanitizeOptionalNonEmptyString(record.selectedSessionId);
   const historyMode = sanitizeStringValue(record.historyMode, HISTORY_MODE_VALUES);
-  const projectSortDirection = sanitizeStringValue(record.projectSortDirection, SORT_DIRECTION_VALUES);
-  const sessionSortDirection = sanitizeStringValue(record.sessionSortDirection, SORT_DIRECTION_VALUES);
-  const messageSortDirection = sanitizeStringValue(record.messageSortDirection, SORT_DIRECTION_VALUES);
+  const projectSortDirection = sanitizeStringValue(
+    record.projectSortDirection,
+    SORT_DIRECTION_VALUES,
+  );
+  const sessionSortDirection = sanitizeStringValue(
+    record.sessionSortDirection,
+    SORT_DIRECTION_VALUES,
+  );
+  const messageSortDirection = sanitizeStringValue(
+    record.messageSortDirection,
+    SORT_DIRECTION_VALUES,
+  );
   const bookmarkSortDirection = sanitizeStringValue(
     record.bookmarkSortDirection,
     SORT_DIRECTION_VALUES,
@@ -373,10 +382,10 @@ function sanitizeStringArray<T extends string>(value: unknown, universe: readonl
   const deduped: T[] = [];
   for (const item of value) {
     if (typeof item !== "string") {
-      return null;
+      continue;
     }
     if (!universe.includes(item as T) || deduped.includes(item as T)) {
-      return null;
+      continue;
     }
     deduped.push(item as T);
   }

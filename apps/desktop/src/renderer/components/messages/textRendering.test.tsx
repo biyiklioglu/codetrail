@@ -70,6 +70,18 @@ describe("renderRichText", () => {
     expect(html).toContain(">Open docs<");
   });
 
+  it("preserves lower-level markdown heading semantics", () => {
+    const markdown = ["#### Four", "##### Five", "###### Six"].join("\n\n");
+
+    const html = renderNodes(renderRichText(markdown, "", "headings"));
+
+    expect(html).toContain("<h6");
+    expect(html).toContain(">Four<");
+    expect(html).toContain(">Five<");
+    expect(html).toContain(">Six<");
+    expect(html).not.toContain('<h5 class="md-h3">Four</h5>');
+  });
+
   it("normalizes links with whitespace between bracket and parenthesis", () => {
     const markdown = "[Open docs] (/Users/acme/repo/docs/guide.md)";
 

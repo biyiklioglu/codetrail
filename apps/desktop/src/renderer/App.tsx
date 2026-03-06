@@ -2,8 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UIEvent as ReactUIEvent } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
-import type { MessageCategory, Provider } from "@codetrail/core";
-import type { IpcRequest, IpcResponse } from "@codetrail/core";
+import type {
+  IpcRequest,
+  IpcResponse,
+  MessageCategory,
+  Provider,
+  SearchMode,
+  SystemMessageRegexRules,
+} from "@codetrail/core";
 
 import {
   type MonoFontFamily,
@@ -87,9 +93,7 @@ const EMPTY_CATEGORY_COUNTS = {
 type MainView = "history" | "search" | "settings" | "help";
 type HistoryMode = "session" | "bookmarks" | "project_all";
 type BulkExpandScope = "all" | MessageCategory;
-type SystemMessageRegexRules = Record<Provider, string[]>;
 type SortDirection = "asc" | "desc";
-type SearchMode = "simple" | "advanced";
 type PaneStateSnapshot = IpcResponse<"ui:getState">;
 type SessionPaneNavigationItem =
   | { id: "__project_all__"; kind: "project_all" }
@@ -113,6 +117,88 @@ const EMPTY_SYSTEM_MESSAGE_REGEX_RULES: SystemMessageRegexRules = {
 };
 const PROJECT_ALL_NAV_ID = "__project_all__";
 const BOOKMARKS_NAV_ID = "__bookmarks__";
+const SHORTCUT_ITEMS = [
+  { group: "Search & Navigation", shortcut: "Cmd/Ctrl+F", description: "Search messages" },
+  {
+    group: "Search & Navigation",
+    shortcut: "Cmd/Ctrl+Shift+F",
+    description: "Open global search",
+  },
+  { group: "Search & Navigation", shortcut: "Cmd/Ctrl+Left", description: "Previous page" },
+  { group: "Search & Navigation", shortcut: "Cmd/Ctrl+Right", description: "Next page" },
+  { group: "Search & Navigation", shortcut: "Cmd+Up", description: "Focus previous message" },
+  { group: "Search & Navigation", shortcut: "Cmd+Down", description: "Focus next message" },
+  { group: "Search & Navigation", shortcut: "Option+Up", description: "Select previous session" },
+  { group: "Search & Navigation", shortcut: "Option+Down", description: "Select next session" },
+  { group: "Search & Navigation", shortcut: "Ctrl+Up", description: "Select previous project" },
+  { group: "Search & Navigation", shortcut: "Ctrl+Down", description: "Select next project" },
+  { group: "Panels", shortcut: "Cmd/Ctrl+B", description: "Expand/collapse Projects pane" },
+  {
+    group: "Panels",
+    shortcut: "Cmd/Ctrl+Shift+B",
+    description: "Expand/collapse Sessions pane",
+  },
+  { group: "Panels", shortcut: "Cmd/Ctrl+E", description: "Expand/collapse session messages" },
+  { group: "Panels", shortcut: "Cmd/Ctrl+Shift+M", description: "Toggle focus mode" },
+  {
+    group: "Message Filters",
+    shortcut: "Cmd/Ctrl+1",
+    description: "Toggle User button on session messages",
+  },
+  {
+    group: "Message Filters",
+    shortcut: "Cmd/Ctrl+2",
+    description: "Toggle Assistant button on session messages",
+  },
+  {
+    group: "Message Filters",
+    shortcut: "Cmd/Ctrl+3",
+    description: "Toggle Write button on session messages",
+  },
+  {
+    group: "Message Filters",
+    shortcut: "Cmd/Ctrl+4",
+    description: "Toggle Tool Use button on session messages",
+  },
+  {
+    group: "Message Filters",
+    shortcut: "Cmd/Ctrl+5",
+    description: "Toggle Tool Result button on session messages",
+  },
+  {
+    group: "Message Filters",
+    shortcut: "Cmd/Ctrl+6",
+    description: "Toggle Thinking button on session messages",
+  },
+  {
+    group: "Message Filters",
+    shortcut: "Cmd/Ctrl+7",
+    description: "Toggle System button on session messages",
+  },
+  { group: "System", shortcut: "Cmd/Ctrl++", description: "Zoom in" },
+  { group: "System", shortcut: "Cmd/Ctrl+-", description: "Zoom out" },
+  { group: "System", shortcut: "Cmd/Ctrl+0", description: "Reset zoom" },
+  { group: "System", shortcut: "?", description: "Open help page" },
+  { group: "System", shortcut: "Esc", description: "Close help / clear focused message" },
+];
+const COMMON_SYNTAX_ITEMS = [
+  { syntax: "term", description: "Match term token" },
+  { syntax: "term*", description: "Prefix wildcard", note: "Postfix only" },
+  { syntax: "focus+on", description: "Punctuation like '+' can still match tokenized text" },
+  { syntax: "focus-on", description: "Punctuation like '-' can still match tokenized text" },
+  { syntax: "focus+on+something", description: "Multiple separators are supported in a token" },
+];
+const ADVANCED_SYNTAX_ITEMS = [
+  { syntax: '"exact phrase"', description: "Match exact phrase" },
+  { syntax: "A OR B", description: "Either side may match (advanced mode)" },
+  { syntax: "A NOT B", description: "Exclude B from A matches (advanced mode)" },
+  {
+    syntax: '"and" / "or" / "not"',
+    description: "Use quotes for literal words",
+    note: "Unquoted AND / OR / NOT are operators",
+  },
+  { syntax: "(A OR B) C", description: "Use parentheses to group expressions" },
+];
 
 const MONO_FONT_STACKS: Record<MonoFontFamily, string> = {
   current: '"JetBrains Mono", "IBM Plex Mono", monospace',
@@ -1075,7 +1161,10 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
       return;
     }
 
-    const targetMessageId = getEdgeItemId(activeHistoryMessages, pendingMessagePageNavigation.direction);
+    const targetMessageId = getEdgeItemId(
+      activeHistoryMessages,
+      pendingMessagePageNavigation.direction,
+    );
     setPendingMessagePageNavigation(null);
     if (!targetMessageId) {
       return;
@@ -1318,7 +1407,9 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
       }
 
       const targetPage =
-        direction === "next" ? Math.min(totalPages - 1, sessionPage + 1) : Math.max(0, sessionPage - 1);
+        direction === "next"
+          ? Math.min(totalPages - 1, sessionPage + 1)
+          : Math.max(0, sessionPage - 1);
       setPendingMessageAreaFocus(true);
       setPendingMessagePageNavigation({ direction, targetPage });
       setSessionPage(targetPage);
@@ -1398,125 +1489,6 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
         }px 1px ${sessionPaneCollapsed ? COLLAPSED_PANE_WIDTH : sessionPaneWidth}px 1px minmax(420px, 1fr)`,
       }
     : undefined;
-
-  const shortcutItems = useMemo(() => {
-    return [
-      { group: "Search & Navigation", shortcut: "Cmd/Ctrl+F", description: "Search messages" },
-      {
-        group: "Search & Navigation",
-        shortcut: "Cmd/Ctrl+Shift+F",
-        description: "Open global search",
-      },
-      { group: "Search & Navigation", shortcut: "Cmd/Ctrl+Left", description: "Previous page" },
-      { group: "Search & Navigation", shortcut: "Cmd/Ctrl+Right", description: "Next page" },
-      {
-        group: "Search & Navigation",
-        shortcut: "Cmd+Up",
-        description: "Focus previous message",
-      },
-      {
-        group: "Search & Navigation",
-        shortcut: "Cmd+Down",
-        description: "Focus next message",
-      },
-      {
-        group: "Search & Navigation",
-        shortcut: "Option+Up",
-        description: "Select previous session",
-      },
-      {
-        group: "Search & Navigation",
-        shortcut: "Option+Down",
-        description: "Select next session",
-      },
-      {
-        group: "Search & Navigation",
-        shortcut: "Ctrl+Up",
-        description: "Select previous project",
-      },
-      {
-        group: "Search & Navigation",
-        shortcut: "Ctrl+Down",
-        description: "Select next project",
-      },
-      { group: "Panels", shortcut: "Cmd/Ctrl+B", description: "Expand/collapse Projects pane" },
-      {
-        group: "Panels",
-        shortcut: "Cmd/Ctrl+Shift+B",
-        description: "Expand/collapse Sessions pane",
-      },
-      {
-        group: "Panels",
-        shortcut: "Cmd/Ctrl+E",
-        description: "Expand/collapse session messages",
-      },
-      { group: "Panels", shortcut: "Cmd/Ctrl+Shift+M", description: "Toggle focus mode" },
-      {
-        group: "Message Filters",
-        shortcut: "Cmd/Ctrl+1",
-        description: "Toggle User button on session messages",
-      },
-      {
-        group: "Message Filters",
-        shortcut: "Cmd/Ctrl+2",
-        description: "Toggle Assistant button on session messages",
-      },
-      {
-        group: "Message Filters",
-        shortcut: "Cmd/Ctrl+3",
-        description: "Toggle Write button on session messages",
-      },
-      {
-        group: "Message Filters",
-        shortcut: "Cmd/Ctrl+4",
-        description: "Toggle Tool Use button on session messages",
-      },
-      {
-        group: "Message Filters",
-        shortcut: "Cmd/Ctrl+5",
-        description: "Toggle Tool Result button on session messages",
-      },
-      {
-        group: "Message Filters",
-        shortcut: "Cmd/Ctrl+6",
-        description: "Toggle Thinking button on session messages",
-      },
-      {
-        group: "Message Filters",
-        shortcut: "Cmd/Ctrl+7",
-        description: "Toggle System button on session messages",
-      },
-      { group: "System", shortcut: "Cmd/Ctrl++", description: "Zoom in" },
-      { group: "System", shortcut: "Cmd/Ctrl+-", description: "Zoom out" },
-      { group: "System", shortcut: "Cmd/Ctrl+0", description: "Reset zoom" },
-      { group: "System", shortcut: "?", description: "Open help page" },
-      { group: "System", shortcut: "Esc", description: "Close help / clear focused message" },
-    ];
-  }, []);
-  const commonSyntaxItems = useMemo(
-    () => [
-      { syntax: "term", description: "Match term token" },
-      { syntax: "term*", description: "Prefix wildcard", note: "Postfix only" },
-      { syntax: "focus+on", description: "Punctuation like '+' can still match tokenized text" },
-      { syntax: "focus-on", description: "Punctuation like '-' can still match tokenized text" },
-      { syntax: "focus+on+something", description: "Multiple separators are supported in a token" },
-    ],
-    [],
-  );
-  const advancedSyntaxItems = useMemo(
-    () => [
-      { syntax: '"exact phrase"', description: "Match exact phrase" },
-      { syntax: "A OR B", description: "Either side may match (advanced mode)" },
-      { syntax: "A NOT B", description: "Exclude B from A matches (advanced mode)" },
-      {
-        syntax: '"and" / "or" / "not"',
-        description: "Use quotes for literal words",
-        note: "Unquoted AND / OR / NOT are operators",
-      },
-      { syntax: "(A OR B) C", description: "Use parentheses to group expressions" },
-    ],
-    [],
-  );
 
   const handleToggleScopedMessagesExpanded = useCallback(() => {
     if (scopedMessages.length === 0) {
@@ -2069,9 +2041,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
                         : "Enable advanced search syntax"
                     }
                     title={
-                      advancedSearchEnabled
-                        ? "Advanced syntax enabled"
-                        : "Advanced syntax disabled"
+                      advancedSearchEnabled ? "Advanced syntax enabled" : "Advanced syntax disabled"
                     }
                   >
                     <svg
@@ -2202,9 +2172,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
                         : "Enable advanced search syntax"
                     }
                     title={
-                      advancedSearchEnabled
-                        ? "Advanced syntax enabled"
-                        : "Advanced syntax disabled"
+                      advancedSearchEnabled ? "Advanced syntax enabled" : "Advanced syntax disabled"
                     }
                   >
                     <svg
@@ -2364,9 +2332,9 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
             </div>
           ) : mainView === "help" ? (
             <ShortcutsDialog
-              shortcutItems={shortcutItems}
-              commonSyntaxItems={commonSyntaxItems}
-              advancedSyntaxItems={advancedSyntaxItems}
+              shortcutItems={SHORTCUT_ITEMS}
+              commonSyntaxItems={COMMON_SYNTAX_ITEMS}
+              advancedSyntaxItems={ADVANCED_SYNTAX_ITEMS}
             />
           ) : (
             <SettingsView

@@ -55,7 +55,12 @@ export type BookmarkReconciliationResult = {
 };
 
 export type BookmarkStore = {
-  listProjectBookmarks: (projectId: string, query?: string, searchMode?: SearchMode) => StoredBookmark[];
+  listProjectBookmarks: (
+    projectId: string,
+    query?: string,
+    searchMode?: SearchMode,
+  ) => StoredBookmark[];
+  countProjectBookmarks: (projectId: string) => number;
   getBookmark: (projectId: string, messageId: string) => StoredBookmark | null;
   upsertBookmark: (snapshot: Omit<BookmarkSnapshot, "snapshotVersion" | "snapshotJson">) => void;
   removeBookmark: (projectId: string, messageId: string) => boolean;
@@ -115,6 +120,7 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
      FROM bookmarks
      WHERE project_id = ? AND message_id = ?`,
   );
+  const countStmt = db.prepare("SELECT COUNT(*) as cnt FROM bookmarks WHERE project_id = ?");
 
   const upsertStmt = db.prepare(
     `INSERT INTO bookmarks (
@@ -203,6 +209,10 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
            ORDER BY b.message_created_at DESC, b.message_id DESC`,
         )
         .all(...params) as StoredBookmark[];
+    },
+    countProjectBookmarks: (projectId) => {
+      const row = countStmt.get(projectId) as { cnt: number } | undefined;
+      return Number(row?.cnt ?? 0);
     },
     getBookmark: (projectId, messageId) => {
       const row = getStmt.get(projectId, messageId) as StoredBookmark | undefined;

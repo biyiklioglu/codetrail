@@ -1,9 +1,7 @@
-import type { Provider } from "../contracts/canonical";
+import { PROVIDER_VALUES, type Provider } from "../contracts/canonical";
 
 export type SystemMessageRegexRules = Record<Provider, string[]>;
 export type SystemMessageRegexRuleOverrides = Partial<Record<Provider, string[]>>;
-
-const PROVIDERS: Provider[] = ["claude", "codex", "gemini", "cursor"];
 
 export const DEFAULT_SYSTEM_MESSAGE_REGEX_RULES: SystemMessageRegexRules = {
   claude: ["^<command-name>", "^<local-command-stdout>", "^<local-command-caveat>"],
@@ -29,7 +27,7 @@ export function resolveSystemMessageRegexRules(
     return resolved;
   }
 
-  for (const provider of PROVIDERS) {
+  for (const provider of PROVIDER_VALUES) {
     if (!Object.prototype.hasOwnProperty.call(overrides, provider)) {
       continue;
     }

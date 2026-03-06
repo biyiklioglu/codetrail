@@ -1,5 +1,9 @@
-import type { MessageCategory } from "@codetrail/core";
-import type { IpcResponse } from "@codetrail/core";
+import type {
+  IpcResponse,
+  MessageCategory,
+  Provider,
+  SystemMessageRegexRules,
+} from "@codetrail/core";
 
 import {
   type MonoFontFamily,
@@ -17,9 +21,6 @@ import { openPath } from "../lib/pathActions";
 import { prettyCategory } from "../lib/viewUtils";
 import { ToolbarIcon } from "./ToolbarIcon";
 type SettingsInfo = IpcResponse<"app:getSettingsInfo">;
-type DiscoveryProvider = "claude" | "codex" | "gemini" | "cursor";
-type RegexRuleProvider = "claude" | "codex" | "gemini" | "cursor";
-type SystemMessageRegexRules = Record<RegexRuleProvider, string[]>;
 
 const MONO_FONT_OPTIONS: Array<{ value: MonoFontFamily; label: string }> = [
   ...UI_MONO_FONT_VALUES.map((value) => ({
@@ -78,13 +79,9 @@ export function SettingsView({
   expandedByDefaultCategories: MessageCategory[];
   onToggleExpandedByDefault: (category: MessageCategory) => void;
   systemMessageRegexRules: SystemMessageRegexRules;
-  onAddSystemMessageRegexRule: (provider: RegexRuleProvider) => void;
-  onUpdateSystemMessageRegexRule: (
-    provider: RegexRuleProvider,
-    index: number,
-    pattern: string,
-  ) => void;
-  onRemoveSystemMessageRegexRule: (provider: RegexRuleProvider, index: number) => void;
+  onAddSystemMessageRegexRule: (provider: Provider) => void;
+  onUpdateSystemMessageRegexRule: (provider: Provider, index: number, pattern: string) => void;
+  onRemoveSystemMessageRegexRule: (provider: Provider, index: number) => void;
 }) {
   const storageRows = info
     ? [
@@ -95,7 +92,7 @@ export function SettingsView({
       ]
     : [];
 
-  const discoveryRows: Array<{ label: string; value: string; provider: DiscoveryProvider }> = info
+  const discoveryRows: Array<{ label: string; value: string; provider: Provider }> = info
     ? [
         { label: "Claude root", value: info.discovery.claudeRoot, provider: "claude" },
         { label: "Codex root", value: info.discovery.codexRoot, provider: "codex" },
@@ -386,7 +383,7 @@ function SettingsInfoRow({
 }: {
   label: string;
   value: string;
-  provider?: DiscoveryProvider;
+  provider?: Provider;
 }) {
   return (
     <div className={`settings-row${provider ? " settings-row-discovery" : ""}`}>
@@ -420,7 +417,9 @@ function SettingsInfoRow({
           onClick={() => {
             void openPath(value).then((result) => {
               if (!result.ok) {
-                console.error(`[codetrail] failed opening settings path '${label}': ${result.error}`);
+                console.error(
+                  `[codetrail] failed opening settings path '${label}': ${result.error}`,
+                );
               }
             });
           }}

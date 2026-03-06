@@ -11,7 +11,6 @@
     "test": "ELECTRON_RUN_AS_NODE=1 ./apps/desktop/node_modules/.bin/electron ./node_modules/vitest/vitest.mjs run",
     "test:coverage": "ELECTRON_RUN_AS_NODE=1 ./apps/desktop/node_modules/.bin/electron ./node_modules/vitest/vitest.mjs run --coverage",
     "test:watch": "ELECTRON_RUN_AS_NODE=1 ./apps/desktop/node_modules/.bin/electron ./node_modules/vitest/vitest.mjs",
-    "test:e2e": "playwright test",
     "desktop:build": "bun run --cwd apps/desktop build",
     "desktop:start": "bun run --cwd apps/desktop start",
     "desktop:start:verbose": "bun run --cwd apps/desktop start:verbose",
@@ -23,7 +22,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
-    "@playwright/test": "1.51.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

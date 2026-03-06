@@ -1,4 +1,4 @@
-import type { MessageCategory, Provider } from "../contracts/canonical";
+import { PROVIDER_VALUES, type MessageCategory, type Provider } from "../contracts/canonical";
 import {
   makeEmptyCategoryCounts,
   normalizeMessageCategories,
@@ -52,8 +52,6 @@ JOIN messages m ON m.id = message_fts.message_id
 JOIN sessions s ON s.id = m.session_id
 LEFT JOIN projects p ON p.id = s.project_id
 `;
-const PROVIDERS: Provider[] = ["claude", "codex", "gemini", "cursor"];
-
 export function searchMessages(
   db: SqliteDatabase,
   input: SearchMessagesInput,
@@ -227,7 +225,7 @@ function buildFilters(
 function normalizeProviders(values: string[]): Provider[] {
   const selected = new Set<Provider>();
   for (const value of values) {
-    if (PROVIDERS.includes(value as Provider)) {
+    if (PROVIDER_VALUES.includes(value as Provider)) {
       selected.add(value as Provider);
     }
   }
