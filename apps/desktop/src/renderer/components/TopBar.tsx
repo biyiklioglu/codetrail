@@ -3,7 +3,7 @@ import { ToolbarIcon } from "./ToolbarIcon";
 export function TopBar({
   mainView,
   theme,
-  refreshing,
+  indexing,
   focusMode,
   focusDisabled,
   onToggleSearchView,
@@ -16,7 +16,7 @@ export function TopBar({
 }: {
   mainView: "history" | "search" | "settings" | "help";
   theme: "light" | "dark";
-  refreshing: boolean;
+  indexing: boolean;
   focusMode: boolean;
   focusDisabled: boolean;
   onToggleSearchView: () => void;
@@ -53,20 +53,20 @@ export function TopBar({
           type="button"
           className="tb-btn"
           onClick={onIncrementalRefresh}
-          disabled={refreshing}
-          aria-label={refreshing ? "Refreshing index" : "Refresh index"}
-          title={refreshing ? "Refreshing index..." : "Refresh index"}
+          disabled={indexing}
+          aria-label={indexing ? "Indexing in progress" : "Refresh index"}
+          title={indexing ? "Indexing in progress..." : "Refresh index"}
         >
           <ToolbarIcon name="refresh" />
-          {refreshing ? "Refreshing..." : "Refresh"}
+          {indexing ? "Indexing..." : "Refresh"}
         </button>
         <button
           type="button"
           className="tb-btn"
           onClick={onForceRefresh}
-          disabled={refreshing}
+          disabled={indexing}
           aria-label="Force reindex"
-          title="Force full reindex"
+          title={indexing ? "Indexing in progress..." : "Force full reindex"}
         >
           <ToolbarIcon name="reindex" />
           Reindex

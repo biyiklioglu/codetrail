@@ -76,6 +76,23 @@ const tableStatements = [
     file_mtime_ms INTEGER NOT NULL,
     indexed_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS index_checkpoints (
+    file_path TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    session_identity TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    file_mtime_ms INTEGER NOT NULL,
+    last_offset_bytes INTEGER NOT NULL,
+    last_line_number INTEGER NOT NULL,
+    last_event_index INTEGER NOT NULL,
+    next_message_sequence INTEGER NOT NULL,
+    processing_state_json TEXT NOT NULL,
+    source_metadata_json TEXT NOT NULL,
+    head_hash TEXT NOT NULL,
+    tail_hash TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
     message_id UNINDEXED,
     session_id UNINDEXED,
@@ -94,7 +111,14 @@ const indexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_messages_session_source_id ON messages(session_id, source_id)",
 ] as const;
 
-const dataTables = ["tool_calls", "messages", "sessions", "projects", "indexed_files"] as const;
+const dataTables = [
+  "tool_calls",
+  "messages",
+  "sessions",
+  "projects",
+  "indexed_files",
+  "index_checkpoints",
+] as const;
 
 export function openDatabase(databasePath: string): SqliteDatabase {
   const db = new Database(databasePath);
@@ -167,6 +191,7 @@ function clearAllSchemaObjects(db: SqliteDatabase): void {
   db.exec("DROP TABLE IF EXISTS sessions");
   db.exec("DROP TABLE IF EXISTS projects");
   db.exec("DROP TABLE IF EXISTS indexed_files");
+  db.exec("DROP TABLE IF EXISTS index_checkpoints");
   db.exec("DROP TABLE IF EXISTS meta");
 }
 

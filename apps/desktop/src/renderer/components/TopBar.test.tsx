@@ -21,7 +21,7 @@ describe("TopBar", () => {
       <TopBar
         mainView="history"
         theme="light"
-        refreshing={false}
+        indexing={false}
         focusMode={false}
         focusDisabled={false}
         onToggleSearchView={onToggleSearchView}
@@ -65,7 +65,7 @@ describe("TopBar", () => {
       <TopBar
         mainView="search"
         theme="dark"
-        refreshing={true}
+        indexing={true}
         focusMode={true}
         focusDisabled={true}
         onToggleSearchView={vi.fn()}
@@ -86,7 +86,7 @@ describe("TopBar", () => {
       "title",
       "Exit focus mode (Cmd/Ctrl+Shift+M)",
     );
-    expect(screen.getByRole("button", { name: "Refreshing index" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Indexing in progress" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Force reindex" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Exit focus mode" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Switch to Light theme" })).toBeInTheDocument();

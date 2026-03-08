@@ -48,36 +48,67 @@ type ParseProviderPayloadArgs = {
   diagnostics: ParserDiagnostic[];
 };
 
+export type ParseProviderEventArgs = {
+  provider: Provider;
+  sessionId: string;
+  eventIndex: number;
+  event: unknown;
+  diagnostics: ParserDiagnostic[];
+  sequence: number;
+};
+
+export type ParseProviderEventResult = {
+  messages: ParsedProviderMessage[];
+  nextSequence: number;
+};
+
 // Each provider emits different event shapes, but all parsers normalize into the same stream of
 // split messages so indexing/search can stay provider-agnostic.
 export function parseProviderPayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
-  const { provider } = args;
-
-  if (provider === "claude") {
-    return parseClaudePayload(args);
-  }
-
-  if (provider === "codex") {
-    return parseCodexPayload(args);
-  }
-
-  if (provider === "cursor") {
-    return parseCursorPayload(args);
-  }
-
-  return parseGeminiPayload(args);
-}
-
-function parseClaudePayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
-  const { provider, sessionId, payload, diagnostics } = args;
-  const events = extractEvents(payload);
+  const events = args.provider === "gemini" ? extractGeminiEvents(args.payload) : extractEvents(args.payload);
   const output: ParsedProviderMessage[] = [];
   let sequence = 0;
 
   for (const [eventIndex, event] of events.entries()) {
-    const eventRecord = asRecord(event);
-    if (!eventRecord) {
-      sequence = pushNonObjectEvent({
+    const result = parseProviderEvent({
+      provider: args.provider,
+      sessionId: args.sessionId,
+      eventIndex,
+      event,
+      diagnostics: args.diagnostics,
+      sequence,
+    });
+    output.push(...result.messages);
+    sequence = result.nextSequence;
+  }
+
+  return output;
+}
+
+export function parseProviderEvent(args: ParseProviderEventArgs): ParseProviderEventResult {
+  if (args.provider === "claude") {
+    return parseClaudeEvent(args);
+  }
+
+  if (args.provider === "codex") {
+    return parseCodexEvent(args);
+  }
+
+  if (args.provider === "cursor") {
+    return parseCursorEvent(args);
+  }
+
+  return parseGeminiEvent(args);
+}
+
+function parseClaudeEvent(args: ParseProviderEventArgs): ParseProviderEventResult {
+  const { provider, sessionId, eventIndex, event, diagnostics, sequence } = args;
+  const output: ParsedProviderMessage[] = [];
+  const eventRecord = asRecord(event);
+  if (!eventRecord) {
+    return {
+      messages: output,
+      nextSequence: pushNonObjectEvent({
         output,
         provider,
         sessionId,
@@ -85,47 +116,42 @@ function parseClaudePayload(args: ParseProviderPayloadArgs): ParsedProviderMessa
         event,
         diagnostics,
         sequence,
-      });
-      continue;
-    }
+      }),
+    };
+  }
 
-    const messageRecord = asRecord(eventRecord.message);
-    const normalized = messageRecord ?? eventRecord;
-    const sourceType = lowerString(
-      eventRecord.type ??
-        normalized.role ??
-        normalized.type ??
-        normalized.author ??
-        normalized.sender,
-    );
-    if (
-      sourceType === "progress" ||
-      sourceType === "file-history-snapshot" ||
-      sourceType === "queue-operation"
-    ) {
-      continue;
-    }
+  const messageRecord = asRecord(eventRecord.message);
+  const normalized = messageRecord ?? eventRecord;
+  const sourceType = lowerString(
+    eventRecord.type ?? normalized.role ?? normalized.type ?? normalized.author ?? normalized.sender,
+  );
+  if (
+    sourceType === "progress" ||
+    sourceType === "file-history-snapshot" ||
+    sourceType === "queue-operation"
+  ) {
+    return { messages: output, nextSequence: sequence };
+  }
 
-    const createdAt = firstKnownTimestamp(eventRecord, normalized);
-    const usage = extractTokenUsage(messageRecord ?? eventRecord);
-    const baseId =
-      readString(eventRecord.uuid) ??
-      readString(eventRecord.id) ??
-      readString(normalized.id) ??
-      null;
-    const segments = dedupeSegments(parseClaudeSegments(sourceType, normalized));
-    if (segments.length === 0) {
-      diagnostics.push({
-        severity: "warning",
-        code: "parser.unknown_event_shape",
-        provider,
-        sessionId,
-        eventIndex,
-        message: "Event shape did not match known patterns; normalized to system message.",
-      });
-    }
+  const createdAt = firstKnownTimestamp(eventRecord, normalized);
+  const usage = extractTokenUsage(messageRecord ?? eventRecord);
+  const baseId =
+    readString(eventRecord.uuid) ?? readString(eventRecord.id) ?? readString(normalized.id) ?? null;
+  const segments = dedupeSegments(parseClaudeSegments(sourceType, normalized));
+  if (segments.length === 0) {
+    diagnostics.push({
+      severity: "warning",
+      code: "parser.unknown_event_shape",
+      provider,
+      sessionId,
+      eventIndex,
+      message: "Event shape did not match known patterns; normalized to system message.",
+    });
+  }
 
-    sequence = pushSplitMessages({
+  return {
+    messages: output,
+    nextSequence: pushSplitMessages({
       output,
       sessionId,
       sequence,
@@ -134,22 +160,18 @@ function parseClaudePayload(args: ParseProviderPayloadArgs): ParsedProviderMessa
       tokenUsage: usage,
       segments,
       fallbackRaw: event,
-    });
-  }
-
-  return output;
+    }),
+  };
 }
 
-function parseCodexPayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
-  const { provider, sessionId, payload, diagnostics } = args;
-  const events = extractEvents(payload);
+function parseCodexEvent(args: ParseProviderEventArgs): ParseProviderEventResult {
+  const { provider, sessionId, eventIndex, event, diagnostics, sequence } = args;
   const output: ParsedProviderMessage[] = [];
-  let sequence = 0;
-
-  for (const [eventIndex, event] of events.entries()) {
-    const eventRecord = asRecord(event);
-    if (!eventRecord) {
-      sequence = pushNonObjectEvent({
+  const eventRecord = asRecord(event);
+  if (!eventRecord) {
+    return {
+      messages: output,
+      nextSequence: pushNonObjectEvent({
         output,
         provider,
         sessionId,
@@ -157,21 +179,21 @@ function parseCodexPayload(args: ParseProviderPayloadArgs): ParsedProviderMessag
         event,
         diagnostics,
         sequence,
-      });
-      continue;
+      }),
+    };
+  }
+
+  const eventType = lowerString(eventRecord.type);
+  const eventKind = lowerString(eventRecord.kind ?? eventRecord.event_type);
+  if (!eventType && eventKind) {
+    const segments = parseSyntheticCodexSegments(eventKind, eventRecord);
+    if (segments.length === 0) {
+      return { messages: output, nextSequence: sequence };
     }
 
-    const eventType = lowerString(eventRecord.type);
-    const eventKind = lowerString(eventRecord.kind ?? eventRecord.event_type);
-    if (!eventType && eventKind) {
-      // Older/synthetic Codex records sometimes encode the interesting part in "kind" rather than
-      // the response_item payload shape used by newer transcripts.
-      const segments = parseSyntheticCodexSegments(eventKind, eventRecord);
-      if (segments.length === 0) {
-        continue;
-      }
-
-      sequence = pushSplitMessages({
+    return {
+      messages: output,
+      nextSequence: pushSplitMessages({
         output,
         sessionId,
         sequence,
@@ -180,35 +202,33 @@ function parseCodexPayload(args: ParseProviderPayloadArgs): ParsedProviderMessag
         tokenUsage: extractTokenUsage(eventRecord),
         segments: dedupeSegments(segments),
         fallbackRaw: event,
-      });
-      continue;
-    }
+      }),
+    };
+  }
 
-    if (eventType === "turn_context") {
-      continue;
-    }
+  if (eventType === "turn_context" || eventType !== "response_item") {
+    return { messages: output, nextSequence: sequence };
+  }
 
-    if (eventType !== "response_item") {
-      continue;
-    }
+  const payloadRecord = asRecord(eventRecord.payload);
+  if (!payloadRecord) {
+    return { messages: output, nextSequence: sequence };
+  }
 
-    const payloadRecord = asRecord(eventRecord.payload);
-    if (!payloadRecord) {
-      continue;
-    }
+  const payloadType = lowerString(payloadRecord.type);
+  const createdAt = extractEventTimestamp(eventRecord);
+  const tokenUsage = extractTokenUsage(payloadRecord);
+  const callId = readString(payloadRecord.call_id);
+  const baseId =
+    readString(payloadRecord.id) ?? (callId && payloadType ? `${callId}:${payloadType}` : callId);
+  const segments = parseCodexSegments(payloadType, payloadRecord, sessionId, sequence);
+  if (segments.length === 0) {
+    return { messages: output, nextSequence: sequence };
+  }
 
-    const payloadType = lowerString(payloadRecord.type);
-    const createdAt = extractEventTimestamp(eventRecord);
-    const tokenUsage = extractTokenUsage(payloadRecord);
-    const callId = readString(payloadRecord.call_id);
-    const baseId =
-      readString(payloadRecord.id) ?? (callId && payloadType ? `${callId}:${payloadType}` : callId);
-    const segments = parseCodexSegments(payloadType, payloadRecord, sessionId, sequence);
-    if (segments.length === 0) {
-      continue;
-    }
-
-    sequence = pushSplitMessages({
+  return {
+    messages: output,
+    nextSequence: pushSplitMessages({
       output,
       sessionId,
       sequence,
@@ -217,22 +237,18 @@ function parseCodexPayload(args: ParseProviderPayloadArgs): ParsedProviderMessag
       tokenUsage,
       segments: dedupeSegments(segments),
       fallbackRaw: event,
-    });
-  }
-
-  return output;
+    }),
+  };
 }
 
-function parseGeminiPayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
-  const { provider, sessionId, payload, diagnostics } = args;
-  const events = extractGeminiEvents(payload);
+function parseGeminiEvent(args: ParseProviderEventArgs): ParseProviderEventResult {
+  const { provider, sessionId, eventIndex, event, diagnostics, sequence } = args;
   const output: ParsedProviderMessage[] = [];
-  let sequence = 0;
-
-  for (const [eventIndex, event] of events.entries()) {
-    const eventRecord = asRecord(event);
-    if (!eventRecord) {
-      sequence = pushNonObjectEvent({
+  const eventRecord = asRecord(event);
+  if (!eventRecord) {
+    return {
+      messages: output,
+      nextSequence: pushNonObjectEvent({
         output,
         provider,
         sessionId,
@@ -240,46 +256,48 @@ function parseGeminiPayload(args: ParseProviderPayloadArgs): ParsedProviderMessa
         event,
         diagnostics,
         sequence,
-      });
-      continue;
-    }
+      }),
+    };
+  }
 
-    const messageType = lowerString(eventRecord.type);
-    const role = lowerString(eventRecord.author ?? eventRecord.role ?? eventRecord.sender);
-    const createdAt = extractEventTimestamp(eventRecord);
-    const usage = extractTokenUsage(eventRecord);
-    const baseId = readString(eventRecord.id);
+  const messageType = lowerString(eventRecord.type);
+  const role = lowerString(eventRecord.author ?? eventRecord.role ?? eventRecord.sender);
+  const createdAt = extractEventTimestamp(eventRecord);
+  const usage = extractTokenUsage(eventRecord);
+  const baseId = readString(eventRecord.id);
 
-    let segments: EventSegment[];
-    if (messageType === "user" || (!messageType && role === "user")) {
-      segments = parseGeminiUserSegments(eventRecord);
-    } else if (
-      messageType === "gemini" ||
-      messageType === "assistant" ||
-      messageType === "model" ||
-      (!messageType && (role === "assistant" || role === "model"))
-    ) {
-      segments = parseGeminiAssistantSegments(eventRecord);
-    } else if (messageType === "info" || messageType === "system" || messageType === "summary") {
-      const text = extractPrimaryText(eventRecord);
-      segments = text.length > 0 ? [{ category: "system", content: text }] : [];
-    } else {
-      segments = parseGeminiGenericSegments(eventRecord);
-    }
+  let segments: EventSegment[];
+  if (messageType === "user" || (!messageType && role === "user")) {
+    segments = parseGeminiUserSegments(eventRecord);
+  } else if (
+    messageType === "gemini" ||
+    messageType === "assistant" ||
+    messageType === "model" ||
+    (!messageType && (role === "assistant" || role === "model"))
+  ) {
+    segments = parseGeminiAssistantSegments(eventRecord);
+  } else if (messageType === "info" || messageType === "system" || messageType === "summary") {
+    const text = extractPrimaryText(eventRecord);
+    segments = text.length > 0 ? [{ category: "system", content: text }] : [];
+  } else {
+    segments = parseGeminiGenericSegments(eventRecord);
+  }
 
-    const normalizedSegments = dedupeSegments(segments);
-    if (normalizedSegments.length === 0) {
-      diagnostics.push({
-        severity: "warning",
-        code: "parser.unknown_event_shape",
-        provider,
-        sessionId,
-        eventIndex,
-        message: "Event shape did not match known patterns; normalized to system message.",
-      });
-    }
+  const normalizedSegments = dedupeSegments(segments);
+  if (normalizedSegments.length === 0) {
+    diagnostics.push({
+      severity: "warning",
+      code: "parser.unknown_event_shape",
+      provider,
+      sessionId,
+      eventIndex,
+      message: "Event shape did not match known patterns; normalized to system message.",
+    });
+  }
 
-    sequence = pushSplitMessages({
+  return {
+    messages: output,
+    nextSequence: pushSplitMessages({
       output,
       sessionId,
       sequence,
@@ -288,22 +306,18 @@ function parseGeminiPayload(args: ParseProviderPayloadArgs): ParsedProviderMessa
       tokenUsage: usage,
       segments: normalizedSegments,
       fallbackRaw: event,
-    });
-  }
-
-  return output;
+    }),
+  };
 }
 
-function parseCursorPayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
-  const { provider, sessionId, payload, diagnostics } = args;
-  const events = extractEvents(payload);
+function parseCursorEvent(args: ParseProviderEventArgs): ParseProviderEventResult {
+  const { provider, sessionId, eventIndex, event, diagnostics, sequence } = args;
   const output: ParsedProviderMessage[] = [];
-  let sequence = 0;
-
-  for (const [eventIndex, event] of events.entries()) {
-    const eventRecord = asRecord(event);
-    if (!eventRecord) {
-      sequence = pushNonObjectEvent({
+  const eventRecord = asRecord(event);
+  if (!eventRecord) {
+    return {
+      messages: output,
+      nextSequence: pushNonObjectEvent({
         output,
         provider,
         sessionId,
@@ -311,41 +325,43 @@ function parseCursorPayload(args: ParseProviderPayloadArgs): ParsedProviderMessa
         event,
         diagnostics,
         sequence,
-      });
-      continue;
-    }
+      }),
+    };
+  }
 
-    const messageRecord = asRecord(eventRecord.message);
-    const role = lowerString(
-      eventRecord.role ??
-        messageRecord?.role ??
-        eventRecord.author ??
-        messageRecord?.author ??
-        eventRecord.sender ??
-        messageRecord?.sender,
-    );
-    const createdAt = firstKnownTimestamp(eventRecord, messageRecord ?? eventRecord);
-    const usage = extractTokenUsage(messageRecord ?? eventRecord);
-    const baseId =
-      readString(eventRecord.id) ??
-      readString(eventRecord.uuid) ??
-      readString(messageRecord?.id) ??
-      readString(messageRecord?.uuid) ??
-      null;
-    const segments = dedupeSegments(parseCursorSegments(role, messageRecord ?? eventRecord));
+  const messageRecord = asRecord(eventRecord.message);
+  const role = lowerString(
+    eventRecord.role ??
+      messageRecord?.role ??
+      eventRecord.author ??
+      messageRecord?.author ??
+      eventRecord.sender ??
+      messageRecord?.sender,
+  );
+  const createdAt = firstKnownTimestamp(eventRecord, messageRecord ?? eventRecord);
+  const usage = extractTokenUsage(messageRecord ?? eventRecord);
+  const baseId =
+    readString(eventRecord.id) ??
+    readString(eventRecord.uuid) ??
+    readString(messageRecord?.id) ??
+    readString(messageRecord?.uuid) ??
+    null;
+  const segments = dedupeSegments(parseCursorSegments(role, messageRecord ?? eventRecord));
 
-    if (segments.length === 0) {
-      diagnostics.push({
-        severity: "warning",
-        code: "parser.unknown_event_shape",
-        provider,
-        sessionId,
-        eventIndex,
-        message: "Event shape did not match known patterns; normalized to system message.",
-      });
-    }
+  if (segments.length === 0) {
+    diagnostics.push({
+      severity: "warning",
+      code: "parser.unknown_event_shape",
+      provider,
+      sessionId,
+      eventIndex,
+      message: "Event shape did not match known patterns; normalized to system message.",
+    });
+  }
 
-    sequence = pushSplitMessages({
+  return {
+    messages: output,
+    nextSequence: pushSplitMessages({
       output,
       sessionId,
       sequence,
@@ -354,10 +370,8 @@ function parseCursorPayload(args: ParseProviderPayloadArgs): ParsedProviderMessa
       tokenUsage: usage,
       segments,
       fallbackRaw: event,
-    });
-  }
-
-  return output;
+    }),
+  };
 }
 
 function parseCursorSegments(role: string | null, event: Record<string, unknown>): EventSegment[] {

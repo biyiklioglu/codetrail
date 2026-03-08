@@ -6,6 +6,7 @@ import { app, ipcMain, shell } from "electron";
 import {
   DATABASE_SCHEMA_VERSION,
   DEFAULT_DISCOVERY_CONFIG,
+  type IndexingFileIssue,
   initializeDatabase,
   resolveSystemMessageRegexRules,
 } from "@codetrail/core";
@@ -20,6 +21,8 @@ export type BootstrapOptions = {
   dbPath?: string;
   runStartupIndexing?: boolean;
   appStateStore?: AppStateStore;
+  onIndexingFileIssue?: (issue: IndexingFileIssue) => void;
+  onBackgroundError?: (message: string, error: unknown, details?: Record<string, unknown>) => void;
 };
 
 export type BootstrapResult = {
@@ -50,6 +53,7 @@ export async function bootstrapMainProcess(
     bookmarksDbPath,
     getSystemMessageRegexRules: () =>
       options.appStateStore?.getPaneState()?.systemMessageRegexRules,
+    ...(options.onIndexingFileIssue ? { onFileIssue: options.onIndexingFileIssue } : {}),
   });
   if (activeQueryService) {
     activeQueryService.close();
@@ -108,6 +112,7 @@ export async function bootstrapMainProcess(
       const job = await indexingRunner.enqueue({ force: payload.force });
       return { jobId: job.jobId };
     },
+    "indexer:getStatus": () => indexingRunner.getStatus(),
     "projects:list": (payload) => queryService.listProjects(payload),
     "projects:getCombinedDetail": (payload) => queryService.getProjectCombinedDetail(payload),
     "sessions:list": (payload) => queryService.listSessions(payload),
@@ -226,6 +231,10 @@ export async function bootstrapMainProcess(
 
   if (options.runStartupIndexing ?? true) {
     void indexingRunner.enqueue({ force: false }).catch((error: unknown) => {
+      if (options.onBackgroundError) {
+        options.onBackgroundError("startup incremental indexing failed", error);
+        return;
+      }
       console.error("[codetrail] startup incremental indexing failed", error);
     });
   }

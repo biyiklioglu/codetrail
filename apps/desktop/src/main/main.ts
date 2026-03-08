@@ -32,8 +32,8 @@ function getDebugLogPath(): string {
   return debugLogPathCache;
 }
 
-function writeDebugLog(message: string, details?: unknown): void {
-  if (!verboseLoggingEnabled) {
+function writeDebugLog(message: string, details?: unknown, options?: { force?: boolean }): void {
+  if (!verboseLoggingEnabled && options?.force !== true) {
     return;
   }
 
@@ -55,6 +55,30 @@ function writeDebugLog(message: string, details?: unknown): void {
   } catch (error) {
     console.error("[codetrail] failed writing debug log", error);
   }
+}
+
+function serializeError(error: unknown): unknown {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      ...(error.cause !== undefined ? { cause: serializeError(error.cause) } : {}),
+    };
+  }
+  return error;
+}
+
+function logAppError(message: string, error: unknown, details?: Record<string, unknown>): void {
+  console.error(`[codetrail] ${message}`, error);
+  writeDebugLog(
+    message,
+    {
+      ...(details ?? {}),
+      error: serializeError(error),
+    },
+    { force: true },
+  );
 }
 
 function createWindow(appStateStore: AppStateStore): BrowserWindow {
@@ -113,7 +137,15 @@ function createWindow(appStateStore: AppStateStore): BrowserWindow {
   });
   if (verboseLoggingEnabled) {
     const logRenderer = (message: string, details?: unknown) => {
-      writeDebugLog(message, details);
+      const force =
+        typeof details === "object" &&
+        details !== null &&
+        "level" in details &&
+        typeof (details as { level?: unknown }).level === "number" &&
+        ((details as { level: number }).level >= 2 ||
+          (typeof (details as { message?: unknown }).message === "string" &&
+            String((details as { message?: unknown }).message).includes("[codetrail]")));
+      writeDebugLog(message, details, force ? { force: true } : undefined);
     };
 
     mainWindow.webContents.on("did-start-loading", () => {
@@ -225,16 +257,25 @@ if (hasSingleInstanceLock) {
     }
     try {
       writeDebugLog("bootstrapMainProcess start");
-      await bootstrapMainProcess({ appStateStore });
+      await bootstrapMainProcess({
+        appStateStore,
+        onIndexingFileIssue: (issue) => {
+          logAppError("indexing file failure", issue.error, {
+            provider: issue.provider,
+            sessionId: issue.sessionId,
+            filePath: issue.filePath,
+            stage: issue.stage,
+          });
+        },
+        onBackgroundError: (message, error, details) => {
+          logAppError(message, error, details);
+        },
+      });
       writeDebugLog("bootstrapMainProcess success");
       mainWindowRef = createWindow(appStateStore);
       writeDebugLog("createWindow success");
     } catch (error) {
-      console.error("[codetrail] bootstrap failure", error);
-      writeDebugLog(
-        "bootstrap failure",
-        error instanceof Error ? (error.stack ?? error.message) : error,
-      );
+      logAppError("bootstrap failure", error);
       app.exit(1);
       return;
     }
@@ -271,6 +312,14 @@ if (hasSingleInstanceLock) {
     }
   });
 }
+
+process.on("uncaughtException", (error) => {
+  logAppError("uncaught exception", error);
+});
+
+process.on("unhandledRejection", (reason) => {
+  logAppError("unhandled rejection", reason);
+});
 
 function resolveLocalRendererHtmlPath(): string | null {
   const moduleDir = dirname(fileURLToPath(import.meta.url));

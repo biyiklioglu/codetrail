@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { closeSync, openSync, readFileSync, readSync } from "node:fs";
 
 import { type MessageCategory, PROVIDER_VALUES, type Provider } from "../contracts/canonical";
 import {
@@ -8,7 +9,7 @@ import {
   openDatabase,
 } from "../db/bootstrap";
 import { DEFAULT_DISCOVERY_CONFIG, type DiscoveryConfig, discoverSessionFiles } from "../discovery";
-import { parseSession } from "../parsing";
+import { type ParserDiagnostic, parseSession, parseSessionEvent } from "../parsing";
 import { asArray, asRecord, readString } from "../parsing/helpers";
 
 import { makeMessageId, makeProjectId, makeSessionId, makeToolCallId } from "./ids";
@@ -45,6 +46,7 @@ export type IndexingDependencies = {
   clearIndexedData?: typeof clearIndexedData;
   readFileText?: ReadFileText;
   now?: () => Date;
+  onFileIssue?: (issue: IndexingFileIssue) => void;
 };
 
 type ResolvedIndexingDependencies = {
@@ -54,6 +56,7 @@ type ResolvedIndexingDependencies = {
   clearIndexedData: typeof clearIndexedData;
   readFileText: ReadFileText;
   now: () => Date;
+  onFileIssue: (issue: IndexingFileIssue) => void;
 };
 
 type IndexedFileRow = {
@@ -64,14 +67,137 @@ type IndexedFileRow = {
   file_mtime_ms: number;
 };
 
+type IndexCheckpointRow = {
+  file_path: string;
+  provider: Provider;
+  session_id: string;
+  session_identity: string;
+  file_size: number;
+  file_mtime_ms: number;
+  last_offset_bytes: number;
+  last_line_number: number;
+  last_event_index: number;
+  next_message_sequence: number;
+  processing_state_json: string;
+  source_metadata_json: string;
+  head_hash: string;
+  tail_hash: string;
+};
+
 type SessionFileRow = {
   id: string;
   file_path: string;
 };
 
 type IndexedMessage = ReturnType<typeof parseSession>["messages"][number];
+type SourceMetadata = {
+  models: string[];
+  gitBranch: string | null;
+  cwd: string | null;
+};
+type SourceMetadataAccumulator = {
+  models: Set<string>;
+  gitBranch: string | null;
+  cwd: string | null;
+};
+type SerializedSourceMetadataAccumulator = {
+  models: string[];
+  gitBranch: string | null;
+  cwd: string | null;
+};
+type SessionAggregateState = {
+  messageCount: number;
+  tokenInputTotal: number;
+  tokenOutputTotal: number;
+  startedAtMs: number | null;
+  endedAtMs: number | null;
+  title: string;
+  titleRank: number | null;
+};
+type MessageProcessingState = {
+  provider: Provider;
+  fileMtimeMs: number;
+  systemMessageRules: RegExp[];
+  previousMessage: IndexedMessage | null;
+  previousCursorTimestampMs: number;
+  assistantThinkingRunRoot: string | null;
+  assistantThinkingRunBaseline: IndexedMessage | null;
+  aggregate: SessionAggregateState;
+};
+type SerializableMessageProcessingState = {
+  previousMessage: IndexedMessage | null;
+  previousCursorTimestampMs: number;
+  assistantThinkingRunRoot: string | null;
+  assistantThinkingRunBaseline: IndexedMessage | null;
+  aggregate: SessionAggregateState;
+};
+type StreamCheckpointState = {
+  filePath: string;
+  provider: Provider;
+  sessionDbId: string;
+  sessionIdentity: string;
+  fileSize: number;
+  fileMtimeMs: number;
+  lastOffsetBytes: number;
+  lastLineNumber: number;
+  lastEventIndex: number;
+  nextMessageSequence: number;
+  processingState: SerializableMessageProcessingState;
+  sourceMetadata: SerializedSourceMetadataAccumulator;
+  headHash: string;
+  tailHash: string;
+};
+type ResumeCheckpoint = {
+  lastOffsetBytes: number;
+  lastLineNumber: number;
+  lastEventIndex: number;
+  nextMessageSequence: number;
+  processingState: SerializableMessageProcessingState;
+  sourceMetadata: SerializedSourceMetadataAccumulator;
+};
+type StreamJsonlResult = {
+  nextOffsetBytes: number;
+  nextLineNumber: number;
+  nextEventIndex: number;
+};
+
+export type IndexingFileIssue = {
+  provider: Provider;
+  sessionId: string;
+  filePath: string;
+  stage: "read" | "parse" | "persist";
+  error: unknown;
+};
+
+type IndexingStatements = {
+  upsertProject: { run: (...args: unknown[]) => unknown };
+  upsertSession: { run: (...args: unknown[]) => unknown };
+  insertMessage: { run: (...args: unknown[]) => unknown };
+  insertMessageFts: { run: (...args: unknown[]) => unknown };
+  insertToolCall: { run: (...args: unknown[]) => unknown };
+  upsertIndexedFile: { run: (...args: unknown[]) => unknown };
+  upsertCheckpoint: { run: (...args: unknown[]) => unknown };
+};
+
+class IndexingFileProcessingError extends Error {
+  readonly issue: IndexingFileIssue;
+
+  constructor(issue: IndexingFileIssue) {
+    super(
+      `[codetrail] failed indexing ${issue.provider} session ${issue.filePath} during ${issue.stage}`,
+    );
+    this.name = "IndexingFileProcessingError";
+    this.issue = issue;
+  }
+}
 
 const MAX_DERIVED_DURATION_MS = 15 * 60 * 1000;
+const JSONL_READ_BUFFER_BYTES = 64 * 1024;
+const JSONL_FINGERPRINT_WINDOW_BYTES = 64 * 1024;
+const MAX_JSONL_LINE_BYTES = 8 * 1024 * 1024;
+const MAX_INDEXED_MESSAGE_CONTENT_BYTES = 256 * 1024;
+const MAX_INDEXED_FTS_CONTENT_BYTES = 32 * 1024;
+const MAX_TOOL_CALL_JSON_BYTES = 64 * 1024;
 
 // Incremental indexing treats the filesystem as source of truth and the SQLite database as a
 // cacheable projection of normalized session history.
@@ -94,6 +220,10 @@ export function runIncrementalIndexing(
 
     const existingRows = listIndexedFiles(db);
     const existingByFilePath = new Map(existingRows.map((row) => [row.file_path, row]));
+    const existingCheckpointRows = listIndexCheckpoints(db);
+    const existingCheckpointByFilePath = new Map(
+      existingCheckpointRows.map((row) => [row.file_path, row]),
+    );
     const existingSessionRows = listSessionFiles(db);
     const existingSessionByFilePath = new Map(
       existingSessionRows.map((row) => [row.file_path, row.id]),
@@ -114,6 +244,8 @@ export function runIncrementalIndexing(
 
         deleteSessionDataForFilePath(db, existing.file_path);
         db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(existing.file_path);
+        db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(existing.file_path);
+        existingCheckpointByFilePath.delete(existing.file_path);
         existingSessionByFilePath.delete(existing.file_path);
         removedFiles += 1;
       }
@@ -213,11 +345,55 @@ export function runIncrementalIndexing(
          file_mtime_ms = excluded.file_mtime_ms,
          indexed_at = excluded.indexed_at`,
     );
+    const upsertCheckpoint = db.prepare(
+      `INSERT INTO index_checkpoints (
+         file_path,
+         provider,
+         session_id,
+         session_identity,
+         file_size,
+         file_mtime_ms,
+         last_offset_bytes,
+         last_line_number,
+         last_event_index,
+         next_message_sequence,
+         processing_state_json,
+         source_metadata_json,
+         head_hash,
+         tail_hash,
+         updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(file_path) DO UPDATE SET
+         provider = excluded.provider,
+         session_id = excluded.session_id,
+         session_identity = excluded.session_identity,
+         file_size = excluded.file_size,
+         file_mtime_ms = excluded.file_mtime_ms,
+         last_offset_bytes = excluded.last_offset_bytes,
+         last_line_number = excluded.last_line_number,
+         last_event_index = excluded.last_event_index,
+         next_message_sequence = excluded.next_message_sequence,
+         processing_state_json = excluded.processing_state_json,
+         source_metadata_json = excluded.source_metadata_json,
+         head_hash = excluded.head_hash,
+         tail_hash = excluded.tail_hash,
+         updated_at = excluded.updated_at`,
+    );
 
     const nowIso = resolvedDependencies.now().toISOString();
+    const statements = {
+      upsertProject,
+      upsertSession,
+      insertMessage,
+      insertMessageFts,
+      insertToolCall,
+      upsertIndexedFile,
+      upsertCheckpoint,
+    };
 
     for (const discovered of discoveredFiles) {
       const existing = existingByFilePath.get(discovered.filePath);
+      const checkpoint = existingCheckpointByFilePath.get(discovered.filePath);
       const sessionDbId = makeSessionId(discovered.provider, discovered.sessionIdentity);
       const existingSessionId = existingSessionByFilePath.get(discovered.filePath);
       const unchanged =
@@ -233,143 +409,52 @@ export function runIncrementalIndexing(
         continue;
       }
 
-      const source = readProviderSource(
-        discovered.provider,
-        discovered.filePath,
-        resolvedDependencies.readFileText,
-      );
-      if (source === null) {
-        diagnostics.errors += 1;
-        continue;
-      }
-
-      let parsed: ReturnType<typeof parseSession>;
-      try {
-        parsed = parseSession({
-          provider: discovered.provider,
-          sessionId: discovered.sourceSessionId,
-          payload: source.parsePayload,
-        });
-      } catch {
-        diagnostics.errors += 1;
-        continue;
-      }
-
-      for (const diagnostic of parsed.diagnostics) {
-        if (diagnostic.severity === "error") {
-          diagnostics.errors += 1;
-        } else {
-          diagnostics.warnings += 1;
-        }
-      }
-
-      const projectId = makeProjectId(discovered.provider, discovered.projectPath);
-      const sourceMeta = extractSourceMetadata(discovered.provider, source.rawPayload);
-      // Normalization happens in stages so each step has one job: provider parsing, optional
-      // system-message overrides, derived duration inference, then timestamp repair.
-      const normalizedMessages = reclassifySystemMessages(
-        parsed.messages,
-        compiledSystemMessageRules.compiledByProvider[discovered.provider],
-      );
-      const messagesWithDuration = deriveOperationDurations(normalizedMessages);
-      const messagesWithTimestamps = normalizeMessageTimestamps(
-        messagesWithDuration,
-        discovered.provider,
-        discovered.fileMtimeMs,
-      );
-      const sessionTitle = deriveSessionTitle(messagesWithTimestamps);
-      const modelNames = sourceMeta.models.join(",");
-      const aggregate = buildSessionAggregate(
-        messagesWithTimestamps.map((message) => ({
-          ...message,
-          id: makeMessageId(sessionDbId, message.id),
-        })),
-      );
-      const persist = db.transaction(() => {
-        deleteSessionDataForFilePath(db, discovered.filePath);
-        deleteSessionData(db, sessionDbId);
-
-        upsertProject.run(
-          projectId,
-          discovered.provider,
-          discovered.projectName,
-          discovered.projectPath,
-          nowIso,
-          nowIso,
-        );
-
-        upsertSession.run(
-          sessionDbId,
-          projectId,
-          discovered.provider,
-          discovered.filePath,
-          sessionTitle || modelNames,
-          modelNames,
-          aggregate.startedAt ?? new Date(discovered.fileMtimeMs).toISOString(),
-          aggregate.endedAt ?? new Date(discovered.fileMtimeMs).toISOString(),
-          aggregate.durationMs,
-          sourceMeta.gitBranch ?? discovered.metadata.gitBranch,
-          sourceMeta.cwd ?? discovered.metadata.cwd,
-          aggregate.messageCount,
-          aggregate.tokenInputTotal,
-          aggregate.tokenOutputTotal,
-        );
-
-        for (const message of messagesWithTimestamps) {
-          const messageId = makeMessageId(sessionDbId, message.id);
-
-          insertMessage.run(
-            messageId,
-            message.id,
-            sessionDbId,
-            message.provider,
-            message.category,
-            message.content,
-            message.createdAt,
-            message.tokenInput,
-            message.tokenOutput,
-            message.operationDurationMs,
-            message.operationDurationSource,
-            message.operationDurationConfidence,
-          );
-
-          insertMessageFts.run(
-            messageId,
-            sessionDbId,
-            message.provider,
-            message.category,
-            message.content,
-          );
-
-          if (message.category !== "tool_use" && message.category !== "tool_edit") {
-            continue;
-          }
-
-          const toolCall = parseToolCallContent(message.content);
-          insertToolCall.run(
-            makeToolCallId(messageId, 0),
-            messageId,
-            toolCall.toolName,
-            toolCall.argsJson,
-            toolCall.resultJson,
-            message.createdAt,
-            null,
-          );
-        }
-
-        upsertIndexedFile.run(
-          discovered.filePath,
-          discovered.provider,
-          discovered.projectPath,
-          discovered.sessionIdentity,
-          discovered.fileSize,
-          discovered.fileMtimeMs,
-          nowIso,
-        );
+      const canResumeFromCheckpoint = shouldResumeFromCheckpoint({
+        discovered,
+        existing,
+        checkpoint,
+        expectedSessionDbId: sessionDbId,
+        existingSessionId,
       });
+      const resumeCheckpoint =
+        canResumeFromCheckpoint && checkpoint ? deserializeResumeCheckpoint(checkpoint) : null;
 
-      persist();
+      try {
+        const fileDiagnostics =
+          discovered.provider === "gemini"
+            ? indexMaterializedSessionFile({
+                db,
+                discovered,
+                sessionDbId,
+                nowIso,
+                readFileText: resolvedDependencies.readFileText,
+                systemMessageRules: compiledSystemMessageRules.compiledByProvider[discovered.provider],
+                statements,
+              })
+            : indexStreamedJsonlSessionFile({
+                db,
+                discovered,
+                sessionDbId,
+                nowIso,
+                systemMessageRules: compiledSystemMessageRules.compiledByProvider[discovered.provider],
+                statements,
+                resumeCheckpoint,
+              });
+        accumulateParserDiagnostics(diagnostics, fileDiagnostics);
+      } catch (error) {
+        diagnostics.errors += 1;
+        resolvedDependencies.onFileIssue(resolveIndexingFileIssue(error, discovered));
+        continue;
+      }
+
       existingSessionByFilePath.set(discovered.filePath, sessionDbId);
+      existingByFilePath.set(discovered.filePath, {
+        file_path: discovered.filePath,
+        provider: discovered.provider,
+        session_identity: discovered.sessionIdentity,
+        file_size: discovered.fileSize,
+        file_mtime_ms: discovered.fileMtimeMs,
+      });
       indexedFiles += 1;
     }
 
@@ -405,7 +490,1182 @@ function resolveIndexingDependencies(
     clearIndexedData: dependencies.clearIndexedData ?? clearIndexedData,
     readFileText: dependencies.readFileText ?? ((filePath) => readFileSync(filePath, "utf8")),
     now: dependencies.now ?? (() => new Date()),
+    onFileIssue: dependencies.onFileIssue ?? defaultOnFileIssue,
   };
+}
+
+function indexMaterializedSessionFile(args: {
+  db: SqliteDatabase;
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  sessionDbId: string;
+  nowIso: string;
+  readFileText: ReadFileText;
+  systemMessageRules: RegExp[];
+  statements: IndexingStatements;
+}): ParserDiagnostic[] {
+  let source: {
+    rawPayload: unknown[] | Record<string, unknown>;
+    parsePayload: unknown[] | Record<string, unknown>;
+  };
+  try {
+    const loaded = readProviderSource(args.discovered.provider, args.discovered.filePath, args.readFileText);
+    if (!loaded) {
+      throw new Error("Unable to read provider source.");
+    }
+    source = loaded;
+  } catch (error) {
+    throw new IndexingFileProcessingError({
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      filePath: args.discovered.filePath,
+      stage: "read",
+      error,
+    });
+  }
+
+  let parsed: ReturnType<typeof parseSession>;
+  try {
+    parsed = parseSession({
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      payload: source.parsePayload,
+    });
+  } catch (error) {
+    throw new IndexingFileProcessingError({
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      filePath: args.discovered.filePath,
+      stage: "parse",
+      error,
+    });
+  }
+
+  const projectId = makeProjectId(args.discovered.provider, args.discovered.projectPath);
+  const sourceMeta = extractSourceMetadata(args.discovered.provider, source.rawPayload);
+  const normalizedMessages = reclassifySystemMessages(parsed.messages, args.systemMessageRules);
+  const messagesWithDuration = deriveOperationDurations(normalizedMessages);
+  const messagesWithLimits = messagesWithDuration.map(applyIndexingContentLimits);
+  const messagesWithTimestamps = normalizeMessageTimestamps(
+    messagesWithLimits,
+    args.discovered.provider,
+    args.discovered.fileMtimeMs,
+  );
+  const sessionTitle = deriveSessionTitle(messagesWithTimestamps);
+  const modelNames = sourceMeta.models.join(",");
+  const aggregate = buildSessionAggregate(
+    messagesWithTimestamps.map((message) => ({
+      ...message,
+      id: makeMessageId(args.sessionDbId, message.id),
+    })),
+  );
+
+  try {
+    const persist = args.db.transaction(() => {
+      deleteSessionDataForFilePath(args.db, args.discovered.filePath);
+      deleteSessionData(args.db, args.sessionDbId);
+      args.db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(args.discovered.filePath);
+      args.statements.upsertProject.run(
+        projectId,
+        args.discovered.provider,
+        args.discovered.projectName,
+        args.discovered.projectPath,
+        args.nowIso,
+        args.nowIso,
+      );
+      args.statements.upsertSession.run(
+        args.sessionDbId,
+        projectId,
+        args.discovered.provider,
+        args.discovered.filePath,
+        sessionTitle || modelNames,
+        modelNames,
+        aggregate.startedAt ?? new Date(args.discovered.fileMtimeMs).toISOString(),
+        aggregate.endedAt ?? new Date(args.discovered.fileMtimeMs).toISOString(),
+        aggregate.durationMs,
+        sourceMeta.gitBranch ?? args.discovered.metadata.gitBranch,
+        sourceMeta.cwd ?? args.discovered.metadata.cwd,
+        aggregate.messageCount,
+        aggregate.tokenInputTotal,
+        aggregate.tokenOutputTotal,
+      );
+
+      for (const message of messagesWithTimestamps) {
+        insertIndexedMessage(args.statements, args.sessionDbId, message);
+      }
+
+      args.statements.upsertIndexedFile.run(
+        args.discovered.filePath,
+        args.discovered.provider,
+        args.discovered.projectPath,
+        args.discovered.sessionIdentity,
+        args.discovered.fileSize,
+        args.discovered.fileMtimeMs,
+        args.nowIso,
+      );
+    });
+    persist();
+  } catch (error) {
+    throw new IndexingFileProcessingError({
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      filePath: args.discovered.filePath,
+      stage: "persist",
+      error,
+    });
+  }
+
+  return parsed.diagnostics;
+}
+
+function indexStreamedJsonlSessionFile(args: {
+  db: SqliteDatabase;
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  sessionDbId: string;
+  nowIso: string;
+  systemMessageRules: RegExp[];
+  statements: IndexingStatements;
+  resumeCheckpoint: ResumeCheckpoint | null;
+}): ParserDiagnostic[] {
+  const parserDiagnostics: ParserDiagnostic[] = [];
+  const sourceMetaAccumulator = createSourceMetadataAccumulator(args.resumeCheckpoint?.sourceMetadata);
+  const processingState = createMessageProcessingState(
+    args.discovered.provider,
+    args.discovered.fileMtimeMs,
+    args.systemMessageRules,
+    args.resumeCheckpoint?.processingState,
+  );
+  const projectId = makeProjectId(args.discovered.provider, args.discovered.projectPath);
+  const shouldResume = args.resumeCheckpoint !== null;
+
+  try {
+    const persist = args.db.transaction(() => {
+      if (!shouldResume) {
+        deleteSessionDataForFilePath(args.db, args.discovered.filePath);
+        deleteSessionData(args.db, args.sessionDbId);
+      }
+      args.db.prepare("DELETE FROM index_checkpoints WHERE file_path = ?").run(args.discovered.filePath);
+      args.statements.upsertProject.run(
+        projectId,
+        args.discovered.provider,
+        args.discovered.projectName,
+        args.discovered.projectPath,
+        args.nowIso,
+        args.nowIso,
+      );
+      upsertSessionSummary(args.statements, {
+        sessionDbId: args.sessionDbId,
+        projectId,
+        provider: args.discovered.provider,
+        filePath: args.discovered.filePath,
+        title: processingState.aggregate.title,
+        modelNames: sourceMetaAccumulator.models.size > 0 ? [...sourceMetaAccumulator.models].sort().join(",") : "",
+        aggregate: finalizeSessionAggregate(processingState.aggregate),
+        messageCount: processingState.aggregate.messageCount,
+        tokenInputTotal: processingState.aggregate.tokenInputTotal,
+        tokenOutputTotal: processingState.aggregate.tokenOutputTotal,
+        fileMtimeMs: args.discovered.fileMtimeMs,
+        gitBranch: sourceMetaAccumulator.gitBranch ?? args.discovered.metadata.gitBranch,
+        cwd: sourceMetaAccumulator.cwd ?? args.discovered.metadata.cwd,
+      });
+
+      let sequence = args.resumeCheckpoint?.nextMessageSequence ?? 0;
+      let emittedEvents = 0;
+      let streamResult: StreamJsonlResult | null = null;
+      try {
+        streamResult = streamJsonlEvents(args.discovered.filePath, {
+          startOffsetBytes: args.resumeCheckpoint?.lastOffsetBytes ?? 0,
+          startLineNumber: args.resumeCheckpoint?.lastLineNumber ?? 0,
+          startEventIndex: args.resumeCheckpoint?.lastEventIndex ?? 0,
+          onEvent: (event, eventIndex) => {
+            emittedEvents += 1;
+            updateSourceMetadataFromEvent(args.discovered.provider, event, sourceMetaAccumulator);
+            let parsedEvent;
+            try {
+              parsedEvent = parseSessionEvent({
+                provider: args.discovered.provider,
+                sessionId: args.discovered.sourceSessionId,
+                eventIndex,
+                event,
+                diagnostics: parserDiagnostics,
+                sequence,
+              });
+            } catch (error) {
+              throw new IndexingFileProcessingError({
+                provider: args.discovered.provider,
+                sessionId: args.discovered.sourceSessionId,
+                filePath: args.discovered.filePath,
+                stage: "parse",
+                error,
+              });
+            }
+            sequence = parsedEvent.nextSequence;
+            const eventMessages = parsedEvent.messages.slice();
+            for (let index = 0; index < eventMessages.length; index += 1) {
+              const message = eventMessages[index];
+              if (!message) {
+                continue;
+              }
+              const normalizedMessage = normalizeIndexedMessage(processingState, message);
+              insertIndexedMessage(args.statements, args.sessionDbId, normalizedMessage);
+            }
+          },
+          onInvalidLine: (lineNumber, error) => {
+            parserDiagnostics.push({
+              severity: "warning",
+              code: "parser.invalid_jsonl_line",
+              provider: args.discovered.provider,
+              sessionId: args.discovered.sourceSessionId,
+              eventIndex: lineNumber - 1,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          },
+        });
+      } catch (error) {
+        if (error instanceof IndexingFileProcessingError) {
+          throw error;
+        }
+        throw new IndexingFileProcessingError({
+          provider: args.discovered.provider,
+          sessionId: args.discovered.sourceSessionId,
+          filePath: args.discovered.filePath,
+          stage: "read",
+          error,
+        });
+      }
+
+      if (emittedEvents === 0 && !shouldResume) {
+        parserDiagnostics.push({
+          severity: "warning",
+          code: "parser.no_events_found",
+          provider: args.discovered.provider,
+          sessionId: args.discovered.sourceSessionId,
+          eventIndex: null,
+          message: "No events were discovered in payload; returning empty message list.",
+        });
+      }
+
+      const sourceMeta = finalizeSourceMetadata(sourceMetaAccumulator);
+      const aggregate = finalizeSessionAggregate(processingState.aggregate);
+      const modelNames = sourceMeta.models.join(",");
+
+      upsertSessionSummary(args.statements, {
+        sessionDbId: args.sessionDbId,
+        projectId,
+        provider: args.discovered.provider,
+        filePath: args.discovered.filePath,
+        title: processingState.aggregate.title || modelNames,
+        modelNames,
+        aggregate,
+        messageCount: processingState.aggregate.messageCount,
+        tokenInputTotal: processingState.aggregate.tokenInputTotal,
+        tokenOutputTotal: processingState.aggregate.tokenOutputTotal,
+        fileMtimeMs: args.discovered.fileMtimeMs,
+        gitBranch: sourceMeta.gitBranch ?? args.discovered.metadata.gitBranch,
+        cwd: sourceMeta.cwd ?? args.discovered.metadata.cwd,
+      });
+
+      args.statements.upsertIndexedFile.run(
+        args.discovered.filePath,
+        args.discovered.provider,
+        args.discovered.projectPath,
+        args.discovered.sessionIdentity,
+        args.discovered.fileSize,
+        args.discovered.fileMtimeMs,
+        args.nowIso,
+      );
+      const hashes = computeFileHashes(args.discovered.filePath, args.discovered.fileSize);
+      const checkpoint = buildStreamCheckpointState({
+        discovered: args.discovered,
+        sessionDbId: args.sessionDbId,
+        sequence,
+        processingState,
+        sourceMetaAccumulator,
+        streamResult:
+          streamResult ??
+          ({
+            nextOffsetBytes: args.resumeCheckpoint?.lastOffsetBytes ?? 0,
+            nextLineNumber: args.resumeCheckpoint?.lastLineNumber ?? 0,
+            nextEventIndex: args.resumeCheckpoint?.lastEventIndex ?? 0,
+          } satisfies StreamJsonlResult),
+        hashes,
+      });
+      args.statements.upsertCheckpoint.run(
+        checkpoint.filePath,
+        checkpoint.provider,
+        checkpoint.sessionDbId,
+        checkpoint.sessionIdentity,
+        checkpoint.fileSize,
+        checkpoint.fileMtimeMs,
+        checkpoint.lastOffsetBytes,
+        checkpoint.lastLineNumber,
+        checkpoint.lastEventIndex,
+        checkpoint.nextMessageSequence,
+        JSON.stringify(checkpoint.processingState),
+        JSON.stringify(checkpoint.sourceMetadata),
+        checkpoint.headHash,
+        checkpoint.tailHash,
+        args.nowIso,
+      );
+    });
+    persist();
+  } catch (error) {
+    if (error instanceof IndexingFileProcessingError) {
+      throw error;
+    }
+    throw new IndexingFileProcessingError({
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      filePath: args.discovered.filePath,
+      stage: "persist",
+      error,
+    });
+  }
+
+  return parserDiagnostics;
+}
+
+function createMessageProcessingState(
+  provider: Provider,
+  fileMtimeMs: number,
+  systemMessageRules: RegExp[],
+  checkpoint?: SerializableMessageProcessingState,
+): MessageProcessingState {
+  return {
+    provider,
+    fileMtimeMs,
+    systemMessageRules,
+    previousMessage: checkpoint?.previousMessage ?? null,
+    previousCursorTimestampMs:
+      checkpoint?.previousCursorTimestampMs ?? Number.NEGATIVE_INFINITY,
+    assistantThinkingRunRoot: checkpoint?.assistantThinkingRunRoot ?? null,
+    assistantThinkingRunBaseline: checkpoint?.assistantThinkingRunBaseline ?? null,
+    aggregate: checkpoint?.aggregate ?? {
+      messageCount: 0,
+      tokenInputTotal: 0,
+      tokenOutputTotal: 0,
+      startedAtMs: null,
+      endedAtMs: null,
+      title: "",
+      titleRank: null,
+    },
+  };
+}
+
+function normalizeIndexedMessage(
+  state: MessageProcessingState,
+  message: IndexedMessage,
+): IndexedMessage {
+  const reclassified = reclassifySystemMessage(message, state.systemMessageRules);
+  const timestamped = normalizeMessageTimestamp(reclassified, state);
+  const withDuration = deriveOperationDuration(timestamped, state);
+  const limited = applyIndexingContentLimits(withDuration);
+  updateSessionAggregateState(state.aggregate, limited);
+  state.previousMessage = limited;
+  return limited;
+}
+
+function reclassifySystemMessage(message: IndexedMessage, rules: RegExp[]): IndexedMessage {
+  if (message.category === "system" || rules.length === 0) {
+    return message;
+  }
+  if (!rules.some((rule) => rule.test(message.content))) {
+    return message;
+  }
+  return {
+    ...message,
+    category: "system",
+  };
+}
+
+function normalizeMessageTimestamp(
+  message: IndexedMessage,
+  state: MessageProcessingState,
+): IndexedMessage {
+  const fallbackBaseMs =
+    Number.isFinite(state.fileMtimeMs) && state.fileMtimeMs > 0 ? state.fileMtimeMs : Date.now();
+  if (state.provider !== "cursor") {
+    const createdAtMs = Date.parse(message.createdAt);
+    if (Number.isFinite(createdAtMs) && createdAtMs > 0) {
+      return message;
+    }
+    return {
+      ...message,
+      createdAt: new Date(fallbackBaseMs).toISOString(),
+    };
+  }
+
+  const parsedMs = Date.parse(message.createdAt);
+  let nextMs = Number.isFinite(parsedMs) && parsedMs > 0 ? parsedMs : fallbackBaseMs;
+  if (nextMs <= state.previousCursorTimestampMs) {
+    nextMs = state.previousCursorTimestampMs + 1;
+  }
+  state.previousCursorTimestampMs = nextMs;
+  return {
+    ...message,
+    createdAt: new Date(nextMs).toISOString(),
+  };
+}
+
+function deriveOperationDuration(
+  message: IndexedMessage,
+  state: MessageProcessingState,
+): IndexedMessage {
+  if (message.operationDurationMs !== null) {
+    updateAssistantThinkingRunState(state, message);
+    return message;
+  }
+
+  const baseline = selectDerivedBaselineForStream(state, message);
+  let nextMessage = message;
+  if (baseline && isHighConfidenceDerivedPair(baseline.category, message.category)) {
+    const currentMs = Date.parse(message.createdAt);
+    const previousMs = Date.parse(baseline.createdAt);
+    const durationMs = currentMs - previousMs;
+    if (
+      Number.isFinite(currentMs) &&
+      Number.isFinite(previousMs) &&
+      durationMs > 0 &&
+      durationMs <= MAX_DERIVED_DURATION_MS
+    ) {
+      nextMessage = {
+        ...message,
+        operationDurationMs: durationMs,
+        operationDurationSource: "derived",
+        operationDurationConfidence: "high",
+      };
+    }
+  }
+
+  updateAssistantThinkingRunState(state, nextMessage);
+  return nextMessage;
+}
+
+function selectDerivedBaselineForStream(
+  state: MessageProcessingState,
+  message: IndexedMessage,
+): IndexedMessage | null {
+  if (!state.previousMessage) {
+    return null;
+  }
+
+  if (message.category === "assistant" || message.category === "thinking") {
+    const messageRoot = splitMessageRoot(message.id);
+    const previous = state.previousMessage;
+    const previousRoot = splitMessageRoot(previous.id);
+    const isSameAssistantThinkingRun =
+      (previous.category === "assistant" || previous.category === "thinking") &&
+      previousRoot === messageRoot &&
+      state.assistantThinkingRunRoot === messageRoot;
+    return isSameAssistantThinkingRun ? state.assistantThinkingRunBaseline : previous;
+  }
+
+  if (message.category === "tool_result") {
+    return state.previousMessage;
+  }
+
+  return null;
+}
+
+function updateAssistantThinkingRunState(
+  state: MessageProcessingState,
+  message: IndexedMessage,
+): void {
+  if (message.category !== "assistant" && message.category !== "thinking") {
+    state.assistantThinkingRunRoot = null;
+    state.assistantThinkingRunBaseline = null;
+    return;
+  }
+
+  const messageRoot = splitMessageRoot(message.id);
+  const previous = state.previousMessage;
+  const previousRoot = previous ? splitMessageRoot(previous.id) : null;
+  const isSameAssistantThinkingRun =
+    previous &&
+    (previous.category === "assistant" || previous.category === "thinking") &&
+    previousRoot === messageRoot;
+
+  if (!isSameAssistantThinkingRun) {
+    state.assistantThinkingRunBaseline = previous;
+    state.assistantThinkingRunRoot = messageRoot;
+    return;
+  }
+
+  state.assistantThinkingRunRoot = messageRoot;
+}
+
+function updateSessionAggregateState(state: SessionAggregateState, message: IndexedMessage): void {
+  state.messageCount += 1;
+  state.tokenInputTotal += message.tokenInput ?? 0;
+  state.tokenOutputTotal += message.tokenOutput ?? 0;
+
+  const timestampMs = Date.parse(message.createdAt);
+  if (Number.isFinite(timestampMs) && timestampMs > 0) {
+    state.startedAtMs =
+      state.startedAtMs === null || timestampMs < state.startedAtMs ? timestampMs : state.startedAtMs;
+    state.endedAtMs =
+      state.endedAtMs === null || timestampMs > state.endedAtMs ? timestampMs : state.endedAtMs;
+  }
+
+  const title = normalizeSessionTitleText(message.content);
+  if (title.length === 0) {
+    return;
+  }
+  const rank = sessionTitleCategoryRank(message.category);
+  if (state.titleRank === null || rank < state.titleRank) {
+    state.title = title;
+    state.titleRank = rank;
+  }
+}
+
+function sessionTitleCategoryRank(category: MessageCategory): number {
+  const preferredCategories: MessageCategory[] = [
+    "user",
+    "assistant",
+    "thinking",
+    "system",
+    "tool_result",
+    "tool_use",
+    "tool_edit",
+  ];
+  const rank = preferredCategories.indexOf(category);
+  return rank >= 0 ? rank : preferredCategories.length;
+}
+
+function finalizeSessionAggregate(state: SessionAggregateState): {
+  startedAt: string | null;
+  endedAt: string | null;
+  durationMs: number | null;
+} {
+  if (state.startedAtMs === null || state.endedAtMs === null) {
+    return {
+      startedAt: null,
+      endedAt: null,
+      durationMs: null,
+    };
+  }
+
+  return {
+    startedAt: new Date(state.startedAtMs).toISOString(),
+    endedAt: new Date(state.endedAtMs).toISOString(),
+    durationMs: state.endedAtMs - state.startedAtMs,
+  };
+}
+
+function createSourceMetadataAccumulator(
+  checkpoint?: SerializedSourceMetadataAccumulator,
+): SourceMetadataAccumulator {
+  return {
+    models: new Set<string>(checkpoint?.models ?? []),
+    gitBranch: checkpoint?.gitBranch ?? null,
+    cwd: checkpoint?.cwd ?? null,
+  };
+}
+
+function finalizeSourceMetadata(accumulator: SourceMetadataAccumulator): SourceMetadata {
+  return {
+    models: [...accumulator.models].sort(),
+    gitBranch: accumulator.gitBranch,
+    cwd: accumulator.cwd,
+  };
+}
+
+function serializeSourceMetadataAccumulator(
+  accumulator: SourceMetadataAccumulator,
+): SerializedSourceMetadataAccumulator {
+  return {
+    models: [...accumulator.models].sort(),
+    gitBranch: accumulator.gitBranch,
+    cwd: accumulator.cwd,
+  };
+}
+
+function serializeProcessingState(
+  state: MessageProcessingState,
+): SerializableMessageProcessingState {
+  return {
+    previousMessage: state.previousMessage,
+    previousCursorTimestampMs: state.previousCursorTimestampMs,
+    assistantThinkingRunRoot: state.assistantThinkingRunRoot,
+    assistantThinkingRunBaseline: state.assistantThinkingRunBaseline,
+    aggregate: state.aggregate,
+  };
+}
+
+function buildStreamCheckpointState(args: {
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  sessionDbId: string;
+  sequence: number;
+  processingState: MessageProcessingState;
+  sourceMetaAccumulator: SourceMetadataAccumulator;
+  streamResult: StreamJsonlResult;
+  hashes: { headHash: string; tailHash: string };
+}): StreamCheckpointState {
+  return {
+    filePath: args.discovered.filePath,
+    provider: args.discovered.provider,
+    sessionDbId: args.sessionDbId,
+    sessionIdentity: args.discovered.sessionIdentity,
+    fileSize: args.discovered.fileSize,
+    fileMtimeMs: args.discovered.fileMtimeMs,
+    lastOffsetBytes: args.streamResult.nextOffsetBytes,
+    lastLineNumber: args.streamResult.nextLineNumber,
+    lastEventIndex: args.streamResult.nextEventIndex,
+    nextMessageSequence: args.sequence,
+    processingState: serializeProcessingState(args.processingState),
+    sourceMetadata: serializeSourceMetadataAccumulator(args.sourceMetaAccumulator),
+    headHash: args.hashes.headHash,
+    tailHash: args.hashes.tailHash,
+  };
+}
+
+function upsertSessionSummary(
+  statements: IndexingStatements,
+  args: {
+    sessionDbId: string;
+    projectId: string;
+    provider: Provider;
+    filePath: string;
+    title: string;
+    modelNames: string;
+    aggregate: ReturnType<typeof finalizeSessionAggregate>;
+    messageCount: number;
+    tokenInputTotal: number;
+    tokenOutputTotal: number;
+    fileMtimeMs: number;
+    gitBranch: string | null;
+    cwd: string | null;
+  },
+): void {
+  statements.upsertSession.run(
+    args.sessionDbId,
+    args.projectId,
+    args.provider,
+    args.filePath,
+    args.title || args.modelNames,
+    args.modelNames,
+    args.aggregate.startedAt ?? new Date(args.fileMtimeMs).toISOString(),
+    args.aggregate.endedAt ?? new Date(args.fileMtimeMs).toISOString(),
+    args.aggregate.durationMs,
+    args.gitBranch,
+    args.cwd,
+    args.messageCount,
+    args.tokenInputTotal,
+    args.tokenOutputTotal,
+  );
+}
+
+function updateSourceMetadataFromEvent(
+  provider: Provider,
+  event: unknown,
+  accumulator: SourceMetadataAccumulator,
+): void {
+  const record = asRecord(event);
+  if (!record) {
+    return;
+  }
+
+  if (provider === "claude") {
+    const message = asRecord(record.message);
+    const model = readString(message?.model);
+    if (model) {
+      accumulator.models.add(model);
+    }
+    accumulator.gitBranch ??= readString(record.gitBranch);
+    accumulator.cwd ??= readString(record.cwd);
+    return;
+  }
+
+  if (provider === "codex") {
+    const payloadRecord = asRecord(record.payload);
+    const payloadGit = asRecord(payloadRecord?.git);
+    const model =
+      readString(payloadRecord?.model) ??
+      (readString(record.type) === "turn_context" ? readString(payloadRecord?.model) : null);
+    if (model) {
+      accumulator.models.add(model);
+    }
+    accumulator.cwd ??= readString(payloadRecord?.cwd);
+    accumulator.gitBranch ??= readString(payloadGit?.branch);
+    return;
+  }
+
+  const messageRecord = asRecord(record.message);
+  const metadataRecord = asRecord(record.metadata);
+  const gitRecord = asRecord(record.git) ?? asRecord(metadataRecord?.git);
+  const model = readString(messageRecord?.model) ?? readString(record.model);
+  if (model) {
+    accumulator.models.add(model);
+  }
+  accumulator.cwd ??=
+    readString(record.cwd) ?? readString(messageRecord?.cwd) ?? readString(metadataRecord?.cwd);
+  accumulator.gitBranch ??=
+    readString(gitRecord?.branch) ?? readString(record.gitBranch) ?? readString(record.branch);
+}
+
+function applyIndexingContentLimits(message: IndexedMessage): IndexedMessage {
+  const nextContent = truncateTextForIndexing(message.content, MAX_INDEXED_MESSAGE_CONTENT_BYTES);
+  if (nextContent === message.content) {
+    return message;
+  }
+  return {
+    ...message,
+    content: nextContent,
+  };
+}
+
+function truncateTextForIndexing(value: string, maxBytes: number): string {
+  const valueBytes = Buffer.byteLength(value, "utf8");
+  if (valueBytes <= maxBytes) {
+    return value;
+  }
+
+  const marker = `[truncated from ${valueBytes} bytes]`;
+  const markerBytes = Buffer.byteLength(marker, "utf8");
+  if (markerBytes >= maxBytes) {
+    return marker.slice(0, Math.max(1, maxBytes));
+  }
+
+  const availableBytes = maxBytes - markerBytes;
+  const headBytes = Math.max(1, Math.floor(availableBytes * 0.75));
+  const tailBytes = Math.max(0, availableBytes - headBytes);
+  const head = sliceUtf8ByBytes(value, headBytes, "head");
+  const tail = tailBytes > 0 ? sliceUtf8ByBytes(value, tailBytes, "tail") : "";
+  return tail.length > 0 ? `${head}${marker}${tail}` : `${head}${marker}`;
+}
+
+function sliceUtf8ByBytes(value: string, byteLimit: number, mode: "head" | "tail"): string {
+  if (byteLimit <= 0 || value.length === 0) {
+    return "";
+  }
+
+  if (mode === "head") {
+    let end = Math.min(value.length, byteLimit);
+    while (end > 0 && Buffer.byteLength(value.slice(0, end), "utf8") > byteLimit) {
+      end -= 1;
+    }
+    return value.slice(0, end);
+  }
+
+  let start = Math.max(0, value.length - byteLimit);
+  while (start < value.length && Buffer.byteLength(value.slice(start), "utf8") > byteLimit) {
+    start += 1;
+  }
+  return value.slice(start);
+}
+
+function streamJsonlEvents(
+  filePath: string,
+  callbacks: {
+    startOffsetBytes?: number;
+    startLineNumber?: number;
+    startEventIndex?: number;
+    onEvent: (event: unknown, eventIndex: number) => void;
+    onInvalidLine: (lineNumber: number, error: unknown) => void;
+  },
+): StreamJsonlResult {
+  const buffer = Buffer.allocUnsafe(JSONL_READ_BUFFER_BYTES);
+  let fd: number | null = null;
+  let lineChunks: Buffer[] = [];
+  let pendingLineBytes = 0;
+  let discardingOversizedLine = false;
+  let consumedOffset = callbacks.startOffsetBytes ?? 0;
+  let readOffset = callbacks.startOffsetBytes ?? 0;
+  let lineNumber = callbacks.startLineNumber ?? 0;
+  let eventIndex = callbacks.startEventIndex ?? 0;
+
+  try {
+    fd = openSync(filePath, "r");
+    const flushLine = (): void => {
+      if (discardingOversizedLine) {
+        callbacks.onInvalidLine(
+          lineNumber + 1,
+          new Error(`JSONL line exceeded ${MAX_JSONL_LINE_BYTES} bytes and was skipped.`),
+        );
+      } else if (lineChunks.length > 0) {
+        const line = Buffer.concat(lineChunks).toString("utf8");
+        eventIndex = handleJsonlLine(line, lineNumber, eventIndex, callbacks);
+      }
+
+      lineChunks = [];
+      pendingLineBytes = 0;
+      discardingOversizedLine = false;
+      lineNumber += 1;
+    };
+
+    while (true) {
+      const bytesRead = readSync(fd, buffer, 0, buffer.length, readOffset);
+      if (bytesRead <= 0) {
+        break;
+      }
+      readOffset += bytesRead;
+      let cursor = 0;
+      while (cursor < bytesRead) {
+        const newlineIndex = buffer.indexOf(0x0a, cursor);
+        const segmentEnd = newlineIndex >= 0 ? newlineIndex : bytesRead;
+        const segment = buffer.subarray(cursor, segmentEnd);
+        if (!discardingOversizedLine) {
+          const nextLineBytes = pendingLineBytes + segment.length;
+          if (nextLineBytes > MAX_JSONL_LINE_BYTES) {
+            discardingOversizedLine = true;
+            lineChunks = [];
+          } else if (segment.length > 0) {
+            lineChunks.push(Buffer.from(segment));
+          }
+        }
+        pendingLineBytes += segment.length;
+
+        if (newlineIndex >= 0) {
+          consumedOffset += pendingLineBytes + 1;
+          flushLine();
+          cursor = newlineIndex + 1;
+          continue;
+        }
+
+        cursor = bytesRead;
+      }
+    }
+    if (pendingLineBytes > 0 || lineChunks.length > 0 || discardingOversizedLine) {
+      consumedOffset = readOffset;
+      flushLine();
+    }
+  } finally {
+    if (fd !== null) {
+      closeSync(fd);
+    }
+  }
+
+  return {
+    nextOffsetBytes: consumedOffset,
+    nextLineNumber: lineNumber,
+    nextEventIndex: eventIndex,
+  };
+}
+
+function handleJsonlLine(
+  line: string,
+  lineNumber: number,
+  eventIndex: number,
+  callbacks: {
+    onEvent: (event: unknown, eventIndex: number) => void;
+    onInvalidLine: (lineNumber: number, error: unknown) => void;
+  },
+): number {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) {
+    return eventIndex;
+  }
+  try {
+    callbacks.onEvent(JSON.parse(trimmed) as unknown, eventIndex);
+    return eventIndex + 1;
+  } catch (error) {
+    callbacks.onInvalidLine(lineNumber + 1, error);
+    return eventIndex;
+  }
+}
+
+function insertIndexedMessage(
+  statements: IndexingStatements,
+  sessionDbId: string,
+  message: IndexedMessage,
+): void {
+  const messageId = makeMessageId(sessionDbId, message.id);
+  const persistedContent = truncateTextForIndexing(message.content, MAX_INDEXED_MESSAGE_CONTENT_BYTES);
+  const ftsContent = truncateTextForIndexing(persistedContent, MAX_INDEXED_FTS_CONTENT_BYTES);
+  statements.insertMessage.run(
+    messageId,
+    message.id,
+    sessionDbId,
+    message.provider,
+    message.category,
+    persistedContent,
+    message.createdAt,
+    message.tokenInput,
+    message.tokenOutput,
+    message.operationDurationMs,
+    message.operationDurationSource,
+    message.operationDurationConfidence,
+  );
+  statements.insertMessageFts.run(
+    messageId,
+    sessionDbId,
+    message.provider,
+    message.category,
+    ftsContent,
+  );
+
+  if (message.category !== "tool_use" && message.category !== "tool_edit") {
+    return;
+  }
+
+  const toolCall = parseToolCallContent(persistedContent);
+  statements.insertToolCall.run(
+    makeToolCallId(messageId, 0),
+    messageId,
+    toolCall.toolName,
+    toolCall.argsJson,
+    toolCall.resultJson,
+    message.createdAt,
+    null,
+  );
+}
+
+function accumulateParserDiagnostics(
+  totals: { warnings: number; errors: number },
+  parserDiagnostics: ParserDiagnostic[],
+): void {
+  for (const diagnostic of parserDiagnostics) {
+    if (diagnostic.severity === "error") {
+      totals.errors += 1;
+    } else {
+      totals.warnings += 1;
+    }
+  }
+}
+
+function resolveIndexingFileIssue(
+  error: unknown,
+  discovered: ReturnType<typeof discoverSessionFiles>[number],
+): IndexingFileIssue {
+  if (error instanceof IndexingFileProcessingError) {
+    return error.issue;
+  }
+  return {
+    provider: discovered.provider,
+    sessionId: discovered.sourceSessionId,
+    filePath: discovered.filePath,
+    stage: "persist",
+    error,
+  };
+}
+
+function defaultOnFileIssue(issue: IndexingFileIssue): void {
+  console.error(
+    `[codetrail] failed indexing ${issue.provider} session ${issue.filePath} during ${issue.stage}`,
+    issue.error,
+  );
+}
+
+function shouldResumeFromCheckpoint(args: {
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  existing: IndexedFileRow | undefined;
+  checkpoint: IndexCheckpointRow | undefined;
+  expectedSessionDbId: string;
+  existingSessionId: string | undefined;
+}): args is {
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  existing: IndexedFileRow;
+  checkpoint: IndexCheckpointRow;
+  expectedSessionDbId: string;
+  existingSessionId: string;
+} {
+  if (!args.existing || !args.checkpoint || !args.existingSessionId) {
+    return false;
+  }
+  if (args.discovered.provider === "gemini") {
+    return false;
+  }
+  if (args.existingSessionId !== args.expectedSessionDbId) {
+    return false;
+  }
+  if (args.checkpoint.session_id !== args.expectedSessionDbId) {
+    return false;
+  }
+  if (args.checkpoint.session_identity !== args.discovered.sessionIdentity) {
+    return false;
+  }
+  if (args.checkpoint.file_size !== args.existing.file_size) {
+    return false;
+  }
+  if (args.checkpoint.file_mtime_ms !== args.existing.file_mtime_ms) {
+    return false;
+  }
+  if (args.discovered.fileSize <= args.existing.file_size) {
+    return false;
+  }
+
+  try {
+    return verifyAppendOnlyFingerprint(
+      args.discovered.filePath,
+      args.existing.file_size,
+      args.checkpoint.head_hash,
+      args.checkpoint.tail_hash,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function deserializeResumeCheckpoint(checkpoint: IndexCheckpointRow): ResumeCheckpoint | null {
+  try {
+    const processingRecord = asRecord(JSON.parse(checkpoint.processing_state_json));
+    const sourceRecord = asRecord(JSON.parse(checkpoint.source_metadata_json));
+    const models = asArray(sourceRecord?.models)
+      .map((value) => readString(value))
+      .filter((value): value is string => Boolean(value));
+
+    return {
+      lastOffsetBytes: checkpoint.last_offset_bytes,
+      lastLineNumber: checkpoint.last_line_number,
+      lastEventIndex: checkpoint.last_event_index,
+      nextMessageSequence: checkpoint.next_message_sequence,
+      processingState: {
+        previousMessage: parseCheckpointMessage(processingRecord?.previousMessage),
+        previousCursorTimestampMs:
+          typeof processingRecord?.previousCursorTimestampMs === "number"
+            ? processingRecord.previousCursorTimestampMs
+            : Number.NEGATIVE_INFINITY,
+        assistantThinkingRunRoot: readString(processingRecord?.assistantThinkingRunRoot) ?? null,
+        assistantThinkingRunBaseline: parseCheckpointMessage(
+          processingRecord?.assistantThinkingRunBaseline,
+        ),
+        aggregate: parseAggregateState(processingRecord?.aggregate),
+      },
+      sourceMetadata: {
+        models,
+        gitBranch: readString(sourceRecord?.gitBranch) ?? null,
+        cwd: readString(sourceRecord?.cwd) ?? null,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseCheckpointMessage(value: unknown): IndexedMessage | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const id = readString(record.id);
+  const sessionId = readString(record.sessionId);
+  const provider = readString(record.provider);
+  const category = readString(record.category);
+  const content = readString(record.content);
+  const createdAt = readString(record.createdAt);
+  if (!id || !sessionId || !provider || !category || content === null || !createdAt) {
+    return null;
+  }
+  return {
+    id,
+    sessionId,
+    provider: provider as Provider,
+    category: category as MessageCategory,
+    content,
+    createdAt,
+    tokenInput: typeof record.tokenInput === "number" ? record.tokenInput : null,
+    tokenOutput: typeof record.tokenOutput === "number" ? record.tokenOutput : null,
+    operationDurationMs: typeof record.operationDurationMs === "number" ? record.operationDurationMs : null,
+    operationDurationSource:
+      record.operationDurationSource === "native" || record.operationDurationSource === "derived"
+        ? record.operationDurationSource
+        : null,
+    operationDurationConfidence:
+      record.operationDurationConfidence === "high" || record.operationDurationConfidence === "low"
+        ? record.operationDurationConfidence
+        : null,
+  };
+}
+
+function parseAggregateState(value: unknown): SessionAggregateState {
+  const record = asRecord(value);
+  return {
+    messageCount: typeof record?.messageCount === "number" ? record.messageCount : 0,
+    tokenInputTotal: typeof record?.tokenInputTotal === "number" ? record.tokenInputTotal : 0,
+    tokenOutputTotal: typeof record?.tokenOutputTotal === "number" ? record.tokenOutputTotal : 0,
+    startedAtMs: typeof record?.startedAtMs === "number" ? record.startedAtMs : null,
+    endedAtMs: typeof record?.endedAtMs === "number" ? record.endedAtMs : null,
+    title: readString(record?.title) ?? "",
+    titleRank: typeof record?.titleRank === "number" ? record.titleRank : null,
+  };
+}
+
+function listIndexCheckpoints(db: SqliteDatabase): IndexCheckpointRow[] {
+  return db
+    .prepare(
+      `SELECT
+         file_path,
+         provider,
+         session_id,
+         session_identity,
+         file_size,
+         file_mtime_ms,
+         last_offset_bytes,
+         last_line_number,
+         last_event_index,
+         next_message_sequence,
+         processing_state_json,
+         source_metadata_json,
+         head_hash,
+         tail_hash
+       FROM index_checkpoints`,
+    )
+    .all() as IndexCheckpointRow[];
+}
+
+function computeFileHashes(
+  filePath: string,
+  fileSize: number,
+): {
+  headHash: string;
+  tailHash: string;
+} {
+  return {
+    headHash: hashFileSlice(filePath, 0, Math.min(fileSize, JSONL_FINGERPRINT_WINDOW_BYTES)),
+    tailHash: hashFileSlice(
+      filePath,
+      Math.max(0, fileSize - JSONL_FINGERPRINT_WINDOW_BYTES),
+      Math.min(fileSize, JSONL_FINGERPRINT_WINDOW_BYTES),
+    ),
+  };
+}
+
+function verifyAppendOnlyFingerprint(
+  filePath: string,
+  previousFileSize: number,
+  expectedHeadHash: string,
+  expectedTailHash: string,
+): boolean {
+  return (
+    hashFileSlice(filePath, 0, Math.min(previousFileSize, JSONL_FINGERPRINT_WINDOW_BYTES)) ===
+      expectedHeadHash &&
+    hashFileSlice(
+      filePath,
+      Math.max(0, previousFileSize - JSONL_FINGERPRINT_WINDOW_BYTES),
+      Math.min(previousFileSize, JSONL_FINGERPRINT_WINDOW_BYTES),
+    ) === expectedTailHash
+  );
+}
+
+function hashFileSlice(filePath: string, start: number, length: number): string {
+  const hash = createHash("sha256");
+  if (length <= 0) {
+    return hash.digest("hex");
+  }
+
+  const buffer = Buffer.allocUnsafe(Math.min(length, JSONL_FINGERPRINT_WINDOW_BYTES));
+  let fd: number | null = null;
+  let remaining = length;
+  let position = start;
+
+  try {
+    fd = openSync(filePath, "r");
+    while (remaining > 0) {
+      const bytesToRead = Math.min(remaining, buffer.length);
+      const bytesRead = readSync(fd, buffer, 0, bytesToRead, position);
+      if (bytesRead <= 0) {
+        break;
+      }
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+      remaining -= bytesRead;
+    }
+  } finally {
+    if (fd !== null) {
+      closeSync(fd);
+    }
+  }
+
+  return hash.digest("hex");
 }
 
 function listIndexedFiles(db: SqliteDatabase): IndexedFileRow[] {
@@ -858,6 +2118,16 @@ function parseToolCallContent(content: string): {
   argsJson: string;
   resultJson: string | null;
 } {
+  if (Buffer.byteLength(content, "utf8") > MAX_TOOL_CALL_JSON_BYTES) {
+    return {
+      toolName: "unknown",
+      argsJson: JSON.stringify({
+        raw: truncateTextForIndexing(content, MAX_TOOL_CALL_JSON_BYTES),
+      }),
+      resultJson: null,
+    };
+  }
+
   try {
     const parsed = JSON.parse(content) as Record<string, unknown>;
     const toolName = readString(parsed.name) ?? readString(parsed.tool_name) ?? "unknown";
@@ -867,13 +2137,16 @@ function parseToolCallContent(content: string): {
 
     return {
       toolName,
-      argsJson: JSON.stringify(args),
-      resultJson: result === undefined || result === null ? null : JSON.stringify(result),
+      argsJson: truncateTextForIndexing(JSON.stringify(args), MAX_TOOL_CALL_JSON_BYTES),
+      resultJson:
+        result === undefined || result === null
+          ? null
+          : truncateTextForIndexing(JSON.stringify(result), MAX_TOOL_CALL_JSON_BYTES),
     };
   } catch {
     return {
       toolName: "unknown",
-      argsJson: JSON.stringify({ raw: content }),
+      argsJson: JSON.stringify({ raw: truncateTextForIndexing(content, MAX_TOOL_CALL_JSON_BYTES) }),
       resultJson: null,
     };
   }

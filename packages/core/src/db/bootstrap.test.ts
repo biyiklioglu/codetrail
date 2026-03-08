@@ -31,6 +31,7 @@ describe("initializeDatabase", () => {
     expect(result.schemaRebuilt).toBe(false);
     expect(result.tables).toEqual(
       expect.arrayContaining([
+        "index_checkpoints",
         "indexed_files",
         "message_fts",
         "messages",
@@ -103,6 +104,14 @@ describe("initializeDatabase", () => {
              ) VALUES (
                '/tmp/p/session.jsonl', 'claude', '/tmp/p', 's1', 10, 10, '2026-01-01T00:00:01.000Z'
              )`);
+    db.exec(`INSERT INTO index_checkpoints (
+               file_path, provider, session_id, session_identity, file_size, file_mtime_ms,
+               last_offset_bytes, last_line_number, last_event_index, next_message_sequence,
+               processing_state_json, source_metadata_json, head_hash, tail_hash, updated_at
+             ) VALUES (
+               '/tmp/p/session.jsonl', 'claude', 's1', 's1', 10, 10, 10, 1, 1, 1,
+               '{}', '{}', 'head', 'tail', '2026-01-01T00:00:01.000Z'
+             )`);
 
     expect(() => clearIndexedData(db)).not.toThrow();
     const counts = {
@@ -111,6 +120,9 @@ describe("initializeDatabase", () => {
       projects: (db.prepare("SELECT COUNT(*) as c FROM projects").get() as { c: number }).c,
       indexedFiles: (db.prepare("SELECT COUNT(*) as c FROM indexed_files").get() as { c: number })
         .c,
+      checkpoints: (
+        db.prepare("SELECT COUNT(*) as c FROM index_checkpoints").get() as { c: number }
+      ).c,
     };
     db.close();
 
@@ -119,6 +131,7 @@ describe("initializeDatabase", () => {
       sessions: 0,
       projects: 0,
       indexedFiles: 0,
+      checkpoints: 0,
     });
 
     rmSync(dir, { recursive: true, force: true });

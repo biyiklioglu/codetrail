@@ -99,6 +99,23 @@ describe("App shell", () => {
     expect(screen.getByText("Next page")).toBeInTheDocument();
   });
 
+  it("disables refresh and reindex controls while background indexing is active", async () => {
+    const client = createAppClient({
+      "indexer:getStatus": () => ({
+        running: true,
+        queuedJobs: 1,
+        activeJobId: "refresh-1",
+      }),
+    });
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Indexing in progress" })).toBeDisabled();
+    });
+    expect(screen.getByRole("button", { name: "Force reindex" })).toBeDisabled();
+  });
+
   it("passes per-mode message sort direction to detail requests and toggles on click", async () => {
     const user = userEvent.setup();
     const client = createAppClient();

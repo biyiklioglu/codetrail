@@ -33,6 +33,7 @@ describe("registerIpcHandlers", () => {
         }),
         "db:getSchemaVersion": () => ({ schemaVersion: 1 }),
         "indexer:refresh": (payload) => ({ jobId: payload.force ? "force-1" : "normal-1" }),
+        "indexer:getStatus": () => ({ running: false, queuedJobs: 0, activeJobId: null }),
         "projects:list": () => ({ projects: [] }),
         "projects:getCombinedDetail": (payload) => ({
           projectId: payload.projectId,
@@ -181,6 +182,7 @@ describe("registerIpcHandlers", () => {
         }),
         "db:getSchemaVersion": () => ({ schemaVersion: 1 }),
         "indexer:refresh": () => ({ jobId: "refresh-1" }),
+        "indexer:getStatus": () => ({ running: false, queuedJobs: 0, activeJobId: null }),
         "projects:list": () => ({ projects: [] }),
         "projects:getCombinedDetail": () => ({
           projectId: "project_1",

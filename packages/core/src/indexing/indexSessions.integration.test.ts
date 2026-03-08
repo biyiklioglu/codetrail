@@ -1,8 +1,15 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { openDatabase } from "../db/bootstrap";
 import { makeSessionId } from "./ids";
@@ -156,6 +163,9 @@ describe("runIncrementalIndexing", () => {
       indexed: (
         dbAfterFirst.prepare("SELECT COUNT(*) as c FROM indexed_files").get() as { c: number }
       ).c,
+      checkpoints: (
+        dbAfterFirst.prepare("SELECT COUNT(*) as c FROM index_checkpoints").get() as { c: number }
+      ).c,
     };
     const claudeSessionId = makeSessionId("claude", "claude-session-1");
     const claudeAggregate = dbAfterFirst
@@ -189,6 +199,7 @@ describe("runIncrementalIndexing", () => {
     expect(countsAfterFirst.sessions).toBe(3);
     expect(countsAfterFirst.messages).toBeGreaterThan(0);
     expect(countsAfterFirst.indexed).toBe(3);
+    expect(countsAfterFirst.checkpoints).toBe(2);
     expect(claudeAggregate.title).toBe("Hello Claude");
     expect(claudeAggregate.message_count).toBeGreaterThanOrEqual(3);
     expect(claudeAggregate.token_input_total).toBe(10);
@@ -257,9 +268,15 @@ describe("runIncrementalIndexing", () => {
     const codexMessageCount = dbAfterThird
       .prepare("SELECT message_count FROM sessions WHERE provider = 'codex' AND file_path = ?")
       .get(codexFile) as { message_count: number };
+    const codexCheckpoint = dbAfterThird
+      .prepare(
+        "SELECT last_offset_bytes, file_size FROM index_checkpoints WHERE file_path = ?",
+      )
+      .get(codexFile) as { last_offset_bytes: number; file_size: number };
     dbAfterThird.close();
 
     expect(codexMessageCount.message_count).toBeGreaterThanOrEqual(3);
+    expect(codexCheckpoint.last_offset_bytes).toBe(codexCheckpoint.file_size);
 
     const force = runIncrementalIndexing({
       dbPath,
@@ -281,6 +298,361 @@ describe("runIncrementalIndexing", () => {
 
     expect(rebuilt.schemaRebuilt).toBe(true);
     expect(rebuilt.indexedFiles).toBe(3);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("streams large codex session files without routing them through readFileText", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-oversized-"));
+    const dbPath = join(dir, "index.db");
+    const codexFile = join(dir, ".codex", "sessions", "2026", "03", "08", "oversized.jsonl");
+    mkdirSync(dirname(codexFile), { recursive: true });
+    writeFileSync(
+      codexFile,
+      `${[
+        JSON.stringify({
+          timestamp: "2026-03-08T10:00:00Z",
+          type: "session_meta",
+          payload: {
+            id: "codex-session-oversized",
+            cwd: "/workspace/codex",
+            git: { branch: "main" },
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-03-08T10:00:01Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Indexed before it grew too large" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const oversizedRead = vi.fn(() => {
+      throw new Error("streamed codex file should not use readFileText");
+    });
+    const sessionIdentity = "codex:codex-session-oversized:test";
+    const result = runIncrementalIndexing(
+      { dbPath },
+      {
+        discoverSessionFiles: () => [
+          {
+            provider: "codex",
+            projectPath: "/workspace/codex",
+            projectName: "codex",
+            sessionIdentity,
+            sourceSessionId: "codex-session-oversized",
+            filePath: codexFile,
+            fileSize: 256 * 1024 * 1024,
+            fileMtimeMs: Date.parse("2026-03-08T10:05:00Z"),
+            metadata: {
+              includeInHistory: true,
+              isSubagent: false,
+              unresolvedProject: false,
+              gitBranch: "main",
+              cwd: "/workspace/codex",
+            },
+          },
+        ],
+        readFileText: oversizedRead,
+      },
+    );
+
+    expect(result.discoveredFiles).toBe(1);
+    expect(result.indexedFiles).toBe(1);
+    expect(result.skippedFiles).toBe(0);
+    expect(oversizedRead).not.toHaveBeenCalled();
+
+    const db = openDatabase(dbPath);
+    const sessionCount = db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number };
+    const messageCount = db.prepare("SELECT COUNT(*) as c FROM messages").get() as { c: number };
+    db.close();
+
+    expect(sessionCount.c).toBe(1);
+    expect(messageCount.c).toBe(1);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("resumes append-only indexing and skips oversized JSONL lines", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-resume-"));
+    const dbPath = join(dir, "index.db");
+    const codexFile = join(dir, ".codex", "sessions", "2026", "03", "08", "resume.jsonl");
+    mkdirSync(dirname(codexFile), { recursive: true });
+    writeFileSync(
+      codexFile,
+      `${[
+        JSON.stringify({
+          timestamp: "2026-03-08T10:00:00Z",
+          type: "session_meta",
+          payload: {
+            id: "codex-session-resume",
+            cwd: "/workspace/codex",
+            git: { branch: "main" },
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-03-08T10:00:01Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Before append" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const discoverSessionFiles = () => [
+      {
+        provider: "codex" as const,
+        projectPath: "/workspace/codex",
+        projectName: "codex",
+        sessionIdentity: "codex:codex-session-resume:test",
+        sourceSessionId: "codex-session-resume",
+        filePath: codexFile,
+        fileSize: Buffer.byteLength(readFileSync(codexFile)),
+        fileMtimeMs: Date.now(),
+        metadata: {
+          includeInHistory: true,
+          isSubagent: false,
+          unresolvedProject: false,
+          gitBranch: "main",
+          cwd: "/workspace/codex",
+        },
+      },
+    ];
+
+    const first = runIncrementalIndexing(
+      { dbPath },
+      {
+        discoverSessionFiles,
+      },
+    );
+    expect(first.indexedFiles).toBe(1);
+
+    const oversizedOutput = "x".repeat(9 * 1024 * 1024);
+    appendFileSync(
+      codexFile,
+      `${[
+        JSON.stringify({
+          timestamp: "2026-03-08T10:00:02Z",
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            output: oversizedOutput,
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-03-08T10:00:03Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "After append" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+    const appendedNow = new Date();
+    utimesSync(codexFile, appendedNow, appendedNow);
+
+    const second = runIncrementalIndexing(
+      { dbPath },
+      {
+        discoverSessionFiles,
+      },
+    );
+
+    expect(second.indexedFiles).toBe(1);
+    expect(second.diagnostics.warnings).toBeGreaterThan(0);
+
+    const db = openDatabase(dbPath);
+    const messages = db
+      .prepare("SELECT category, content FROM messages WHERE session_id = ? ORDER BY created_at, id")
+      .all(makeSessionId("codex", "codex:codex-session-resume:test")) as Array<{
+      category: string;
+      content: string;
+    }>;
+    const checkpoint = db
+      .prepare(
+        "SELECT last_offset_bytes, file_size FROM index_checkpoints WHERE file_path = ?",
+      )
+      .get(codexFile) as { last_offset_bytes: number; file_size: number };
+    db.close();
+
+    expect(messages.map((message) => message.content)).toEqual(
+      expect.arrayContaining(["Before append", "After append"]),
+    );
+    expect(messages.some((message) => message.category === "tool_result")).toBe(false);
+    expect(checkpoint.last_offset_bytes).toBe(checkpoint.file_size);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("truncates oversized stored message and tool payload content", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-truncate-"));
+    const dbPath = join(dir, "index.db");
+    const claudeFile = join(dir, ".claude", "projects", "truncate", "session.jsonl");
+    mkdirSync(dirname(claudeFile), { recursive: true });
+    const hugeInput = "a".repeat(400 * 1024);
+    writeFileSync(
+      claudeFile,
+      `${[
+        JSON.stringify({
+          sessionId: "claude-session-truncate",
+          type: "assistant",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-03-08T10:00:00Z",
+          message: {
+            model: "claude-opus-4-6",
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_1",
+                name: "Read",
+                input: { payload: hugeInput },
+              },
+            ],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const result = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig: {
+        claudeRoot: join(dir, ".claude", "projects"),
+        codexRoot: join(dir, ".codex", "sessions"),
+        geminiRoot: join(dir, ".gemini", "tmp"),
+        geminiHistoryRoot: join(dir, ".gemini", "history"),
+        geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+        cursorRoot: join(dir, ".cursor", "projects"),
+        includeClaudeSubagents: false,
+      },
+    });
+
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    const messageRow = db.prepare("SELECT content FROM messages LIMIT 1").get() as {
+      content: string;
+    };
+    const ftsRow = db.prepare("SELECT content FROM message_fts LIMIT 1").get() as {
+      content: string;
+    };
+    const toolCallRow = db
+      .prepare("SELECT args_json FROM tool_calls LIMIT 1")
+      .get() as { args_json: string };
+    db.close();
+
+    expect(Buffer.byteLength(messageRow.content, "utf8")).toBeLessThan(300 * 1024);
+    expect(messageRow.content).toContain("[truncated from");
+    expect(Buffer.byteLength(ftsRow.content, "utf8")).toBeLessThan(64 * 1024);
+    expect(Buffer.byteLength(toolCallRow.args_json, "utf8")).toBeLessThan(80 * 1024);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("continues indexing other files when one file cannot be read and reports the failing path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-file-issue-"));
+    const dbPath = join(dir, "index.db");
+    const goodFile = join(dir, ".codex", "sessions", "2026", "03", "08", "good.jsonl");
+    const missingFile = join(dir, ".codex", "sessions", "2026", "03", "08", "missing.jsonl");
+    mkdirSync(dirname(goodFile), { recursive: true });
+    writeFileSync(
+      goodFile,
+      `${[
+        JSON.stringify({
+          timestamp: "2026-03-08T10:00:00Z",
+          type: "session_meta",
+          payload: {
+            id: "codex-session-good",
+            cwd: "/workspace/codex",
+            git: { branch: "main" },
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-03-08T10:00:01Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Good file indexed" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const onFileIssue = vi.fn();
+    const result = runIncrementalIndexing(
+      { dbPath },
+      {
+        discoverSessionFiles: () => [
+          {
+            provider: "codex",
+            projectPath: "/workspace/codex",
+            projectName: "codex",
+            sessionIdentity: "codex:codex-session-good:test",
+            sourceSessionId: "codex-session-good",
+            filePath: goodFile,
+            fileSize: 1024,
+            fileMtimeMs: Date.parse("2026-03-08T10:05:00Z"),
+            metadata: {
+              includeInHistory: true,
+              isSubagent: false,
+              unresolvedProject: false,
+              gitBranch: "main",
+              cwd: "/workspace/codex",
+            },
+          },
+          {
+            provider: "codex",
+            projectPath: "/workspace/codex",
+            projectName: "codex",
+            sessionIdentity: "codex:codex-session-missing:test",
+            sourceSessionId: "codex-session-missing",
+            filePath: missingFile,
+            fileSize: 1024,
+            fileMtimeMs: Date.parse("2026-03-08T10:06:00Z"),
+            metadata: {
+              includeInHistory: true,
+              isSubagent: false,
+              unresolvedProject: false,
+              gitBranch: "main",
+              cwd: "/workspace/codex",
+            },
+          },
+        ],
+        onFileIssue,
+      },
+    );
+
+    expect(result.discoveredFiles).toBe(2);
+    expect(result.indexedFiles).toBe(1);
+    expect(result.skippedFiles).toBe(0);
+    expect(result.diagnostics.errors).toBe(1);
+    expect(onFileIssue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "codex",
+        sessionId: "codex-session-missing",
+        filePath: missingFile,
+        stage: "read",
+      }),
+    );
+
+    const db = openDatabase(dbPath);
+    const sessionCount = db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number };
+    const indexedFileCount = db.prepare("SELECT COUNT(*) as c FROM indexed_files").get() as { c: number };
+    db.close();
+
+    expect(sessionCount.c).toBe(1);
+    expect(indexedFileCount.c).toBe(1);
 
     rmSync(dir, { recursive: true, force: true });
   });

@@ -70,6 +70,10 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
 
   invoke.mockImplementation(async (channel, payload) => {
     const request = payload as Request;
+    const handler = handlers[channel];
+    if (handler) {
+      return await handler(request);
+    }
 
     if (channel === "ui:getState") {
       return EMPTY_UI_STATE;
@@ -87,16 +91,14 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
     if (channel === "indexer:refresh") {
       return { jobId: "refresh-1" };
     }
+    if (channel === "indexer:getStatus") {
+      return { running: false, queuedJobs: 0, activeJobId: null };
+    }
     if (channel === "bookmarks:toggle") {
       return { bookmarked: true };
     }
     if (channel === "app:getSettingsInfo") {
       return SETTINGS_INFO;
-    }
-
-    const handler = handlers[channel];
-    if (handler) {
-      return await handler(request);
     }
 
     throw new Error(`Unhandled IPC call: ${channel}`);
@@ -105,7 +107,7 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
   return client;
 }
 
-export function createAppClient() {
+export function createAppClient(overrides: Record<string, ChannelHandler> = {}) {
   return createRendererClient({
     "projects:list": () => ({
       projects: [
@@ -338,6 +340,7 @@ export function createAppClient() {
               ],
       };
     },
+    ...overrides,
   });
 }
 

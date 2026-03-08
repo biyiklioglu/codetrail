@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { MessageCategory, Provider, SearchMode } from "@codetrail/core";
 
@@ -26,6 +26,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   const codetrail = useCodetrailClient();
   const preloadUnavailable = isMissingCodetrailClient(codetrail);
   const [refreshing, setRefreshing] = useState(false);
+  const [indexingInBackground, setIndexingInBackground] = useState(false);
   const [mainView, setMainView] = useState<MainView>("history");
   const [focusMode, setFocusMode] = useState(false);
   const [advancedSearchEnabled, setAdvancedSearchEnabled] = useState(false);
@@ -38,6 +39,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   const logError = useCallback((context: string, error: unknown) => {
     console.error(`[codetrail] ${context}: ${toErrorMessage(error)}`);
   }, []);
+  const wasIndexingRef = useRef(false);
 
   const appearance = useAppearanceController({
     initialPaneState,
@@ -77,6 +79,43 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     }
   }, [history.sortedProjects, search]);
 
+  const reloadIndexedData = useCallback(async () => {
+    await Promise.all([history.handleRefreshAllData(), search.reloadSearch()]);
+  }, [history.handleRefreshAllData, search.reloadSearch]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncIndexingStatus = async () => {
+      try {
+        const status = await codetrail.invoke("indexer:getStatus", {});
+        if (cancelled) {
+          return;
+        }
+        setIndexingInBackground(status.running);
+        const wasIndexing = wasIndexingRef.current;
+        wasIndexingRef.current = status.running;
+        if (wasIndexing && !status.running) {
+          await reloadIndexedData();
+        }
+      } catch (error) {
+        if (!cancelled) {
+          logError("Indexing status refresh failed", error);
+        }
+      }
+    };
+
+    void syncIndexingStatus();
+    const intervalId = window.setInterval(() => {
+      void syncIndexingStatus();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [codetrail, logError, reloadIndexedData]);
+
   const focusSessionSearch = useCallback(() => {
     setMainView("history");
     history.focusSessionSearch();
@@ -92,7 +131,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
       setRefreshing(true);
       try {
         await codetrail.invoke("indexer:refresh", { force });
-        await Promise.all([history.handleRefreshAllData(), search.reloadSearch()]);
+        await reloadIndexedData();
       } catch (error) {
         logError("Refresh failed", error);
       } finally {
@@ -109,6 +148,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   const handleForceRefresh = useCallback(async () => {
     await handleRefresh(true);
   }, [handleRefresh]);
+  const indexing = refreshing || indexingInBackground;
 
   useKeyboardShortcuts({
     mainView,
@@ -152,7 +192,7 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
       <TopBar
         mainView={mainView}
         theme={appearance.theme}
-        refreshing={refreshing}
+        indexing={indexing}
         focusMode={focusMode}
         focusDisabled={mainView !== "history"}
         onToggleSearchView={() =>

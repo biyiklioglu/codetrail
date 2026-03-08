@@ -40,6 +40,14 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
     request: { force: false },
     response: { jobId: "refresh-1" },
   },
+  "indexer:getStatus": {
+    request: {},
+    response: {
+      running: false,
+      queuedJobs: 0,
+      activeJobId: null,
+    },
+  },
   "projects:list": {
     request: { providers: ["claude"], query: "" },
     response: { projects: [] },

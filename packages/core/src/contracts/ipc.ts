@@ -172,6 +172,12 @@ const settingsInfoResponseSchema = z.object({
   }),
 });
 
+const indexerStatusResponseSchema = z.object({
+  running: z.boolean(),
+  queuedJobs: z.number().int().nonnegative(),
+  activeJobId: z.string().min(1).nullable(),
+});
+
 export const ipcContractSchemas = {
   "app:getHealth": {
     request: z.object({}),
@@ -197,6 +203,10 @@ export const ipcContractSchemas = {
     response: z.object({
       jobId: z.string().min(1),
     }),
+  },
+  "indexer:getStatus": {
+    request: z.object({}),
+    response: indexerStatusResponseSchema,
   },
   "projects:list": {
     request: z.object({

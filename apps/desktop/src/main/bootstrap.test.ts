@@ -13,6 +13,7 @@ const {
   mockWorkerIndexingRunner,
   mockRegisterIpcHandlers,
   mockEnqueue,
+  mockGetStatus,
   mockStat,
   mockRealpath,
   mockOpenPath,
@@ -54,6 +55,7 @@ const {
   mockWorkerIndexingRunner: vi.fn(),
   mockRegisterIpcHandlers: vi.fn(),
   mockEnqueue: vi.fn(async () => ({ jobId: "job-1" })),
+  mockGetStatus: vi.fn(() => ({ running: false, queuedJobs: 0, activeJobId: null })),
   mockStat: vi.fn<() => Promise<{ isFile: () => boolean }>>(async () => ({ isFile: () => false })),
   mockRealpath: vi.fn(async (pathValue: string) => pathValue),
   mockOpenPath: vi.fn(async () => ""),
@@ -187,6 +189,7 @@ describe("bootstrapMainProcess", () => {
 
     mockWorkerIndexingRunner.mockImplementation(() => ({
       enqueue: mockEnqueue,
+      getStatus: mockGetStatus,
     }));
     mockCreateQueryService.mockImplementation(() => ({
       listProjects: mockListProjects,
@@ -339,6 +342,11 @@ describe("bootstrapMainProcess", () => {
         force: true,
       }),
     );
+    expect(getRequiredHandler(handlers, "indexer:getStatus")({})).toEqual({
+      running: false,
+      queuedJobs: 0,
+      activeJobId: null,
+    });
   });
 
   it("manages path actions for files, directories and fallback errors", async () => {

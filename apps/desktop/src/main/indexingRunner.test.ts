@@ -1,8 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { WorkerIndexingRunner } from "./indexingRunner";
+import { WorkerIndexingRunner, shouldUseIndexingWorker } from "./indexingRunner";
 
-type WorkerMessage = { ok: true } | { ok: false; message: string };
+type WorkerMessage =
+  | { type: "result"; ok: true }
+  | { type: "result"; ok: false; message: string; stack?: string }
+  | {
+      type: "file-issue";
+      issue: {
+        provider: "claude" | "codex" | "gemini" | "cursor";
+        sessionId: string;
+        filePath: string;
+        stage: "read" | "parse" | "persist";
+        error: unknown;
+      };
+    };
 type WorkerRequest = {
   dbPath: string;
   forceReindex: boolean;
@@ -16,7 +28,7 @@ type WorkerRequest = {
 
 type WorkerController = {
   worker: {
-    once(event: "message", listener: (value: WorkerMessage) => void): void;
+    on(event: "message", listener: (value: WorkerMessage) => void): void;
     once(event: "error", listener: (error: unknown) => void): void;
     once(event: "exit", listener: (code: number) => void): void;
     postMessage(value: WorkerRequest): void;
@@ -30,19 +42,24 @@ type WorkerController = {
 
 function createWorkerController(): WorkerController {
   const listeners: {
-    message?: (value: WorkerMessage) => void;
+    message: Array<(value: WorkerMessage) => void>;
     error?: (error: unknown) => void;
     exit?: (code: number) => void;
-  } = {};
+  } = {
+    message: [],
+  };
   let lastRequest: WorkerRequest | null = null;
 
   return {
     worker: {
-      once(event, listener) {
+      on(event, listener) {
         if (event === "message") {
-          listeners.message = listener as (value: WorkerMessage) => void;
+          listeners.message.push(listener as (value: WorkerMessage) => void);
           return;
         }
+        throw new Error(`Unsupported event registration: ${event}`);
+      },
+      once(event, listener) {
         if (event === "error") {
           listeners.error = listener as (error: unknown) => void;
           return;
@@ -57,10 +74,35 @@ function createWorkerController(): WorkerController {
       },
     },
     getLastRequest: () => lastRequest,
-    emitMessage: (value) => listeners.message?.(value),
+    emitMessage: (value) => {
+      for (const listener of listeners.message) {
+        listener(value);
+      }
+    },
     emitError: (error) => listeners.error?.(error),
     emitExit: (code) => listeners.exit?.(code),
   };
+}
+
+async function withIndexingWorkerOverride<T>(
+  value: "0" | "1" | undefined,
+  callback: () => Promise<T>,
+): Promise<T> {
+  const previous = process.env.CODETRAIL_ENABLE_INDEXING_WORKER;
+  if (value === undefined) {
+    delete process.env.CODETRAIL_ENABLE_INDEXING_WORKER;
+  } else {
+    process.env.CODETRAIL_ENABLE_INDEXING_WORKER = value;
+  }
+  try {
+    return await callback();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CODETRAIL_ENABLE_INDEXING_WORKER;
+    } else {
+      process.env.CODETRAIL_ENABLE_INDEXING_WORKER = previous;
+    }
+  }
 }
 
 function makeIndexingResult() {
@@ -102,6 +144,32 @@ function createBookmarkStoreHarness() {
 }
 
 describe("WorkerIndexingRunner", () => {
+  it("disables the bundled worker on Electron 35+ for macOS by default", () => {
+    expect(
+      shouldUseIndexingWorker({
+        platform: "darwin",
+        electronVersion: "35.0.0",
+      }),
+    ).toBe(false);
+  });
+
+  it("allows overriding the worker runtime decision explicitly", () => {
+    expect(
+      shouldUseIndexingWorker({
+        platform: "darwin",
+        electronVersion: "35.0.0",
+        enableWorkerOverride: "1",
+      }),
+    ).toBe(true);
+    expect(
+      shouldUseIndexingWorker({
+        platform: "linux",
+        electronVersion: "34.3.0",
+        enableWorkerOverride: "0",
+      }),
+    ).toBe(false);
+  });
+
   it("runs indexing directly when worker is unavailable", async () => {
     const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
     const bookmarkHarness = createBookmarkStoreHarness();
@@ -155,38 +223,11 @@ describe("WorkerIndexingRunner", () => {
   });
 
   it("uses worker path when worker returns success", async () => {
-    const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
-    const controller = createWorkerController();
-    const bookmarkHarness = createBookmarkStoreHarness();
+    await withIndexingWorkerOverride("1", async () => {
+      const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
+      const controller = createWorkerController();
+      const bookmarkHarness = createBookmarkStoreHarness();
 
-    const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
-      runIncrementalIndexing,
-      resolveWorkerUrl: () => new URL("file:///tmp/indexingWorker.js"),
-      createWorker: () => controller.worker,
-      createBookmarkStore: bookmarkHarness.createBookmarkStore,
-    });
-
-    const job = runner.enqueue({ force: false });
-    await Promise.resolve();
-    expect(controller.getLastRequest()).toEqual({
-      dbPath: "/tmp/codetrail.db",
-      forceReindex: false,
-    });
-
-    controller.emitMessage({ ok: true });
-
-    await expect(job).resolves.toEqual({ jobId: "refresh-1" });
-    expect(runIncrementalIndexing).not.toHaveBeenCalled();
-    expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledWith("/tmp/codetrail.db");
-  });
-
-  it("falls back to direct indexing when worker returns error payload", async () => {
-    const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
-    const controller = createWorkerController();
-    const bookmarkHarness = createBookmarkStoreHarness();
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-    try {
       const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
         runIncrementalIndexing,
         resolveWorkerUrl: () => new URL("file:///tmp/indexingWorker.js"),
@@ -196,84 +237,191 @@ describe("WorkerIndexingRunner", () => {
 
       const job = runner.enqueue({ force: false });
       await Promise.resolve();
-      controller.emitMessage({ ok: false, message: "worker failed" });
+      expect(runner.getStatus()).toEqual({
+        running: true,
+        queuedJobs: 1,
+        activeJobId: "refresh-1",
+      });
+      expect(controller.getLastRequest()).toEqual({
+        dbPath: "/tmp/codetrail.db",
+        forceReindex: false,
+      });
+
+      controller.emitMessage({ type: "result", ok: true });
+
+      await expect(job).resolves.toEqual({ jobId: "refresh-1" });
+      expect(runner.getStatus()).toEqual({
+        running: false,
+        queuedJobs: 0,
+        activeJobId: null,
+      });
+      expect(runIncrementalIndexing).not.toHaveBeenCalled();
+      expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledWith("/tmp/codetrail.db");
+    });
+  });
+
+  it("falls back to direct indexing when worker returns error payload", async () => {
+    await withIndexingWorkerOverride("1", async () => {
+      const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
+      const controller = createWorkerController();
+      const bookmarkHarness = createBookmarkStoreHarness();
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      try {
+        const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
+          runIncrementalIndexing,
+          resolveWorkerUrl: () => new URL("file:///tmp/indexingWorker.js"),
+          createWorker: () => controller.worker,
+          createBookmarkStore: bookmarkHarness.createBookmarkStore,
+        });
+
+        const job = runner.enqueue({ force: false });
+        await Promise.resolve();
+        controller.emitMessage({ type: "result", ok: false, message: "worker failed" });
+
+        await expect(job).resolves.toEqual({ jobId: "refresh-1" });
+        expect(runIncrementalIndexing).toHaveBeenCalledTimes(1);
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          "[codetrail] indexing worker failed; falling back to in-process indexing",
+          expect.any(Error),
+        );
+        expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledWith("/tmp/codetrail.db");
+      } finally {
+        consoleErrorSpy.mockRestore();
+      }
+    });
+  });
+
+  it("uses child-process path when worker threads are disabled", async () => {
+    await withIndexingWorkerOverride("0", async () => {
+      const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
+      const controller = createWorkerController();
+      const bookmarkHarness = createBookmarkStoreHarness();
+      const onFileIssue = vi.fn();
+
+      const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
+        runIncrementalIndexing,
+        resolveWorkerUrl: () => new URL("file:///tmp/indexingWorker.js"),
+        createBackgroundProcess: () => controller.worker,
+        createBookmarkStore: bookmarkHarness.createBookmarkStore,
+        onFileIssue,
+      });
+
+      const job = runner.enqueue({ force: false });
+      await Promise.resolve();
+      expect(controller.getLastRequest()).toEqual({
+        dbPath: "/tmp/codetrail.db",
+        forceReindex: false,
+      });
+
+      controller.emitMessage({
+        type: "file-issue",
+        issue: {
+          provider: "codex",
+          sessionId: "session-1",
+          filePath: "/tmp/bad.jsonl",
+          stage: "parse",
+          error: { message: "bad line" },
+        },
+      });
+      controller.emitMessage({ type: "result", ok: true });
+
+      await expect(job).resolves.toEqual({ jobId: "refresh-1" });
+      expect(onFileIssue).toHaveBeenCalledWith({
+        provider: "codex",
+        sessionId: "session-1",
+        filePath: "/tmp/bad.jsonl",
+        stage: "parse",
+        error: { message: "bad line" },
+      });
+      expect(runIncrementalIndexing).not.toHaveBeenCalled();
+      expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledWith("/tmp/codetrail.db");
+    });
+  });
+
+  it("falls back to direct indexing when background runtime exits non-zero", async () => {
+    await withIndexingWorkerOverride("0", async () => {
+      const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
+      const controller = createWorkerController();
+      const bookmarkHarness = createBookmarkStoreHarness();
+
+      const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
+        runIncrementalIndexing,
+        resolveWorkerUrl: () => new URL("file:///tmp/indexingWorker.js"),
+        createBackgroundProcess: () => controller.worker,
+        createBookmarkStore: bookmarkHarness.createBookmarkStore,
+      });
+
+      const job = runner.enqueue({ force: true });
+      await Promise.resolve();
+      controller.emitExit(1);
 
       await expect(job).resolves.toEqual({ jobId: "refresh-1" });
       expect(runIncrementalIndexing).toHaveBeenCalledTimes(1);
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "[codetrail] indexing worker failed; falling back to in-process indexing",
-        expect.any(Error),
-      );
+      expect(runIncrementalIndexing).toHaveBeenCalledWith({
+        dbPath: "/tmp/codetrail.db",
+        forceReindex: true,
+      });
       expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledWith("/tmp/codetrail.db");
-    } finally {
-      consoleErrorSpy.mockRestore();
-    }
-  });
-
-  it("falls back to direct indexing when worker exits non-zero", async () => {
-    const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
-    const controller = createWorkerController();
-    const bookmarkHarness = createBookmarkStoreHarness();
-
-    const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
-      runIncrementalIndexing,
-      resolveWorkerUrl: () => new URL("file:///tmp/indexingWorker.js"),
-      createWorker: () => controller.worker,
-      createBookmarkStore: bookmarkHarness.createBookmarkStore,
     });
-
-    const job = runner.enqueue({ force: true });
-    await Promise.resolve();
-    controller.emitExit(1);
-
-    await expect(job).resolves.toEqual({ jobId: "refresh-1" });
-    expect(runIncrementalIndexing).toHaveBeenCalledTimes(1);
-    expect(runIncrementalIndexing).toHaveBeenCalledWith({
-      dbPath: "/tmp/codetrail.db",
-      forceReindex: true,
-    });
-    expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledWith("/tmp/codetrail.db");
   });
 
   it("serializes queued jobs and increments job ids", async () => {
-    const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
-    const workers: WorkerController[] = [];
-    const bookmarkHarness = createBookmarkStoreHarness();
+    await withIndexingWorkerOverride("1", async () => {
+      const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
+      const workers: WorkerController[] = [];
+      const bookmarkHarness = createBookmarkStoreHarness();
 
-    const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
-      runIncrementalIndexing,
-      resolveWorkerUrl: () => new URL("file:///tmp/indexingWorker.js"),
-      createWorker: () => {
-        const controller = createWorkerController();
-        workers.push(controller);
-        return controller.worker;
-      },
-      createBookmarkStore: bookmarkHarness.createBookmarkStore,
+      const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
+        runIncrementalIndexing,
+        resolveWorkerUrl: () => new URL("file:///tmp/indexingWorker.js"),
+        createWorker: () => {
+          const controller = createWorkerController();
+          workers.push(controller);
+          return controller.worker;
+        },
+        createBookmarkStore: bookmarkHarness.createBookmarkStore,
+      });
+
+      const first = runner.enqueue({ force: false });
+      const second = runner.enqueue({ force: true });
+      await Promise.resolve();
+
+      expect(workers).toHaveLength(1);
+      expect(runner.getStatus()).toEqual({
+        running: true,
+        queuedJobs: 2,
+        activeJobId: "refresh-1",
+      });
+      expect(workers[0]?.getLastRequest()).toEqual({
+        dbPath: "/tmp/codetrail.db",
+        forceReindex: false,
+      });
+
+      workers[0]?.emitMessage({ type: "result", ok: true });
+      await expect(first).resolves.toEqual({ jobId: "refresh-1" });
+
+      await Promise.resolve();
+      expect(workers).toHaveLength(2);
+      expect(runner.getStatus()).toEqual({
+        running: true,
+        queuedJobs: 1,
+        activeJobId: "refresh-2",
+      });
+      expect(workers[1]?.getLastRequest()).toEqual({
+        dbPath: "/tmp/codetrail.db",
+        forceReindex: true,
+      });
+
+      workers[1]?.emitMessage({ type: "result", ok: true });
+      await expect(second).resolves.toEqual({ jobId: "refresh-2" });
+      expect(runner.getStatus()).toEqual({
+        running: false,
+        queuedJobs: 0,
+        activeJobId: null,
+      });
+      expect(runIncrementalIndexing).not.toHaveBeenCalled();
+      expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledTimes(2);
     });
-
-    const first = runner.enqueue({ force: false });
-    const second = runner.enqueue({ force: true });
-    await Promise.resolve();
-
-    expect(workers).toHaveLength(1);
-    expect(workers[0]?.getLastRequest()).toEqual({
-      dbPath: "/tmp/codetrail.db",
-      forceReindex: false,
-    });
-
-    workers[0]?.emitMessage({ ok: true });
-    await expect(first).resolves.toEqual({ jobId: "refresh-1" });
-
-    await Promise.resolve();
-    expect(workers).toHaveLength(2);
-    expect(workers[1]?.getLastRequest()).toEqual({
-      dbPath: "/tmp/codetrail.db",
-      forceReindex: true,
-    });
-
-    workers[1]?.emitMessage({ ok: true });
-    await expect(second).resolves.toEqual({ jobId: "refresh-2" });
-    expect(runIncrementalIndexing).not.toHaveBeenCalled();
-    expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledTimes(2);
   });
 });
