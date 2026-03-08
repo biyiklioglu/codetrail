@@ -5,6 +5,7 @@ import { Worker } from "node:worker_threads";
 
 import {
   type IndexingFileIssue,
+  type IndexingNotice,
   type SystemMessageRegexRuleOverrides,
   runIncrementalIndexing,
 } from "@codetrail/core";
@@ -48,6 +49,10 @@ type IndexingWorkerMessage =
   | {
       type: "file-issue";
       issue: IndexingFileIssue;
+    }
+  | {
+      type: "notice";
+      notice: IndexingNotice;
     };
 
 type WorkerLike = {
@@ -67,6 +72,7 @@ export type IndexingRunnerDependencies = {
   bookmarksDbPath?: string;
   createBookmarkStore?: (bookmarksDbPath: string) => BookmarkStore;
   onFileIssue?: (issue: IndexingFileIssue) => void;
+  onNotice?: (notice: IndexingNotice) => void;
 };
 
 type IndexingWorkerRuntimeOptions = {
@@ -91,6 +97,7 @@ export class WorkerIndexingRunner {
   private readonly bookmarksDbPath: string;
   private readonly createBookmarkStoreFn: (bookmarksDbPath: string) => BookmarkStore;
   private readonly onFileIssue: ((issue: IndexingFileIssue) => void) | undefined;
+  private readonly onNotice: ((notice: IndexingNotice) => void) | undefined;
   private pendingJobs = 0;
   private activeJobId: string | null = null;
 
@@ -140,6 +147,7 @@ export class WorkerIndexingRunner {
     this.bookmarksDbPath = dependencies.bookmarksDbPath ?? resolveBookmarksDbPath(dbPath);
     this.createBookmarkStoreFn = dependencies.createBookmarkStore ?? createBookmarkStore;
     this.onFileIssue = dependencies.onFileIssue;
+    this.onNotice = dependencies.onNotice;
   }
 
   async enqueue(request: RefreshJobRequest): Promise<RefreshJobResponse> {
@@ -158,6 +166,7 @@ export class WorkerIndexingRunner {
           createWorker: this.createWorkerFn,
           createBackgroundProcess: this.createBackgroundProcessFn,
           ...(this.onFileIssue ? { onFileIssue: this.onFileIssue } : {}),
+          ...(this.onNotice ? { onNotice: this.onNotice } : {}),
         });
         const bookmarkStore = this.createBookmarkStoreFn(this.bookmarksDbPath);
         try {
@@ -197,6 +206,7 @@ async function runIndexingJob(args: {
   createWorker: (workerUrl: URL) => WorkerLike;
   createBackgroundProcess: (workerUrl: URL) => WorkerLike;
   onFileIssue?: (issue: IndexingFileIssue) => void;
+  onNotice?: (notice: IndexingNotice) => void;
 }): Promise<void> {
   if (!args.workerUrl) {
     // Tests and some dev builds do not emit the worker bundle, so keep an in-process path.
@@ -204,6 +214,7 @@ async function runIndexingJob(args: {
       dbPath: args.dbPath,
       forceReindex: args.forceReindex,
       ...(args.onFileIssue ? { onFileIssue: args.onFileIssue } : {}),
+      ...(args.onNotice ? { onNotice: args.onNotice } : {}),
       ...(args.systemMessageRegexRules
         ? { systemMessageRegexRules: args.systemMessageRegexRules }
         : {}),
@@ -226,6 +237,7 @@ async function runIndexingJob(args: {
           : {}),
       },
       args.onFileIssue,
+      args.onNotice,
     );
   } catch (error) {
     // Falling back preserves functionality even if the worker cannot boot due to packaging or ABI
@@ -235,6 +247,7 @@ async function runIndexingJob(args: {
       dbPath: args.dbPath,
       forceReindex: args.forceReindex,
       ...(args.onFileIssue ? { onFileIssue: args.onFileIssue } : {}),
+      ...(args.onNotice ? { onNotice: args.onNotice } : {}),
       ...(args.systemMessageRegexRules
         ? { systemMessageRegexRules: args.systemMessageRegexRules }
         : {}),
@@ -246,6 +259,7 @@ function runIndexingInBackgroundRuntime(
   worker: WorkerLike,
   request: IndexingWorkerRequest,
   onFileIssue?: (issue: IndexingFileIssue) => void,
+  onNotice?: (notice: IndexingNotice) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -263,6 +277,10 @@ function runIndexingInBackgroundRuntime(
     worker.on("message", (response: IndexingWorkerMessage) => {
       if (response?.type === "file-issue") {
         onFileIssue?.(response.issue);
+        return;
+      }
+      if (response?.type === "notice") {
+        onNotice?.(response.notice);
         return;
       }
       if (!response || response.type !== "result" || response.ok !== true) {

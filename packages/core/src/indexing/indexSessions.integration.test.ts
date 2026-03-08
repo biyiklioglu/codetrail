@@ -426,10 +426,14 @@ describe("runIncrementalIndexing", () => {
       },
     ];
 
+    const notices: Array<{ code: string; message: string }> = [];
     const first = runIncrementalIndexing(
       { dbPath },
       {
         discoverSessionFiles,
+        onNotice: (notice) => {
+          notices.push({ code: notice.code, message: notice.message });
+        },
       },
     );
     expect(first.indexedFiles).toBe(1);
@@ -464,6 +468,9 @@ describe("runIncrementalIndexing", () => {
       { dbPath },
       {
         discoverSessionFiles,
+        onNotice: (notice) => {
+          notices.push({ code: notice.code, message: notice.message });
+        },
       },
     );
 
@@ -489,6 +496,11 @@ describe("runIncrementalIndexing", () => {
     );
     expect(messages.some((message) => message.category === "tool_result")).toBe(false);
     expect(checkpoint.last_offset_bytes).toBe(checkpoint.file_size);
+    expect(notices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "parser.invalid_jsonl_line" }),
+      ]),
+    );
 
     rmSync(dir, { recursive: true, force: true });
   });
@@ -524,18 +536,26 @@ describe("runIncrementalIndexing", () => {
       ].join("\n")}\n`,
     );
 
-    const result = runIncrementalIndexing({
-      dbPath,
-      discoveryConfig: {
-        claudeRoot: join(dir, ".claude", "projects"),
-        codexRoot: join(dir, ".codex", "sessions"),
-        geminiRoot: join(dir, ".gemini", "tmp"),
-        geminiHistoryRoot: join(dir, ".gemini", "history"),
-        geminiProjectsPath: join(dir, ".gemini", "projects.json"),
-        cursorRoot: join(dir, ".cursor", "projects"),
-        includeClaudeSubagents: false,
+    const notices: string[] = [];
+    const result = runIncrementalIndexing(
+      {
+        dbPath,
+        discoveryConfig: {
+          claudeRoot: join(dir, ".claude", "projects"),
+          codexRoot: join(dir, ".codex", "sessions"),
+          geminiRoot: join(dir, ".gemini", "tmp"),
+          geminiHistoryRoot: join(dir, ".gemini", "history"),
+          geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+          cursorRoot: join(dir, ".cursor", "projects"),
+          includeClaudeSubagents: false,
+        },
       },
-    });
+      {
+        onNotice: (notice) => {
+          notices.push(notice.code);
+        },
+      },
+    );
 
     expect(result.indexedFiles).toBe(1);
 
@@ -555,6 +575,12 @@ describe("runIncrementalIndexing", () => {
     expect(messageRow.content).toContain("[truncated from");
     expect(Buffer.byteLength(ftsRow.content, "utf8")).toBeLessThan(64 * 1024);
     expect(Buffer.byteLength(toolCallRow.args_json, "utf8")).toBeLessThan(80 * 1024);
+    expect(notices).toEqual(
+      expect.arrayContaining([
+        "index.message_fts_truncated",
+        "index.tool_call_raw_truncated",
+      ]),
+    );
 
     rmSync(dir, { recursive: true, force: true });
   });

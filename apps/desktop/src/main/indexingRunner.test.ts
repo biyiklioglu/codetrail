@@ -14,6 +14,19 @@ type WorkerMessage =
         stage: "read" | "parse" | "persist";
         error: unknown;
       };
+    }
+  | {
+      type: "notice";
+      notice: {
+        provider: "claude" | "codex" | "gemini" | "cursor";
+        sessionId: string;
+        filePath: string;
+        stage: "read" | "parse" | "persist";
+        severity: "info" | "warning";
+        code: string;
+        message: string;
+        details?: Record<string, unknown>;
+      };
     };
 type WorkerRequest = {
   dbPath: string;
@@ -336,6 +349,53 @@ describe("WorkerIndexingRunner", () => {
       });
       expect(runIncrementalIndexing).not.toHaveBeenCalled();
       expect(bookmarkHarness.reconcileWithIndexedData).toHaveBeenCalledWith("/tmp/codetrail.db");
+    });
+  });
+
+  it("forwards indexing notices from the background runtime", async () => {
+    await withIndexingWorkerOverride("0", async () => {
+      const runIncrementalIndexing = vi.fn(() => makeIndexingResult());
+      const controller = createWorkerController();
+      const bookmarkHarness = createBookmarkStoreHarness();
+      const onNotice = vi.fn();
+
+      const runner = new WorkerIndexingRunner("/tmp/codetrail.db", {
+        runIncrementalIndexing,
+        resolveWorkerUrl: () => new URL("file:///tmp/indexingWorker.js"),
+        createBackgroundProcess: () => controller.worker,
+        createBookmarkStore: bookmarkHarness.createBookmarkStore,
+        onNotice,
+      });
+
+      const job = runner.enqueue({ force: false });
+      await Promise.resolve();
+
+      controller.emitMessage({
+        type: "notice",
+        notice: {
+          provider: "codex",
+          sessionId: "session-1",
+          filePath: "/tmp/bad.jsonl",
+          stage: "parse",
+          severity: "warning",
+          code: "parser.invalid_jsonl_line",
+          message: "line skipped",
+          details: { lineNumber: 10 },
+        },
+      });
+      controller.emitMessage({ type: "result", ok: true });
+
+      await expect(job).resolves.toEqual({ jobId: "refresh-1" });
+      expect(onNotice).toHaveBeenCalledWith({
+        provider: "codex",
+        sessionId: "session-1",
+        filePath: "/tmp/bad.jsonl",
+        stage: "parse",
+        severity: "warning",
+        code: "parser.invalid_jsonl_line",
+        message: "line skipped",
+        details: { lineNumber: 10 },
+      });
     });
   });
 

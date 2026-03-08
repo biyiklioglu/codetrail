@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -12,6 +12,7 @@ import {
 
 import { type AppStateStore, createAppStateStore } from "./appStateStore";
 import { bootstrapMainProcess, shutdownMainProcess } from "./bootstrap";
+import { appendDebugLog } from "./debugLog";
 
 let mainWindowRef: BrowserWindow | null = null;
 let debugLogPathCache: string | null = null;
@@ -51,7 +52,7 @@ function writeDebugLog(message: string, details?: unknown, options?: { force?: b
     console.log(line.trimEnd());
   }
   try {
-    appendFileSync(getDebugLogPath(), line, "utf8");
+    appendDebugLog(getDebugLogPath(), line);
   } catch (error) {
     console.error("[codetrail] failed writing debug log", error);
   }
@@ -79,6 +80,11 @@ function logAppError(message: string, error: unknown, details?: Record<string, u
     },
     { force: true },
   );
+}
+
+function logIndexingNotice(message: string, details: Record<string, unknown>): void {
+  console.info(`[codetrail] ${message}`, details);
+  writeDebugLog(message, details, { force: true });
 }
 
 function createWindow(appStateStore: AppStateStore): BrowserWindow {
@@ -265,6 +271,18 @@ if (hasSingleInstanceLock) {
             sessionId: issue.sessionId,
             filePath: issue.filePath,
             stage: issue.stage,
+          });
+        },
+        onIndexingNotice: (notice) => {
+          logIndexingNotice("indexing notice", {
+            provider: notice.provider,
+            sessionId: notice.sessionId,
+            filePath: notice.filePath,
+            stage: notice.stage,
+            severity: notice.severity,
+            code: notice.code,
+            message: notice.message,
+            ...(notice.details ? { details: notice.details } : {}),
           });
         },
         onBackgroundError: (message, error, details) => {

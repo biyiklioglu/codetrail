@@ -2,6 +2,7 @@ import { parentPort } from "node:worker_threads";
 
 import {
   type IndexingFileIssue,
+  type IndexingNotice,
   type SystemMessageRegexRuleOverrides,
   runIncrementalIndexing,
 } from "@codetrail/core";
@@ -31,6 +32,10 @@ type IndexingWorkerMessage =
       issue: Omit<IndexingFileIssue, "error"> & {
         error: unknown;
       };
+    }
+  | {
+      type: "notice";
+      notice: IndexingNotice;
     };
 
 function serializeError(error: unknown): unknown {
@@ -75,6 +80,12 @@ function handleRequest(request: IndexingWorkerRequest): void {
               ...issue,
               error: serializeError(issue.error),
             },
+          });
+        },
+        onNotice: (notice: IndexingNotice) => {
+          postMessage({
+            type: "notice",
+            notice,
           });
         },
       },

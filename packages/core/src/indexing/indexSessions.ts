@@ -47,6 +47,7 @@ export type IndexingDependencies = {
   readFileText?: ReadFileText;
   now?: () => Date;
   onFileIssue?: (issue: IndexingFileIssue) => void;
+  onNotice?: (notice: IndexingNotice) => void;
 };
 
 type ResolvedIndexingDependencies = {
@@ -57,6 +58,7 @@ type ResolvedIndexingDependencies = {
   readFileText: ReadFileText;
   now: () => Date;
   onFileIssue: (issue: IndexingFileIssue) => void;
+  onNotice: (notice: IndexingNotice) => void;
 };
 
 type IndexedFileRow = {
@@ -167,6 +169,17 @@ export type IndexingFileIssue = {
   filePath: string;
   stage: "read" | "parse" | "persist";
   error: unknown;
+};
+
+export type IndexingNotice = {
+  provider: Provider;
+  sessionId: string;
+  filePath: string;
+  stage: "read" | "parse" | "persist";
+  severity: "info" | "warning";
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
 };
 
 type IndexingStatements = {
@@ -430,6 +443,7 @@ export function runIncrementalIndexing(
                 readFileText: resolvedDependencies.readFileText,
                 systemMessageRules: compiledSystemMessageRules.compiledByProvider[discovered.provider],
                 statements,
+                onNotice: resolvedDependencies.onNotice,
               })
             : indexStreamedJsonlSessionFile({
                 db,
@@ -439,6 +453,7 @@ export function runIncrementalIndexing(
                 systemMessageRules: compiledSystemMessageRules.compiledByProvider[discovered.provider],
                 statements,
                 resumeCheckpoint,
+                onNotice: resolvedDependencies.onNotice,
               });
         accumulateParserDiagnostics(diagnostics, fileDiagnostics);
       } catch (error) {
@@ -491,6 +506,7 @@ function resolveIndexingDependencies(
     readFileText: dependencies.readFileText ?? ((filePath) => readFileSync(filePath, "utf8")),
     now: dependencies.now ?? (() => new Date()),
     onFileIssue: dependencies.onFileIssue ?? defaultOnFileIssue,
+    onNotice: dependencies.onNotice ?? defaultOnNotice,
   };
 }
 
@@ -502,6 +518,7 @@ function indexMaterializedSessionFile(args: {
   readFileText: ReadFileText;
   systemMessageRules: RegExp[];
   statements: IndexingStatements;
+  onNotice: (notice: IndexingNotice) => void;
 }): ParserDiagnostic[] {
   let source: {
     rawPayload: unknown[] | Record<string, unknown>;
@@ -590,7 +607,12 @@ function indexMaterializedSessionFile(args: {
       );
 
       for (const message of messagesWithTimestamps) {
-        insertIndexedMessage(args.statements, args.sessionDbId, message);
+        insertIndexedMessage(args.statements, args.sessionDbId, message, {
+          provider: args.discovered.provider,
+          sessionId: args.discovered.sourceSessionId,
+          filePath: args.discovered.filePath,
+          onNotice: args.onNotice,
+        });
       }
 
       args.statements.upsertIndexedFile.run(
@@ -625,6 +647,7 @@ function indexStreamedJsonlSessionFile(args: {
   systemMessageRules: RegExp[];
   statements: IndexingStatements;
   resumeCheckpoint: ResumeCheckpoint | null;
+  onNotice: (notice: IndexingNotice) => void;
 }): ParserDiagnostic[] {
   const parserDiagnostics: ParserDiagnostic[] = [];
   const sourceMetaAccumulator = createSourceMetadataAccumulator(args.resumeCheckpoint?.sourceMetadata);
@@ -706,17 +729,33 @@ function indexStreamedJsonlSessionFile(args: {
                 continue;
               }
               const normalizedMessage = normalizeIndexedMessage(processingState, message);
-              insertIndexedMessage(args.statements, args.sessionDbId, normalizedMessage);
+              insertIndexedMessage(args.statements, args.sessionDbId, normalizedMessage, {
+                provider: args.discovered.provider,
+                sessionId: args.discovered.sourceSessionId,
+                filePath: args.discovered.filePath,
+                onNotice: args.onNotice,
+              });
             }
           },
           onInvalidLine: (lineNumber, error) => {
+            const noticeMessage = error instanceof Error ? error.message : String(error);
             parserDiagnostics.push({
               severity: "warning",
               code: "parser.invalid_jsonl_line",
               provider: args.discovered.provider,
               sessionId: args.discovered.sourceSessionId,
               eventIndex: lineNumber - 1,
-              message: error instanceof Error ? error.message : String(error),
+              message: noticeMessage,
+            });
+            args.onNotice({
+              provider: args.discovered.provider,
+              sessionId: args.discovered.sourceSessionId,
+              filePath: args.discovered.filePath,
+              stage: "parse",
+              severity: "warning",
+              code: "parser.invalid_jsonl_line",
+              message: noticeMessage,
+              details: { lineNumber },
             });
           },
         });
@@ -1367,10 +1406,51 @@ function insertIndexedMessage(
   statements: IndexingStatements,
   sessionDbId: string,
   message: IndexedMessage,
+  context?: {
+    provider: Provider;
+    sessionId: string;
+    filePath: string;
+    onNotice: (notice: IndexingNotice) => void;
+  },
 ): void {
   const messageId = makeMessageId(sessionDbId, message.id);
   const persistedContent = truncateTextForIndexing(message.content, MAX_INDEXED_MESSAGE_CONTENT_BYTES);
+  const persistedContentWasTruncated = persistedContent !== message.content;
   const ftsContent = truncateTextForIndexing(persistedContent, MAX_INDEXED_FTS_CONTENT_BYTES);
+  const ftsContentWasTruncated = ftsContent !== persistedContent;
+  if (context && persistedContentWasTruncated) {
+    context.onNotice({
+      provider: context.provider,
+      sessionId: context.sessionId,
+      filePath: context.filePath,
+      stage: "persist",
+      severity: "warning",
+      code: "index.message_content_truncated",
+      message: `Truncated indexed message content for ${message.id}.`,
+      details: {
+        messageId: message.id,
+        category: message.category,
+        originalBytes: Buffer.byteLength(message.content, "utf8"),
+        storedBytes: Buffer.byteLength(persistedContent, "utf8"),
+      },
+    });
+  }
+  if (context && ftsContentWasTruncated) {
+    context.onNotice({
+      provider: context.provider,
+      sessionId: context.sessionId,
+      filePath: context.filePath,
+      stage: "persist",
+      severity: "info",
+      code: "index.message_fts_truncated",
+      message: `Stored preview-only FTS content for ${message.id}.`,
+      details: {
+        messageId: message.id,
+        originalBytes: Buffer.byteLength(persistedContent, "utf8"),
+        indexedBytes: Buffer.byteLength(ftsContent, "utf8"),
+      },
+    });
+  }
   statements.insertMessage.run(
     messageId,
     message.id,
@@ -1397,7 +1477,13 @@ function insertIndexedMessage(
     return;
   }
 
-  const toolCall = parseToolCallContent(persistedContent);
+  const toolCall = parseToolCallContent(persistedContent, {
+    provider: context?.provider ?? message.provider,
+    sessionId: context?.sessionId ?? message.sessionId,
+    filePath: context?.filePath ?? "",
+    messageId: message.id,
+    ...(context?.onNotice ? { onNotice: context.onNotice } : {}),
+  });
   statements.insertToolCall.run(
     makeToolCallId(messageId, 0),
     messageId,
@@ -1442,6 +1528,14 @@ function defaultOnFileIssue(issue: IndexingFileIssue): void {
   console.error(
     `[codetrail] failed indexing ${issue.provider} session ${issue.filePath} during ${issue.stage}`,
     issue.error,
+  );
+}
+
+function defaultOnNotice(notice: IndexingNotice): void {
+  const details = notice.details ? ` ${JSON.stringify(notice.details)}` : "";
+  const method = notice.severity === "warning" ? console.warn : console.info;
+  method(
+    `[codetrail] indexing ${notice.severity} ${notice.code} ${notice.filePath}: ${notice.message}${details}`,
   );
 }
 
@@ -2113,12 +2207,35 @@ function buildSessionAggregate(
   };
 }
 
-function parseToolCallContent(content: string): {
+function parseToolCallContent(
+  content: string,
+  context?: {
+    provider: Provider;
+    sessionId: string;
+    filePath: string;
+    messageId: string;
+    onNotice?: (notice: IndexingNotice) => void;
+  },
+): {
   toolName: string;
   argsJson: string;
   resultJson: string | null;
 } {
   if (Buffer.byteLength(content, "utf8") > MAX_TOOL_CALL_JSON_BYTES) {
+    context?.onNotice?.({
+      provider: context.provider,
+      sessionId: context.sessionId,
+      filePath: context.filePath,
+      stage: "persist",
+      severity: "warning",
+      code: "index.tool_call_raw_truncated",
+      message: `Tool payload preview was truncated for ${context.messageId}.`,
+      details: {
+        messageId: context.messageId,
+        originalBytes: Buffer.byteLength(content, "utf8"),
+        storedBytes: MAX_TOOL_CALL_JSON_BYTES,
+      },
+    });
     return {
       toolName: "unknown",
       argsJson: JSON.stringify({
@@ -2134,14 +2251,48 @@ function parseToolCallContent(content: string): {
 
     const args = parsed.args ?? parsed.input ?? parsed.arguments ?? parsed;
     const result = parsed.result ?? parsed.output ?? null;
+    const argsJson = JSON.stringify(args);
+    const resultJson = result === undefined || result === null ? null : JSON.stringify(result);
+    const boundedArgsJson = truncateTextForIndexing(argsJson, MAX_TOOL_CALL_JSON_BYTES);
+    const boundedResultJson =
+      resultJson === null ? null : truncateTextForIndexing(resultJson, MAX_TOOL_CALL_JSON_BYTES);
+    if (context?.onNotice && boundedArgsJson !== argsJson) {
+      context.onNotice({
+        provider: context.provider,
+        sessionId: context.sessionId,
+        filePath: context.filePath,
+        stage: "persist",
+        severity: "warning",
+        code: "index.tool_call_args_truncated",
+        message: `Tool args were truncated for ${context.messageId}.`,
+        details: {
+          messageId: context.messageId,
+          originalBytes: Buffer.byteLength(argsJson, "utf8"),
+          storedBytes: Buffer.byteLength(boundedArgsJson, "utf8"),
+        },
+      });
+    }
+    if (context?.onNotice && resultJson !== null && boundedResultJson !== resultJson) {
+      context.onNotice({
+        provider: context.provider,
+        sessionId: context.sessionId,
+        filePath: context.filePath,
+        stage: "persist",
+        severity: "warning",
+        code: "index.tool_call_result_truncated",
+        message: `Tool result was truncated for ${context.messageId}.`,
+        details: {
+          messageId: context.messageId,
+          originalBytes: Buffer.byteLength(resultJson, "utf8"),
+          storedBytes: Buffer.byteLength(boundedResultJson ?? "", "utf8"),
+        },
+      });
+    }
 
     return {
       toolName,
-      argsJson: truncateTextForIndexing(JSON.stringify(args), MAX_TOOL_CALL_JSON_BYTES),
-      resultJson:
-        result === undefined || result === null
-          ? null
-          : truncateTextForIndexing(JSON.stringify(result), MAX_TOOL_CALL_JSON_BYTES),
+      argsJson: boundedArgsJson,
+      resultJson: boundedResultJson,
     };
   } catch {
     return {

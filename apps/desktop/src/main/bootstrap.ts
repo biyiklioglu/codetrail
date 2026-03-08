@@ -7,6 +7,7 @@ import {
   DATABASE_SCHEMA_VERSION,
   DEFAULT_DISCOVERY_CONFIG,
   type IndexingFileIssue,
+  type IndexingNotice,
   initializeDatabase,
   resolveSystemMessageRegexRules,
 } from "@codetrail/core";
@@ -22,6 +23,7 @@ export type BootstrapOptions = {
   runStartupIndexing?: boolean;
   appStateStore?: AppStateStore;
   onIndexingFileIssue?: (issue: IndexingFileIssue) => void;
+  onIndexingNotice?: (notice: IndexingNotice) => void;
   onBackgroundError?: (message: string, error: unknown, details?: Record<string, unknown>) => void;
 };
 
@@ -54,6 +56,7 @@ export async function bootstrapMainProcess(
     getSystemMessageRegexRules: () =>
       options.appStateStore?.getPaneState()?.systemMessageRegexRules,
     ...(options.onIndexingFileIssue ? { onFileIssue: options.onIndexingFileIssue } : {}),
+    ...(options.onIndexingNotice ? { onNotice: options.onIndexingNotice } : {}),
   });
   if (activeQueryService) {
     activeQueryService.close();
