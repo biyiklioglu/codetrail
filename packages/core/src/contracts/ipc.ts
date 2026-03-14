@@ -148,6 +148,8 @@ const paneStateSchema = z.object({
   sessionPage: z.number().int().nonnegative().nullable(),
   sessionScrollTop: z.number().int().nonnegative().nullable(),
   systemMessageRegexRules: systemMessageRegexRulesSchema.nullable(),
+  autoScrollEnabled: z.boolean().nullable(),
+  periodicRefreshInterval: z.number().int().nonnegative().nullable(),
 });
 
 const uiZoomResponseSchema = z.object({
@@ -361,6 +363,8 @@ export const ipcContractSchemas = {
       sessionPage: z.number().int().nonnegative(),
       sessionScrollTop: z.number().int().nonnegative(),
       systemMessageRegexRules: systemMessageRegexRulesSchema,
+      autoScrollEnabled: z.boolean(),
+      periodicRefreshInterval: z.number().int().nonnegative(),
     }),
     response: z.object({
       ok: z.literal(true),

@@ -9,6 +9,7 @@ import {
   SHORTCUT_ITEMS,
 } from "./app/constants";
 import type { MainView, PaneStateSnapshot } from "./app/types";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { SettingsView } from "./components/SettingsView";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { TopBar } from "./components/TopBar";
@@ -30,6 +31,14 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   const [mainView, setMainView] = useState<MainView>("history");
   const [focusMode, setFocusMode] = useState(false);
   const [advancedSearchEnabled, setAdvancedSearchEnabled] = useState(false);
+  const [showReindexConfirm, setShowReindexConfirm] = useState(false);
+  const [periodicRefreshInterval, setPeriodicRefreshInterval] = useState(0);
+  const [preferredPeriodicInterval, setPreferredPeriodicInterval] = useState(
+    (initialPaneState?.periodicRefreshInterval ?? 0) || 10_000,
+  );
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(
+    initialPaneState?.autoScrollEnabled ?? false,
+  );
   const [searchProviders, setSearchProviders] = useState<Provider[]>(
     initialPaneState?.searchProviders ?? [],
   );
@@ -53,6 +62,10 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     setSearchProviders,
     appearance,
     logError,
+    autoScrollEnabled,
+    setAutoScrollEnabled,
+    periodicRefreshInterval: preferredPeriodicInterval,
+    setPeriodicRefreshInterval: setPreferredPeriodicInterval,
   });
   const search = useSearchController({
     searchMode,
@@ -150,6 +163,34 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
   }, [handleRefresh]);
   const indexing = refreshing || indexingInBackground;
 
+  const refreshingRef = useRef(false);
+  useEffect(() => {
+    refreshingRef.current = indexing;
+  }, [indexing]);
+
+  // Keep a stable ref to handleRefresh so the periodic timer effect doesn't need
+  // handleRefresh in its dependency array (handleRefresh has an unstable identity
+  // because its deps include the entire history/search objects).
+  const handleRefreshRef = useRef(handleRefresh);
+  useEffect(() => {
+    handleRefreshRef.current = handleRefresh;
+  }, [handleRefresh]);
+
+  useEffect(() => {
+    if (periodicRefreshInterval <= 0) return;
+    const id = window.setInterval(() => {
+      if (refreshingRef.current) return;
+      void handleRefreshRef.current(false);
+    }, periodicRefreshInterval);
+    return () => window.clearInterval(id);
+  }, [periodicRefreshInterval]);
+
+  useEffect(() => {
+    if (periodicRefreshInterval > 0) {
+      setPreferredPeriodicInterval(periodicRefreshInterval);
+    }
+  }, [periodicRefreshInterval]);
+
   useKeyboardShortcuts({
     mainView,
     hasFocusedHistoryMessage: Boolean(history.visibleFocusedMessageId),
@@ -173,6 +214,10 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
     goToPreviousSearchPage: search.goToPreviousSearchPage,
     goToNextSearchPage: search.goToNextSearchPage,
     applyZoomAction: appearance.applyZoomAction,
+    triggerIncrementalRefresh: () => void handleIncrementalRefresh(),
+    togglePeriodicRefresh: () =>
+      setPeriodicRefreshInterval((v) => (v > 0 ? 0 : preferredPeriodicInterval)),
+    toggleAutoScroll: () => setAutoScrollEnabled((v) => !v),
   });
 
   return (
@@ -200,7 +245,11 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
         }
         onThemeChange={appearance.setTheme}
         onIncrementalRefresh={() => void handleIncrementalRefresh()}
-        onForceRefresh={() => void handleForceRefresh()}
+        onForceRefresh={() => setShowReindexConfirm(true)}
+        periodicRefreshInterval={periodicRefreshInterval}
+        onPeriodicRefreshIntervalChange={setPeriodicRefreshInterval}
+        autoScrollEnabled={autoScrollEnabled}
+        onToggleAutoScroll={() => setAutoScrollEnabled((v) => !v)}
         onToggleFocus={() => setFocusMode((value) => !value)}
         onToggleHelp={() => setMainView((value) => (value === "help" ? "history" : "help"))}
         onToggleSettings={() =>
@@ -326,6 +375,18 @@ export function App({ initialPaneState = null }: { initialPaneState?: PaneStateS
           </section>
         )}
       </div>
+      <ConfirmDialog
+        open={showReindexConfirm}
+        title="Force Reindex"
+        message="This will re-read and re-index all provider session files from scratch. This may take a while. Continue?"
+        confirmLabel="Reindex"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          setShowReindexConfirm(false);
+          void handleForceRefresh();
+        }}
+        onCancel={() => setShowReindexConfirm(false)}
+      />
     </main>
   );
 }

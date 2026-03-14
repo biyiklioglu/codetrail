@@ -179,6 +179,8 @@ describe("bootstrapMainProcess", () => {
       gemini: [],
       cursor: [],
     },
+    autoScrollEnabled: true,
+    periodicRefreshInterval: 5000,
   };
 
   beforeEach(() => {
@@ -432,6 +434,8 @@ describe("bootstrapMainProcess", () => {
         gemini: [],
         cursor: [],
       },
+      autoScrollEnabled: true,
+    periodicRefreshInterval: 5000,
     });
 
     const updated = {

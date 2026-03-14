@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   Dispatch,
   KeyboardEvent as ReactKeyboardEvent,
@@ -83,6 +83,10 @@ export function useHistoryController({
   setSearchProviders,
   appearance,
   logError,
+  autoScrollEnabled = false,
+  setAutoScrollEnabled,
+  periodicRefreshInterval = 0,
+  setPeriodicRefreshInterval,
 }: {
   initialPaneState?: PaneStateSnapshot | null;
   isHistoryLayout: boolean;
@@ -91,6 +95,10 @@ export function useHistoryController({
   setSearchProviders: Dispatch<SetStateAction<Provider[]>>;
   appearance: AppearanceState;
   logError: (context: string, error: unknown) => void;
+  autoScrollEnabled?: boolean;
+  setAutoScrollEnabled: Dispatch<SetStateAction<boolean>>;
+  periodicRefreshInterval?: number;
+  setPeriodicRefreshInterval: Dispatch<SetStateAction<number>>;
 }) {
   const codetrail = useCodetrailClient();
   const initialProjectPaneWidth = clamp(initialPaneState?.projectPaneWidth ?? 300, 230, 520);
@@ -161,6 +169,7 @@ export function useHistoryController({
     useState<PendingMessagePageNavigation | null>(null);
   const [pendingSearchNavigation, setPendingSearchNavigation] =
     useState<HistorySearchNavigation | null>(null);
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
   const projectQuery = useDebouncedValue(projectQueryInput, 180);
   const sessionQuery = useDebouncedValue(sessionQueryInput, 400);
@@ -190,6 +199,15 @@ export function useHistoryController({
         }
       : null,
   );
+  const scrollPreservationRef = useRef<{
+    scrollTop: number;
+    referenceMessageId: string;
+    referenceOffsetTop: number;
+  } | null>(null);
+  const pendingAutoScrollRef = useRef(false);
+  const messageCountRef = useRef(0);
+  const prevMessageCountRef = useRef(0);
+
   const projectsLoadTokenRef = useRef(0);
   const sessionsLoadTokenRef = useRef(0);
   const bookmarksLoadTokenRef = useRef(0);
@@ -269,6 +287,8 @@ export function useHistoryController({
       sessionPage,
       sessionScrollTop,
       systemMessageRegexRules,
+      autoScrollEnabled,
+      periodicRefreshInterval,
     }),
     [
       appearance.monoFontFamily,
@@ -294,6 +314,8 @@ export function useHistoryController({
       sessionPaneCollapsed,
       sessionPaneWidth,
       sessionScrollTop,
+      autoScrollEnabled,
+      periodicRefreshInterval,
       sessionSortDirection,
       systemMessageRegexRules,
     ],
@@ -361,6 +383,8 @@ export function useHistoryController({
     setSessionPage,
     setSessionScrollTop,
     setSystemMessageRegexRules,
+    setAutoScrollEnabled,
+    setPeriodicRefreshInterval,
     sessionScrollTopRef,
     pendingRestoredSessionScrollRef,
   });
@@ -409,6 +433,7 @@ export function useHistoryController({
     projectsLoadTokenRef,
     sessionsLoadTokenRef,
     bookmarksLoadTokenRef,
+    refreshCounter,
   });
 
   useEffect(() => {
@@ -483,6 +508,10 @@ export function useHistoryController({
     sessionPaneCollapsed,
     sessionPaneWidth,
   });
+
+  // Keep messageCountRef in sync so handleRefreshAllData can snapshot it without
+  // needing activeHistoryMessages.length in its dependency array.
+  messageCountRef.current = activeHistoryMessages.length;
 
   useEffect(() => {
     if (!messageListRef.current) {
@@ -574,6 +603,44 @@ export function useHistoryController({
     }
     setFocusMessageId(targetMessageId);
   }, [activeHistoryMessages, loadedHistoryPage, pendingMessagePageNavigation]);
+
+  // Scroll preservation after refresh: restore the scroll position so the same messages stay
+  // visible. Auto-scroll: scroll to the edge when new messages arrive during periodic refresh.
+  useLayoutEffect(() => {
+    const container = messageListRef.current;
+    if (!container) return;
+
+    if (pendingAutoScrollRef.current) {
+      pendingAutoScrollRef.current = false;
+      if (activeHistoryMessages.length !== prevMessageCountRef.current) {
+        if (activeMessageSortDirection === "asc") {
+          container.scrollTop = container.scrollHeight;
+        } else {
+          container.scrollTop = 0;
+        }
+      }
+      prevMessageCountRef.current = activeHistoryMessages.length;
+      return;
+    }
+
+    const saved = scrollPreservationRef.current;
+    if (!saved) return;
+    scrollPreservationRef.current = null;
+
+    if (saved.referenceMessageId) {
+      const refEl = container.querySelector<HTMLElement>(
+        `[data-history-message-id="${CSS.escape(saved.referenceMessageId)}"]`,
+      );
+      if (refEl) {
+        const drift = refEl.offsetTop - saved.referenceOffsetTop;
+        container.scrollTop = saved.scrollTop + drift;
+        return;
+      }
+    }
+    // Fallback: preserve raw scrollTop
+    container.scrollTop = saved.scrollTop;
+  }, [activeHistoryMessages, activeMessageSortDirection]);
+
   const {
     handleToggleScopedMessagesExpanded,
     handleToggleHistoryCategoryShortcut,
@@ -759,6 +826,28 @@ export function useHistoryController({
     prettyCategory,
     prettyProvider: formatPrettyProvider,
     formatDate,
-    handleRefreshAllData: handleRefresh,
+    handleRefreshAllData: useCallback(async () => {
+      const container = messageListRef.current;
+      if (autoScrollEnabled) {
+        pendingAutoScrollRef.current = true;
+        prevMessageCountRef.current = messageCountRef.current;
+      } else if (container) {
+        const elements = Array.from(
+          container.querySelectorAll<HTMLElement>("[data-history-message-id]"),
+        );
+        for (const el of elements) {
+          if (el.offsetTop + el.offsetHeight > container.scrollTop) {
+            scrollPreservationRef.current = {
+              scrollTop: container.scrollTop,
+              referenceMessageId: el.getAttribute("data-history-message-id") ?? "",
+              referenceOffsetTop: el.offsetTop,
+            };
+            break;
+          }
+        }
+      }
+      await handleRefresh();
+      setRefreshCounter((c) => c + 1);
+    }, [handleRefresh, autoScrollEnabled]),
   };
 }

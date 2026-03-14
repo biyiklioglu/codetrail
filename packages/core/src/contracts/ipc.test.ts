@@ -200,6 +200,8 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
       sessionPage: null,
       sessionScrollTop: null,
       systemMessageRegexRules: null,
+      autoScrollEnabled: null,
+      periodicRefreshInterval: null,
     },
   },
   "ui:setState": {
@@ -234,6 +236,8 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
         gemini: [],
         cursor: [],
       },
+      autoScrollEnabled: false,
+      periodicRefreshInterval: 0,
     },
     response: { ok: true },
   },

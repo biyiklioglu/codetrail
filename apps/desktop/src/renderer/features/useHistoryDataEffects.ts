@@ -69,6 +69,7 @@ export function useHistoryDataEffects({
   projectsLoadTokenRef,
   sessionsLoadTokenRef,
   bookmarksLoadTokenRef,
+  refreshCounter,
 }: {
   codetrail: CodetrailClient;
   logError: (context: string, error: unknown) => void;
@@ -113,6 +114,7 @@ export function useHistoryDataEffects({
   projectsLoadTokenRef: MutableRefObject<number>;
   sessionsLoadTokenRef: MutableRefObject<number>;
   bookmarksLoadTokenRef: MutableRefObject<number>;
+  refreshCounter: number;
 }) {
   const loadProjects = useCallback(async () => {
     // Monotonic request tokens prevent stale async responses from overwriting newer selections.
@@ -424,6 +426,7 @@ export function useHistoryDataEffects({
     logError,
     messageSortDirection,
     pendingRevealTarget,
+    refreshCounter,
     searchMode,
     selectedSessionId,
     sessionPage,
@@ -484,6 +487,7 @@ export function useHistoryDataEffects({
     logError,
     pendingRevealTarget,
     projectAllSortDirection,
+    refreshCounter,
     searchMode,
     selectedProjectId,
     sessionPage,

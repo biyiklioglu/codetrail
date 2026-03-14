@@ -28,6 +28,10 @@ describe("TopBar", () => {
         onThemeChange={onThemeChange}
         onIncrementalRefresh={onIncrementalRefresh}
         onForceRefresh={onForceRefresh}
+        periodicRefreshInterval={0}
+        onPeriodicRefreshIntervalChange={vi.fn()}
+        autoScrollEnabled={false}
+        onToggleAutoScroll={vi.fn()}
         onToggleFocus={onToggleFocus}
         onToggleHelp={onToggleHelp}
         onToggleSettings={onToggleSettings}
@@ -44,7 +48,7 @@ describe("TopBar", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Global Search" }));
-    await user.click(screen.getByRole("button", { name: "Refresh index" }));
+    await user.click(screen.getByRole("button", { name: "Incremental refresh" }));
     await user.click(screen.getByRole("button", { name: "Force reindex" }));
     await user.click(screen.getByRole("button", { name: "Enter focus mode" }));
     await user.click(screen.getByRole("button", { name: "Open help" }));
@@ -72,6 +76,10 @@ describe("TopBar", () => {
         onThemeChange={vi.fn()}
         onIncrementalRefresh={vi.fn()}
         onForceRefresh={vi.fn()}
+        periodicRefreshInterval={0}
+        onPeriodicRefreshIntervalChange={vi.fn()}
+        autoScrollEnabled={false}
+        onToggleAutoScroll={vi.fn()}
         onToggleFocus={vi.fn()}
         onToggleHelp={vi.fn()}
         onToggleSettings={vi.fn()}

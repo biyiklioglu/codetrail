@@ -36,6 +36,9 @@ function createProps(
     goToPreviousSearchPage: vi.fn(),
     goToNextSearchPage: vi.fn(),
     applyZoomAction: vi.fn(async () => undefined),
+    triggerIncrementalRefresh: vi.fn(),
+    togglePeriodicRefresh: vi.fn(),
+    toggleAutoScroll: vi.fn(),
     ...overrides,
   };
 }

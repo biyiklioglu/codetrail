@@ -181,6 +181,8 @@ export async function bootstrapMainProcess(
         sessionPage: paneState?.sessionPage ?? null,
         sessionScrollTop: paneState?.sessionScrollTop ?? null,
         systemMessageRegexRules: resolveSystemMessageRegexRules(paneState?.systemMessageRegexRules),
+        autoScrollEnabled: paneState?.autoScrollEnabled ?? null,
+        periodicRefreshInterval: paneState?.periodicRefreshInterval ?? null,
       };
     },
     "ui:setState": (payload) => {
@@ -210,6 +212,8 @@ export async function bootstrapMainProcess(
         sessionPage: payload.sessionPage,
         sessionScrollTop: payload.sessionScrollTop,
         systemMessageRegexRules: payload.systemMessageRegexRules,
+        autoScrollEnabled: payload.autoScrollEnabled,
+        periodicRefreshInterval: payload.periodicRefreshInterval,
       });
       return { ok: true };
     },

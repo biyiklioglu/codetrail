@@ -29,6 +29,8 @@ const EMPTY_UI_STATE = {
   sessionPage: null,
   sessionScrollTop: null,
   systemMessageRegexRules: null,
+  autoScrollEnabled: null,
+  periodicRefreshInterval: null,
 } as const;
 
 const SETTINGS_INFO = {

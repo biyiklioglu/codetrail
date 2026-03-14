@@ -65,6 +65,8 @@ export function usePaneStateSync(args: {
   setSessionPage: Dispatch<SetStateAction<number>>;
   setSessionScrollTop: Dispatch<SetStateAction<number>>;
   setSystemMessageRegexRules: Dispatch<SetStateAction<SystemMessageRegexRules>>;
+  setAutoScrollEnabled: Dispatch<SetStateAction<boolean>>;
+  setPeriodicRefreshInterval: Dispatch<SetStateAction<number>>;
   sessionScrollTopRef: MutableRefObject<number>;
   pendingRestoredSessionScrollRef: MutableRefObject<RestoredScrollTarget | null>;
 }): { paneStateHydrated: boolean } {
@@ -98,6 +100,8 @@ export function usePaneStateSync(args: {
     setSessionPage,
     setSessionScrollTop,
     setSystemMessageRegexRules,
+    setAutoScrollEnabled,
+    setPeriodicRefreshInterval,
     sessionScrollTopRef,
     pendingRestoredSessionScrollRef,
   } = args;
@@ -164,6 +168,8 @@ export function usePaneStateSync(args: {
             setSessionScrollTop(value);
           },
           systemMessageRegexRules: setSystemMessageRegexRules,
+          autoScrollEnabled: setAutoScrollEnabled,
+          periodicRefreshInterval: setPeriodicRefreshInterval,
         };
 
         // Hydrate scalar settings generically, then repair selection separately because the three
@@ -247,6 +253,8 @@ export function usePaneStateSync(args: {
     setSessionPaneWidth,
     setSessionPaneCollapsed,
     setSessionScrollTop,
+    setAutoScrollEnabled,
+    setPeriodicRefreshInterval,
     setSystemMessageRegexRules,
     setTheme,
     setMonoFontFamily,

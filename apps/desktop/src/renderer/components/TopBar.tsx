@@ -1,4 +1,74 @@
+import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
+
 import { ToolbarIcon } from "./ToolbarIcon";
+
+const PERIODIC_REFRESH_OPTIONS: { label: string; value: number }[] = [
+  { label: "Off", value: 0 },
+  { label: "3s", value: 3_000 },
+  { label: "5s", value: 5_000 },
+  { label: "10s", value: 10_000 },
+  { label: "30s", value: 30_000 },
+  { label: "1min", value: 60_000 },
+  { label: "5min", value: 300_000 },
+];
+
+function PeriodicRefreshDropdown({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: Dispatch<SetStateAction<number>>;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const selectedLabel = PERIODIC_REFRESH_OPTIONS.find((o) => o.value === value)?.label ?? "Off";
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  return (
+    <div className="tb-dropdown" ref={containerRef}>
+      <button
+        type="button"
+        className={`tb-btn tb-dropdown-trigger${value > 0 ? " active" : ""}`}
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Periodic refresh interval"
+        aria-expanded={open}
+        title="Toggle auto-refresh (Cmd/Ctrl+Shift+R)"
+      >
+        <ToolbarIcon name="refresh" />
+        {selectedLabel}
+      </button>
+      {open ? (
+        <div className="tb-dropdown-menu" role="listbox" aria-label="Auto-refresh interval">
+          {PERIODIC_REFRESH_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              role="option"
+              aria-selected={opt.value === value}
+              className={`tb-dropdown-item${opt.value === value ? " selected" : ""}`}
+              onClick={() => {
+                onChange(opt.value);
+                setOpen(false);
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export function TopBar({
   mainView,
@@ -10,6 +80,10 @@ export function TopBar({
   onThemeChange,
   onIncrementalRefresh,
   onForceRefresh,
+  periodicRefreshInterval,
+  onPeriodicRefreshIntervalChange,
+  autoScrollEnabled,
+  onToggleAutoScroll,
   onToggleFocus,
   onToggleHelp,
   onToggleSettings,
@@ -23,6 +97,10 @@ export function TopBar({
   onThemeChange: (theme: "light" | "dark") => void;
   onIncrementalRefresh: () => void;
   onForceRefresh: () => void;
+  periodicRefreshInterval: number;
+  onPeriodicRefreshIntervalChange: Dispatch<SetStateAction<number>>;
+  autoScrollEnabled: boolean;
+  onToggleAutoScroll: () => void;
   onToggleFocus: () => void;
   onToggleHelp: () => void;
   onToggleSettings: () => void;
@@ -54,19 +132,42 @@ export function TopBar({
           className="tb-btn"
           onClick={onIncrementalRefresh}
           disabled={indexing}
-          aria-label={indexing ? "Indexing in progress" : "Refresh index"}
-          title={indexing ? "Indexing in progress..." : "Refresh index"}
+          aria-label={indexing ? "Indexing in progress" : "Incremental refresh"}
+          title={indexing ? "Indexing in progress..." : "Incremental refresh (Cmd/Ctrl+R)"}
         >
           <ToolbarIcon name="refresh" />
           {indexing ? "Indexing..." : "Refresh"}
+        </button>
+        <PeriodicRefreshDropdown
+          value={periodicRefreshInterval}
+          onChange={onPeriodicRefreshIntervalChange}
+        />
+        <button
+          type="button"
+          className={`tb-btn auto-scroll-btn${autoScrollEnabled ? " active" : ""}`}
+          onClick={onToggleAutoScroll}
+          aria-label={autoScrollEnabled ? "Disable auto-scroll" : "Enable auto-scroll"}
+          title={
+            autoScrollEnabled
+              ? "Auto-scroll to new messages (on) (Cmd/Ctrl+Shift+A)"
+              : "Auto-scroll to new messages (off) (Cmd/Ctrl+Shift+A)"
+          }
+        >
+          <ToolbarIcon name="autoScroll" />
         </button>
         <button
           type="button"
           className="tb-btn"
           onClick={onForceRefresh}
-          disabled={indexing}
+          disabled={indexing || periodicRefreshInterval > 0}
           aria-label="Force reindex"
-          title={indexing ? "Indexing in progress..." : "Force full reindex"}
+          title={
+            periodicRefreshInterval > 0
+              ? "Disable periodic refresh before reindexing"
+              : indexing
+                ? "Indexing in progress..."
+                : "Force full reindex"
+          }
         >
           <ToolbarIcon name="reindex" />
           Reindex

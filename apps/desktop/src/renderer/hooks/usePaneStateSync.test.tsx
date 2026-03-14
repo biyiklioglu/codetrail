@@ -55,6 +55,8 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     gemini: [],
     cursor: [],
   });
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(false);
+  const [periodicRefreshInterval, setPeriodicRefreshInterval] = useState(0);
   const sessionScrollTopRef = useRef(0);
   const pendingRestoredSessionScrollRef = useRef<{
     sessionId: string;
@@ -90,6 +92,8 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       sessionPage,
       sessionScrollTop,
       systemMessageRegexRules,
+      autoScrollEnabled,
+      periodicRefreshInterval,
     },
     setProjectPaneWidth,
     setSessionPaneWidth,
@@ -116,6 +120,8 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     setSessionPage,
     setSessionScrollTop,
     setSystemMessageRegexRules,
+    setAutoScrollEnabled,
+    setPeriodicRefreshInterval,
     sessionScrollTopRef,
     pendingRestoredSessionScrollRef,
   });
@@ -166,6 +172,8 @@ describe("usePaneStateSync", () => {
             gemini: [],
             cursor: [],
           },
+          autoScrollEnabled: false,
+          periodicRefreshInterval: 0,
         };
       }
       return { ok: true };
