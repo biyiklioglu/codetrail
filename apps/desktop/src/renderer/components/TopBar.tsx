@@ -59,7 +59,11 @@ function RefreshStrategyDropdown({
         ) : null}
       </button>
       {open ? (
-        <div className="tb-dropdown-menu" role="listbox" aria-label="Auto-refresh strategy">
+        <div
+          className="tb-dropdown-menu tb-dropdown-menu-auto-refresh"
+          role="listbox"
+          aria-label="Auto-refresh strategy"
+        >
           {REFRESH_STRATEGY_OPTIONS.map((opt) => (
             <button
               key={opt.value}

@@ -773,6 +773,10 @@ body.platform-macos .titlebar-left {
   min-width: 220px;
 }
 
+.tb-dropdown-menu-auto-refresh {
+  min-width: 172px;
+}
+
 .tb-dropdown-menu-right {
   left: auto;
   right: 0;
@@ -809,6 +813,10 @@ body.platform-macos .titlebar-left {
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
+}
+
+.tb-dropdown-menu-auto-refresh .tb-dropdown-item {
+  white-space: nowrap;
 }
 
 .tb-dropdown-item:hover {
