@@ -113,6 +113,21 @@ const regularFontSizeSchema = z.enum([
   "18px",
   "20px",
 ]);
+const themeModeSchema = z.enum([
+  "light",
+  "dark",
+  "ft-dark",
+  "tomorrow-night",
+  "catppuccin-mocha",
+  "obsidian",
+  "graphite",
+  "midnight",
+  "onyx",
+  "clean-white",
+  "warm-paper",
+  "stone",
+  "sand",
+]);
 const sortDirectionSchema = z.enum(["asc", "desc"]);
 const searchModeSchema = z.enum(["simple", "advanced"]);
 const systemMessageRegexRulesSchema = z.object({
@@ -134,7 +149,7 @@ export const paneStateBaseSchema = z.object({
   historyCategories: z.array(messageCategorySchema),
   expandedByDefaultCategories: z.array(messageCategorySchema),
   searchProviders: z.array(providerSchema),
-  theme: z.enum(["light", "dark"]),
+  theme: themeModeSchema,
   monoFontFamily: z.enum(["current", "droid_sans_mono"]),
   regularFontFamily: z.enum(["current", "inter"]),
   monoFontSize: monoFontSizeSchema,
@@ -357,9 +372,14 @@ export const ipcContractSchemas = {
     response: uiZoomResponseSchema,
   },
   "ui:setZoom": {
-    request: z.object({
-      action: z.enum(["in", "out", "reset"]),
-    }),
+    request: z.union([
+      z.object({
+        action: z.enum(["in", "out", "reset"]),
+      }),
+      z.object({
+        percent: z.number().int(),
+      }),
+    ]),
     response: uiZoomResponseSchema,
   },
   "watcher:start": {

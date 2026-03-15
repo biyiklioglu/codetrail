@@ -21,6 +21,11 @@ import { FileWatcherService } from "./fileWatcherService";
 import { WorkerIndexingRunner } from "./indexingRunner";
 import { registerIpcHandlers } from "./ipc";
 
+const MIN_ZOOM_PERCENT = 60;
+const MAX_ZOOM_PERCENT = 175;
+const DEFAULT_ZOOM_PERCENT = 100;
+const ZOOM_STEP_PERCENT = 10;
+
 export type BootstrapOptions = {
   dbPath?: string;
   runStartupIndexing?: boolean;
@@ -201,17 +206,23 @@ export async function bootstrapMainProcess(
       percent: Math.round(event.sender.getZoomFactor() * 100),
     }),
     "ui:setZoom": (payload, event) => {
-      const zoomStep = 0.5;
-      const current = event.sender.getZoomLevel();
-      if (payload.action === "reset") {
-        event.sender.setZoomLevel(0);
+      const currentPercent = Math.round(event.sender.getZoomFactor() * 100);
+      let nextPercent = currentPercent;
+      if ("percent" in payload) {
+        nextPercent = payload.percent;
+      } else if (payload.action === "reset") {
+        nextPercent = DEFAULT_ZOOM_PERCENT;
       } else if (payload.action === "in") {
-        event.sender.setZoomLevel(current + zoomStep);
+        nextPercent = currentPercent + ZOOM_STEP_PERCENT;
       } else {
-        event.sender.setZoomLevel(current - zoomStep);
+        nextPercent = currentPercent - ZOOM_STEP_PERCENT;
       }
+      const clampedPercent = Math.round(
+        Math.max(MIN_ZOOM_PERCENT, Math.min(MAX_ZOOM_PERCENT, nextPercent)),
+      );
+      event.sender.setZoomFactor(clampedPercent / 100);
       return {
-        percent: Math.round(event.sender.getZoomFactor() * 100),
+        percent: clampedPercent,
       };
     },
     "watcher:start": async () => {

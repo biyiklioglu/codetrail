@@ -450,17 +450,16 @@ describe("bootstrapMainProcess", () => {
     expect(setPaneState).toHaveBeenCalledWith(updated);
   });
 
-  it("handles zoom get/in/out/reset actions", async () => {
+  it("handles zoom get/in/out/reset and explicit percent actions", async () => {
     await bootstrapMainProcess({ runStartupIndexing: false });
 
     const sender = {
-      zoomLevel: 1,
-      getZoomFactor: vi.fn(() => 1.21),
-      getZoomLevel: vi.fn(function (this: { zoomLevel: number }) {
-        return this.zoomLevel;
+      zoomFactor: 1.21,
+      getZoomFactor: vi.fn(function (this: { zoomFactor: number }) {
+        return this.zoomFactor;
       }),
-      setZoomLevel: vi.fn(function (this: { zoomLevel: number }, value: number) {
-        this.zoomLevel = value;
+      setZoomFactor: vi.fn(function (this: { zoomFactor: number }, value: number) {
+        this.zoomFactor = value;
       }),
     };
     const event = { sender };
@@ -468,21 +467,29 @@ describe("bootstrapMainProcess", () => {
     expect(getRequiredHandler(handlers, "ui:getZoom")({}, event)).toEqual({ percent: 121 });
 
     expect(getRequiredHandler(handlers, "ui:setZoom")({ action: "in" }, event)).toEqual({
-      percent: 121,
+      percent: 131,
     });
-    expect(sender.setZoomLevel).toHaveBeenCalledWith(1.5);
+    expect(sender.setZoomFactor).toHaveBeenCalledWith(1.31);
 
-    sender.zoomLevel = 2;
     expect(getRequiredHandler(handlers, "ui:setZoom")({ action: "out" }, event)).toEqual({
       percent: 121,
     });
-    expect(sender.setZoomLevel).toHaveBeenCalledWith(1.5);
+    expect(sender.setZoomFactor).toHaveBeenCalledWith(1.21);
 
-    sender.zoomLevel = 3;
     expect(getRequiredHandler(handlers, "ui:setZoom")({ action: "reset" }, event)).toEqual({
-      percent: 121,
+      percent: 100,
     });
-    expect(sender.setZoomLevel).toHaveBeenCalledWith(0);
+    expect(sender.setZoomFactor).toHaveBeenCalledWith(1);
+
+    expect(getRequiredHandler(handlers, "ui:setZoom")({ percent: 104 }, event)).toEqual({
+      percent: 104,
+    });
+    expect(sender.setZoomFactor).toHaveBeenCalledWith(1.04);
+
+    expect(getRequiredHandler(handlers, "ui:setZoom")({ percent: 300 }, event)).toEqual({
+      percent: 175,
+    });
+    expect(sender.setZoomFactor).toHaveBeenCalledWith(1.75);
   });
 
   it("triggers startup indexing by default and logs startup failures", async () => {

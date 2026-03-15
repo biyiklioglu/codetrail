@@ -15,16 +15,39 @@
 
       html[data-theme="dark"],
       html[data-theme="dark"] body,
-      html[data-theme="dark"] #root {
+      html[data-theme="dark"] #root,
+      html[data-theme="tomorrow-night"],
+      html[data-theme="tomorrow-night"] body,
+      html[data-theme="tomorrow-night"] #root,
+      html[data-theme="catppuccin-mocha"],
+      html[data-theme="catppuccin-mocha"] body,
+      html[data-theme="catppuccin-mocha"] #root {
         background: #1e2028;
       }
     </style>
     <script>
       (() => {
         try {
+          const themeBases = {
+            light: "light",
+            dark: "dark",
+            "ft-dark": "dark",
+            "tomorrow-night": "tomorrow-night",
+            "catppuccin-mocha": "catppuccin-mocha",
+            obsidian: "dark",
+            graphite: "dark",
+            midnight: "dark",
+            onyx: "dark",
+            "clean-white": "light",
+            "warm-paper": "light",
+            stone: "light",
+            sand: "light",
+          };
           const storedTheme = window.localStorage.getItem("codetrail-theme");
-          if (storedTheme === "dark" || storedTheme === "light") {
-            document.documentElement.dataset.theme = storedTheme;
+          const baseTheme = themeBases[storedTheme];
+          if (baseTheme) {
+            document.documentElement.dataset.theme = baseTheme;
+            document.documentElement.dataset.themeVariant = storedTheme;
           }
         } catch {
           // Ignore storage errors at bootstrap.

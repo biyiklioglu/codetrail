@@ -17,6 +17,7 @@ export function HistoryLayout({
   canZoomIn,
   canZoomOut,
   applyZoomAction,
+  setZoomPercent,
   logError,
 }: {
   history: HistoryController;
@@ -26,6 +27,7 @@ export function HistoryLayout({
   canZoomIn: boolean;
   canZoomOut: boolean;
   applyZoomAction: (action: "in" | "out" | "reset") => Promise<void>;
+  setZoomPercent: (percent: number) => Promise<void>;
   logError: (context: string, error: unknown) => void;
 }) {
   return (
@@ -120,6 +122,7 @@ export function HistoryLayout({
           canZoomIn={canZoomIn}
           canZoomOut={canZoomOut}
           applyZoomAction={applyZoomAction}
+          setZoomPercent={setZoomPercent}
         />
       </section>
     </>

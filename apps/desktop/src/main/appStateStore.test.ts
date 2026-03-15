@@ -60,7 +60,7 @@ describe("AppStateStore", () => {
     store.setPaneState({
       projectPaneWidth: 312,
       sessionPaneWidth: 404,
-      theme: "dark",
+      theme: "ft-dark",
       monoFontFamily: "droid_sans_mono",
       regularFontFamily: "inter",
       monoFontSize: "13px",
@@ -90,7 +90,7 @@ describe("AppStateStore", () => {
     expect(reloaded.getPaneState()).toEqual({
       projectPaneWidth: 312,
       sessionPaneWidth: 404,
-      theme: "dark",
+      theme: "ft-dark",
       monoFontFamily: "droid_sans_mono",
       regularFontFamily: "inter",
       monoFontSize: "13px",

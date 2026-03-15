@@ -12,7 +12,14 @@ import type {
 import { MONO_FONT_STACKS, REGULAR_FONT_STACKS } from "../app/constants";
 import type { PaneStateSnapshot, SettingsInfoResponse } from "../app/types";
 import { useCodetrailClient } from "../lib/codetrailClient";
+import { applyTheme } from "../lib/theme";
 import { toErrorMessage } from "../lib/viewUtils";
+import {
+  DEFAULT_ZOOM_PERCENT,
+  MAX_ZOOM_PERCENT,
+  MIN_ZOOM_PERCENT,
+  clampZoomPercent,
+} from "../lib/zoom";
 
 export function useAppearanceController({
   initialPaneState,
@@ -49,7 +56,7 @@ export function useAppearanceController({
       .invoke("ui:getZoom", {})
       .then((response) => {
         if (!cancelled) {
-          setZoomPercent(response.percent);
+          setZoomPercent(clampZoomPercent(response.percent));
         }
       })
       .catch((error: unknown) => {
@@ -64,7 +71,7 @@ export function useAppearanceController({
   }, [codetrail, logError]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    applyTheme(theme);
     try {
       window.localStorage.setItem("codetrail-theme", theme);
     } catch {
@@ -98,12 +105,25 @@ export function useAppearanceController({
   }, [useMonospaceForAllMessages]);
 
   const applyZoomAction = useCallback(
-    async (action: IpcRequest<"ui:setZoom">["action"]) => {
+    async (action: "in" | "out" | "reset") => {
       try {
         const response = await codetrail.invoke("ui:setZoom", { action });
-        setZoomPercent(response.percent);
+        setZoomPercent(clampZoomPercent(response.percent));
       } catch (error) {
         logError(`Failed applying zoom action '${action}'`, error);
+      }
+    },
+    [codetrail, logError],
+  );
+
+  const setZoomPercentValue = useCallback(
+    async (percent: number) => {
+      const clampedPercent = clampZoomPercent(percent);
+      try {
+        const response = await codetrail.invoke("ui:setZoom", { percent: clampedPercent });
+        setZoomPercent(clampZoomPercent(response.percent));
+      } catch (error) {
+        logError(`Failed setting zoom to ${clampedPercent}%`, error);
       }
     },
     [codetrail, logError],
@@ -136,9 +156,11 @@ export function useAppearanceController({
     useMonospaceForAllMessages,
     setUseMonospaceForAllMessages,
     zoomPercent,
-    canZoomIn: zoomPercent < 500,
-    canZoomOut: zoomPercent > 25,
+    canZoomIn: zoomPercent < MAX_ZOOM_PERCENT,
+    canZoomOut: zoomPercent > MIN_ZOOM_PERCENT,
     applyZoomAction,
+    setZoomPercent: setZoomPercentValue,
+    defaultZoomPercent: DEFAULT_ZOOM_PERCENT,
     settingsInfo,
     settingsLoading,
     settingsError,

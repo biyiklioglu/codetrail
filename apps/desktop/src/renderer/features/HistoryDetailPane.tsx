@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { MessageCategory } from "@codetrail/core";
 
 import { CATEGORIES } from "../app/constants";
+import { ZoomPercentInput } from "../components/ZoomPercentInput";
 import { ToolbarIcon } from "../components/ToolbarIcon";
 import { MessageCard } from "../components/messages/MessagePresentation";
 import { SEARCH_PLACEHOLDERS } from "../lib/searchPlaceholders";
@@ -19,6 +20,7 @@ export function HistoryDetailPane({
   canZoomIn,
   canZoomOut,
   applyZoomAction,
+  setZoomPercent,
 }: {
   history: HistoryController;
   advancedSearchEnabled: boolean;
@@ -27,6 +29,7 @@ export function HistoryDetailPane({
   canZoomIn: boolean;
   canZoomOut: boolean;
   applyZoomAction: (action: "in" | "out" | "reset") => Promise<void>;
+  setZoomPercent: (percent: number) => Promise<void>;
 }) {
   return (
     <div className="history-view">
@@ -106,9 +109,14 @@ export function HistoryDetailPane({
               >
                 <ToolbarIcon name="zoomOut" />
               </button>
-              <span className="zoom-level" title="Current zoom level (Cmd/Ctrl+0 resets)">
-                {zoomPercent}%
-              </span>
+              <ZoomPercentInput
+                value={zoomPercent}
+                onCommit={(percent) => void setZoomPercent(percent)}
+                ariaLabel="Zoom percentage"
+                title="Zoom level (60%-175%; Enter applies, Cmd/Ctrl+0 resets)"
+                wrapperClassName="zoom-level-control"
+                inputClassName="zoom-level-input"
+              />
               <button
                 type="button"
                 className="toolbar-btn zoom-btn"

@@ -63,6 +63,9 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
       return { percent: 100 };
     }
     if (channel === "ui:setZoom") {
+      if (typeof request.percent === "number") {
+        return { percent: request.percent };
+      }
       const action = String(request.action ?? "");
       return { percent: action === "in" ? 110 : action === "out" ? 90 : 100 };
     }

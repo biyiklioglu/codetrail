@@ -40,11 +40,15 @@ const info = {
 
 function createBaseProps() {
   return {
+    theme: "dark" as const,
+    zoomPercent: 100,
     monoFontFamily: "droid_sans_mono" as const,
     regularFontFamily: "current" as const,
     monoFontSize: "12px" as const,
     regularFontSize: "13.5px" as const,
     useMonospaceForAllMessages: false,
+    onThemeChange: vi.fn(),
+    onZoomPercentChange: vi.fn(),
     onMonoFontFamilyChange: vi.fn(),
     onRegularFontFamilyChange: vi.fn(),
     onMonoFontSizeChange: vi.fn(),
@@ -89,11 +93,15 @@ describe("SettingsView", () => {
     expect(screen.getByText("System Message Rules")).toBeInTheDocument();
 
     const selects = screen.getAllByRole("combobox");
-    expect(selects).toHaveLength(4);
-    await user.selectOptions(selects[0] as HTMLElement, "current");
-    await user.selectOptions(selects[1] as HTMLElement, "13px");
-    await user.selectOptions(selects[2] as HTMLElement, "inter");
-    await user.selectOptions(selects[3] as HTMLElement, "14px");
+    expect(selects).toHaveLength(5);
+    await user.selectOptions(selects[0] as HTMLElement, "midnight");
+    await user.selectOptions(selects[1] as HTMLElement, "current");
+    await user.selectOptions(selects[2] as HTMLElement, "13px");
+    await user.selectOptions(selects[3] as HTMLElement, "inter");
+    await user.selectOptions(selects[4] as HTMLElement, "14px");
+    await user.clear(screen.getByRole("textbox", { name: "Zoom" }));
+    await user.type(screen.getByRole("textbox", { name: "Zoom" }), "104%");
+    await user.tab();
 
     await user.click(
       screen.getByRole("checkbox", { name: "Use monospaced fonts for all messages" }),
@@ -110,6 +118,8 @@ describe("SettingsView", () => {
     await user.click(copyButtons[0] as HTMLElement);
     await user.click(openButtons[0] as HTMLElement);
 
+    expect(baseProps.onThemeChange).toHaveBeenCalledWith("midnight");
+    expect(baseProps.onZoomPercentChange).toHaveBeenCalledWith(104);
     expect(baseProps.onMonoFontFamilyChange).toHaveBeenCalledWith("current");
     expect(baseProps.onMonoFontSizeChange).toHaveBeenCalledWith("13px");
     expect(baseProps.onRegularFontFamilyChange).toHaveBeenCalledWith("inter");

@@ -50,7 +50,8 @@ describe("TopBar", () => {
     await user.click(screen.getByRole("button", { name: "Force reindex" }));
     await user.click(screen.getByRole("button", { name: "Enter focus mode" }));
     await user.click(screen.getByRole("button", { name: "Open help" }));
-    await user.click(screen.getByRole("button", { name: "Switch to Dark theme" }));
+    await user.click(screen.getByRole("button", { name: "Choose theme" }));
+    await user.click(screen.getByRole("option", { name: "Tomorrow Night" }));
     await user.click(screen.getByRole("button", { name: "Open settings" }));
 
     expect(onToggleSearchView).toHaveBeenCalledTimes(1);
@@ -58,7 +59,7 @@ describe("TopBar", () => {
     expect(onForceRefresh).toHaveBeenCalledTimes(1);
     expect(onToggleFocus).toHaveBeenCalledTimes(1);
     expect(onToggleHelp).toHaveBeenCalledTimes(1);
-    expect(onThemeChange).toHaveBeenCalledWith("dark");
+    expect(onThemeChange).toHaveBeenCalledWith("tomorrow-night");
     expect(onToggleSettings).toHaveBeenCalledTimes(1);
   });
 
@@ -93,7 +94,7 @@ describe("TopBar", () => {
     expect(screen.getByRole("button", { name: "Indexing in progress" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Force reindex" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Exit focus mode" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Switch to Light theme" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose theme" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open settings" })).toBeInTheDocument();
   });
 });

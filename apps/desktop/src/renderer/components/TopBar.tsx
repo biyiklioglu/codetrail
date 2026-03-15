@@ -1,5 +1,6 @@
-import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
+import { Fragment, type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 
+import { THEME_GROUPS, getThemeLabel, type ThemeMode } from "../../shared/uiPreferences";
 import { ToolbarIcon } from "./ToolbarIcon";
 
 export type RefreshStrategy = "off" | "watch" | "5s" | "10s" | "30s" | "1min" | "5min";
@@ -73,6 +74,80 @@ function RefreshStrategyDropdown({
   );
 }
 
+function ThemeDropdown({
+  value,
+  onChange,
+}: {
+  value: ThemeMode;
+  onChange: (theme: ThemeMode) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  return (
+    <div className="tb-dropdown" ref={containerRef}>
+      <button
+        type="button"
+        className={open ? "tb-btn tb-btn-icon active" : "tb-btn tb-btn-icon"}
+        onClick={() => setOpen((current) => !current)}
+        aria-label="Choose theme"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title={`Theme: ${getThemeLabel(value)}`}
+      >
+        <ToolbarIcon name="theme" />
+      </button>
+      {open ? (
+        <div
+          className="tb-dropdown-menu tb-dropdown-menu-wide tb-dropdown-menu-right tb-dropdown-menu-scrollable"
+          role="listbox"
+          aria-label="Theme"
+        >
+          {THEME_GROUPS.map((group, groupIndex) => (
+            <Fragment key={group.value}>
+              {groupIndex > 0 ? <div className="tb-dropdown-separator" aria-hidden /> : null}
+              <div className="tb-dropdown-group-label">{group.label}</div>
+              {group.options.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="option"
+                  aria-selected={option.value === value}
+                  className={`tb-dropdown-item tb-dropdown-item-checkable${
+                    option.value === value ? " selected" : ""
+                  }`}
+                  onClick={() => {
+                    onChange(option.value);
+                    setOpen(false);
+                  }}
+                >
+                  <span>{option.label}</span>
+                  {option.value === value ? <span className="tb-dropdown-check">✓</span> : null}
+                </button>
+              ))}
+            </Fragment>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function TopBar({
   mainView,
   theme,
@@ -90,12 +165,12 @@ export function TopBar({
   onToggleSettings,
 }: {
   mainView: "history" | "search" | "settings" | "help";
-  theme: "light" | "dark";
+  theme: ThemeMode;
   indexing: boolean;
   focusMode: boolean;
   focusDisabled: boolean;
   onToggleSearchView: () => void;
-  onThemeChange: (theme: "light" | "dark") => void;
+  onThemeChange: (theme: ThemeMode) => void;
   onIncrementalRefresh: () => void;
   onForceRefresh: () => void;
   refreshStrategy: RefreshStrategy;
@@ -181,40 +256,7 @@ export function TopBar({
           <ToolbarIcon name="help" />
           Help
         </button>
-        <div className="theme-toggle" aria-label="Theme toggle">
-          <svg
-            className={`toggle-icon ${theme === "dark" ? "active" : ""}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden
-          >
-            <title>Dark theme</title>
-            <path d="M21 12.79A9 9 0 1111.21 3A7 7 0 0021 12.79z" />
-          </svg>
-          <button
-            type="button"
-            className="toggle-track"
-            onClick={() => onThemeChange(theme === "dark" ? "light" : "dark")}
-            aria-label={`Switch to ${theme === "dark" ? "Light" : "Dark"} theme`}
-            title={`Switch to ${theme === "dark" ? "Light" : "Dark"} theme`}
-          >
-            <span className="toggle-thumb" />
-          </button>
-          <svg
-            className={`toggle-icon ${theme === "light" ? "active" : ""}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden
-          >
-            <title>Light theme</title>
-            <circle cx="12" cy="12" r="5" />
-            <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-          </svg>
-        </div>
+        <ThemeDropdown value={theme} onChange={onThemeChange} />
         <span className="titlebar-divider" aria-hidden />
         <button
           type="button"

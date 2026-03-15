@@ -310,6 +310,7 @@ export function App({
               canZoomIn={appearance.canZoomIn}
               canZoomOut={appearance.canZoomOut}
               applyZoomAction={appearance.applyZoomAction}
+              setZoomPercent={appearance.setZoomPercent}
               logError={logError}
             />
           ) : (
@@ -322,6 +323,7 @@ export function App({
                 canZoomIn={appearance.canZoomIn}
                 canZoomOut={appearance.canZoomOut}
                 applyZoomAction={appearance.applyZoomAction}
+                setZoomPercent={appearance.setZoomPercent}
               />
             </section>
           )
@@ -356,11 +358,15 @@ export function App({
               info={appearance.settingsInfo}
               loading={appearance.settingsLoading}
               error={appearance.settingsError}
+              theme={appearance.theme}
+              zoomPercent={appearance.zoomPercent}
               monoFontFamily={appearance.monoFontFamily}
               regularFontFamily={appearance.regularFontFamily}
               monoFontSize={appearance.monoFontSize}
               regularFontSize={appearance.regularFontSize}
               useMonospaceForAllMessages={appearance.useMonospaceForAllMessages}
+              onThemeChange={appearance.setTheme}
+              onZoomPercentChange={appearance.setZoomPercent}
               onMonoFontFamilyChange={appearance.setMonoFontFamily}
               onRegularFontFamilyChange={appearance.setRegularFontFamily}
               onMonoFontSizeChange={appearance.setMonoFontSize}

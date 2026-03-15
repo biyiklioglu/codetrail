@@ -14,7 +14,9 @@ import "@fontsource/plus-jakarta-sans/500.css";
 import "@fontsource/plus-jakarta-sans/600.css";
 import "@fontsource/plus-jakarta-sans/700.css";
 
+import type { ThemeMode } from "../shared/uiPreferences";
 import "./styles.css";
+import { applyTheme } from "./lib/theme";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
@@ -55,8 +57,8 @@ function showBootFailure(title: string, details: unknown): void {
   body.appendChild(container);
 }
 
-function applyInitialTheme(theme: "light" | "dark"): void {
-  document.documentElement.dataset.theme = theme;
+function applyInitialTheme(theme: ThemeMode): void {
+  applyTheme(theme);
   try {
     window.localStorage.setItem("codetrail-theme", theme);
   } catch {

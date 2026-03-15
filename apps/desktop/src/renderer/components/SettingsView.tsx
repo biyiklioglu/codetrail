@@ -10,6 +10,8 @@ import {
   type MonoFontSize,
   type RegularFontFamily,
   type RegularFontSize,
+  THEME_GROUPS,
+  type ThemeMode,
   UI_MESSAGE_CATEGORY_VALUES,
   UI_MONO_FONT_SIZE_VALUES,
   UI_MONO_FONT_VALUES,
@@ -20,6 +22,7 @@ import { copyTextToClipboard } from "../lib/clipboard";
 import { openPath } from "../lib/pathActions";
 import { prettyCategory } from "../lib/viewUtils";
 import { ToolbarIcon } from "./ToolbarIcon";
+import { ZoomPercentInput } from "./ZoomPercentInput";
 type SettingsInfo = IpcResponse<"app:getSettingsInfo">;
 
 const MONO_FONT_OPTIONS: Array<{ value: MonoFontFamily; label: string }> = [
@@ -46,11 +49,15 @@ export function SettingsView({
   info,
   loading,
   error,
+  theme,
+  zoomPercent,
   monoFontFamily,
   regularFontFamily,
   monoFontSize,
   regularFontSize,
   useMonospaceForAllMessages,
+  onThemeChange,
+  onZoomPercentChange,
   onMonoFontFamilyChange,
   onRegularFontFamilyChange,
   onMonoFontSizeChange,
@@ -66,11 +73,15 @@ export function SettingsView({
   info: SettingsInfo | null;
   loading: boolean;
   error: string | null;
+  theme: ThemeMode;
+  zoomPercent: number;
   monoFontFamily: MonoFontFamily;
   regularFontFamily: RegularFontFamily;
   monoFontSize: MonoFontSize;
   regularFontSize: RegularFontSize;
   useMonospaceForAllMessages: boolean;
+  onThemeChange: (theme: ThemeMode) => void;
+  onZoomPercentChange: (zoomPercent: number) => void;
   onMonoFontFamilyChange: (fontFamily: MonoFontFamily) => void;
   onRegularFontFamilyChange: (fontFamily: RegularFontFamily) => void;
   onMonoFontSizeChange: (fontSize: MonoFontSize) => void;
@@ -121,6 +132,53 @@ export function SettingsView({
             <p>Application preferences and configuration</p>
           </div>
         </header>
+
+        <section className="settings-section">
+          <div className="settings-section-header">
+            <div className="settings-section-icon settings-section-icon-theme" aria-hidden>
+              ◐
+            </div>
+            <div>
+              <h3>Appearance</h3>
+              <p>Theme and zoom used across history, search, help, and settings.</p>
+            </div>
+          </div>
+          <div className="settings-section-body">
+            <div className="settings-font-grid">
+              <label className="settings-field">
+                <span className="settings-field-label">Application theme</span>
+                <select
+                  className="settings-select"
+                  aria-label="Theme"
+                  value={theme}
+                  onChange={(event) => onThemeChange(event.target.value as ThemeMode)}
+                >
+                  {THEME_GROUPS.map((group) => (
+                    <optgroup key={group.value} label={group.label}>
+                      {group.options.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+
+              <label className="settings-field">
+                <span className="settings-field-label">Zoom</span>
+                <ZoomPercentInput
+                  value={zoomPercent}
+                  onCommit={onZoomPercentChange}
+                  ariaLabel="Zoom"
+                  title="Zoom level (60%-175%)"
+                  wrapperClassName="settings-zoom-control"
+                  inputClassName="settings-zoom-input"
+                />
+              </label>
+            </div>
+          </div>
+        </section>
 
         <section className="settings-section">
           <div className="settings-section-header">
