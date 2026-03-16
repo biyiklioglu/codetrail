@@ -151,7 +151,7 @@ describe("App history messages", () => {
     fireEvent.keyDown(window, { key: "ArrowDown", metaKey: true });
 
     await waitFor(() => {
-      expect(scrollTo).toHaveBeenCalledWith({ top: 80, behavior: "smooth" });
+      expect(scrollTo).toHaveBeenCalledWith({ top: 80 });
     });
   });
 
