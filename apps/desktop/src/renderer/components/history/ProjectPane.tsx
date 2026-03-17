@@ -115,13 +115,15 @@ export function ProjectPane({
       </div>
       <div className="search-wrapper">
         <div className="search-box">
-          <ToolbarIcon name="search" />
-          <input
-            className="search-input"
-            value={projectQueryInput}
-            onChange={(event) => onProjectQueryChange(event.target.value)}
-            placeholder={SEARCH_PLACEHOLDERS.sidebarProjects}
-          />
+          <div className="search-input-shell">
+            <ToolbarIcon name="search" />
+            <input
+              className="search-input"
+              value={projectQueryInput}
+              onChange={(event) => onProjectQueryChange(event.target.value)}
+              placeholder={SEARCH_PLACEHOLDERS.sidebarProjects}
+            />
+          </div>
         </div>
       </div>
       <div className="tag-row">
