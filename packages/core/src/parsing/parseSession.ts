@@ -1,4 +1,5 @@
 import { canonicalMessageSchema } from "../contracts/canonical";
+import { getProviderAdapter } from "../providers";
 
 import {
   type ParseSessionInput,
@@ -7,22 +8,19 @@ import {
   parseSessionInputSchema,
   parseSessionResultSchema,
 } from "./contracts";
-import {
-  type ParseProviderEventResult,
-  parseProviderEvent,
-  parseProviderPayload,
-} from "./providerParsers";
+import type { ParsedProviderMessage } from "./providerParsers";
 
 // parseSession is the narrow boundary between provider-specific transcript shapes and the
 // canonical message model used everywhere else in the app.
 export function parseSession(input: ParseSessionInput): ParseSessionResult {
   const validated = parseSessionInputSchema.parse(input);
+  const adapter = getProviderAdapter(validated.provider);
   const diagnostics: ParserDiagnostic[] = [];
   const messages = normalizeParsedMessages(
     validated.provider,
     validated.sessionId,
     diagnostics,
-    parseProviderPayload({
+    adapter.parsePayload({
       provider: validated.provider,
       sessionId: validated.sessionId,
       payload: validated.payload,
@@ -63,7 +61,8 @@ export function parseSessionEvent(args: {
     sessionId: args.sessionId,
     payload: null,
   });
-  const parsed = parseProviderEvent({
+  const adapter = getProviderAdapter(validated.provider);
+  const parsed = adapter.parseEvent({
     provider: validated.provider,
     sessionId: validated.sessionId,
     eventIndex: args.eventIndex,
@@ -87,7 +86,7 @@ function normalizeParsedMessages(
   provider: ParseSessionInput["provider"],
   sessionId: ParseSessionInput["sessionId"],
   diagnostics: ParserDiagnostic[],
-  messages: ReturnType<typeof parseProviderPayload>,
+  messages: ParsedProviderMessage[],
 ): ParseSessionResult["messages"] {
   return messages.map((message) => {
     const candidate = {

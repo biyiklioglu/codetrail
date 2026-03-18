@@ -1,5 +1,6 @@
 import type { AppStateStore, PaneState } from "./appStateStore";
 
+import { createSettingsInfoFixture } from "@codetrail/core/testing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -143,6 +144,7 @@ vi.mock("@codetrail/core", async () => {
       geminiProjectsPath: null,
       cursorRoot: "/cursor/root",
       copilotRoot: "/copilot/root",
+      includeClaudeSubagents: false,
     },
     initializeDatabase: mockInitializeDatabase,
     resolveSystemMessageRegexRules: mockResolveSystemMessageRegexRules,
@@ -309,13 +311,16 @@ describe("bootstrapMainProcess", () => {
         userDataDir: string;
       };
       discovery: {
-        claudeRoot: string;
-        codexRoot: string;
-        geminiRoot: string;
-        geminiHistoryRoot: string;
-        geminiProjectsPath: string;
-        cursorRoot: string;
-        copilotRoot: string;
+        providers: Array<{
+          provider: string;
+          label: string;
+          paths: Array<{
+            key: string;
+            label: string;
+            value: string;
+            watch: boolean;
+          }>;
+        }>;
       };
     };
     expect(settings.storage).toEqual({
@@ -325,15 +330,18 @@ describe("bootstrapMainProcess", () => {
       bookmarksDatabaseFile: "/tmp/codetrail.sqlite.bookmarks",
       userDataDir: "/tmp/user-data",
     });
-    expect(settings.discovery).toEqual({
-      claudeRoot: "/claude/root",
-      codexRoot: "/codex/root",
-      geminiRoot: "/gemini/root",
-      geminiHistoryRoot: "/Users/test/.gemini/history",
-      geminiProjectsPath: "/Users/test/.gemini/projects.json",
-      cursorRoot: "/cursor/root",
-      copilotRoot: "/copilot/root",
-    });
+    expect(settings.discovery).toEqual(
+      createSettingsInfoFixture({
+        homeDir: "/Users/test",
+        pathValues: {
+          claudeRoot: "/claude/root",
+          codexRoot: "/codex/root",
+          geminiRoot: "/gemini/root",
+          cursorRoot: "/cursor/root",
+          copilotRoot: "/copilot/root",
+        },
+      }).discovery,
+    );
 
     const projectPayload = { providers: ["claude"], query: "" };
     expect(getRequiredHandler(handlers, "projects:list")(projectPayload)).toEqual({
@@ -554,10 +562,7 @@ describe("bootstrapMainProcess", () => {
         }),
       );
       expect(mockFileWatcherInstances[0]?.start).toHaveBeenCalledTimes(1);
-      expect(mockEnqueue).toHaveBeenCalledWith(
-        { force: false },
-        { source: "watch_initial_scan" },
-      );
+      expect(mockEnqueue).toHaveBeenCalledWith({ force: false }, { source: "watch_initial_scan" });
     } finally {
       Object.defineProperty(process, "platform", { value: originalPlatform });
     }
@@ -786,10 +791,7 @@ describe("bootstrapMainProcess", () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       await bootstrapMainProcess();
-      expect(mockEnqueue).toHaveBeenCalledWith(
-        { force: false },
-        { source: "startup_incremental" },
-      );
+      expect(mockEnqueue).toHaveBeenCalledWith({ force: false }, { source: "startup_incremental" });
 
       mockEnqueue.mockRejectedValueOnce(new Error("index boom"));
       await bootstrapMainProcess({ dbPath: "/tmp/next.sqlite" });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { MessageCategory, Provider, SearchMode } from "@codetrail/core";
+import type { MessageCategory, Provider, SearchMode } from "@codetrail/core/browser";
 
 import {
   DEFAULT_PREFERRED_REFRESH_STRATEGY,

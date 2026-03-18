@@ -1,6 +1,6 @@
 import { createContext, useContext, useRef } from "react";
 
-import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core";
+import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core/browser";
 
 export type CodetrailClient = {
   invoke<C extends IpcChannel>(channel: C, payload: IpcRequestInput<C>): Promise<IpcResponse<C>>;

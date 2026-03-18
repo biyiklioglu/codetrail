@@ -1,0 +1,72 @@
+{
+  "version": 3,
+  "sessionId": "copilot-session-redacted-001",
+  "creationDate": "2026-03-10T14:00:00Z",
+  "lastMessageDate": "2026-03-10T14:05:00Z",
+  "requests": [
+    {
+      "requestId": "req-001",
+      "timestamp": 1741615200000,
+      "modelId": "gpt-4o-mini",
+      "message": {
+        "text": "How do I add a new provider?"
+      },
+      "response": [
+        {
+          "kind": "markdownContent",
+          "value": "You can add a new provider by creating a parser function."
+        }
+      ]
+    },
+    {
+      "requestId": "req-002",
+      "timestamp": 1741615260000,
+      "message": {
+        "text": "Show me the code."
+      },
+      "response": [
+        {
+          "kind": "markdownContent",
+          "value": "Here is the relevant code:"
+        },
+        {
+          "kind": "toolInvocationSerialized",
+          "toolId": "vscode.open",
+          "toolSpecificData": {
+            "commandLine": "code src/parser.ts"
+          }
+        },
+        {
+          "kind": "progressMessage",
+          "value": "Opening file..."
+        },
+        {
+          "kind": "markdownContent",
+          "value": "The file has been opened."
+        }
+      ]
+    },
+    {
+      "requestId": "req-003",
+      "timestamp": 1741615320000,
+      "message": {
+        "text": "Apply changes"
+      },
+      "response": [
+        {
+          "kind": "elicitation",
+          "title": "Confirm changes",
+          "message": "Do you want to apply these edits?"
+        },
+        {
+          "kind": "toolInvocationSerialized",
+          "toolId": "editFile",
+          "toolSpecificData": {
+            "path": "src/parser.ts",
+            "operation": "write"
+          }
+        }
+      ]
+    }
+  ]
+}

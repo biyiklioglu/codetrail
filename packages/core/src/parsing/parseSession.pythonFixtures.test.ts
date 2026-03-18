@@ -165,4 +165,43 @@ describe("parseSession python fixtures", () => {
     expect(parsed.messages.some((message) => message.id === "cur-a-2")).toBe(true);
     expect(parsed.messages.some((message) => message.content.includes("<user_query>"))).toBe(false);
   });
+
+  it("parses copilot fixture requests into canonical categories", () => {
+    const fixturesRoot = join(process.cwd(), "packages", "core", "test-fixtures", "providers");
+    const payload = JSON.parse(
+      readFileSync(
+        join(
+          fixturesRoot,
+          "copilot",
+          "workspaceStorage",
+          "workspace-redacted-001",
+          "chatSessions",
+          "copilot-session-redacted-001.json",
+        ),
+        "utf8",
+      ),
+    ) as unknown;
+
+    const parsed = parseSession({
+      provider: "copilot",
+      sessionId: "copilot-session-redacted-001",
+      payload,
+    });
+
+    expect(parsed.diagnostics).toEqual([]);
+    expect(new Set(parsed.messages.map((message) => message.category))).toEqual(
+      new Set(["user", "assistant", "tool_use", "tool_edit", "system"]),
+    );
+    expect(parsed.messages.some((message) => message.id === "req-001:user")).toBe(true);
+    expect(parsed.messages.some((message) => message.id === "req-002:resp:1")).toBe(true);
+    expect(parsed.messages.some((message) => message.id === "req-003:resp:0")).toBe(true);
+    expect(
+      parsed.messages.some(
+        (message) =>
+          message.id === "req-003:resp:1" &&
+          message.category === "tool_edit" &&
+          message.content.includes('"editFile"'),
+      ),
+    ).toBe(true);
+  });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { createSettingsInfoFixture } from "../testing/settingsInfoFixture";
 import { type IpcChannel, ipcChannels, ipcContractSchemas, paneStateBaseSchema } from "./ipc";
 
 const allNullPaneState = Object.fromEntries(
@@ -18,24 +19,12 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
   },
   "app:getSettingsInfo": {
     request: {},
-    response: {
-      storage: {
-        settingsFile: "/tmp/ui-state.json",
-        cacheDir: "/tmp/cache",
-        databaseFile: "/tmp/codetrail.sqlite",
-        bookmarksDatabaseFile: "/tmp/codetrail.bookmarks.sqlite",
-        userDataDir: "/tmp",
-      },
-      discovery: {
-        claudeRoot: "/home/user/.claude/projects",
-        codexRoot: "/home/user/.codex/sessions",
-        geminiRoot: "/home/user/.gemini/tmp",
-        geminiHistoryRoot: "/home/user/.gemini/history",
-        geminiProjectsPath: "/home/user/.gemini/projects.json",
-        cursorRoot: "/home/user/.cursor/projects",
+    response: createSettingsInfoFixture({
+      homeDir: "/home/user",
+      pathValues: {
         copilotRoot: "/home/user/.config/Code/User/workspaceStorage",
       },
-    },
+    }),
   },
   "db:getSchemaVersion": {
     request: {},

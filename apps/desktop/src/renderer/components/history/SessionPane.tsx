@@ -1,4 +1,4 @@
-import type { IpcResponse } from "@codetrail/core";
+import type { IpcResponse } from "@codetrail/core/browser";
 import { type Ref, useCallback, useEffect, useState } from "react";
 
 import { deriveSessionTitle, formatDate, sessionActivityOf } from "../../lib/viewUtils";

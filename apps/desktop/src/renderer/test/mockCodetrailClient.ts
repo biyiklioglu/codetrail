@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 
-import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core";
+import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core/browser";
 
 import type { CodetrailClient } from "../lib/codetrailClient";
 

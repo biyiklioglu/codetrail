@@ -1,4 +1,5 @@
-import { paneStateBaseSchema } from "@codetrail/core";
+import { paneStateBaseSchema } from "@codetrail/core/browser";
+import { createSettingsInfoFixture } from "@codetrail/core/testing";
 
 import { createMockCodetrailClient } from "./mockCodetrailClient";
 
@@ -9,23 +10,7 @@ const EMPTY_UI_STATE = Object.fromEntries(
   Object.keys(paneStateBaseSchema.shape).map((k) => [k, null]),
 );
 
-const SETTINGS_INFO = {
-  storage: {
-    settingsFile: "/tmp/ui-state.json",
-    cacheDir: "/tmp/cache",
-    databaseFile: "/tmp/codetrail.sqlite",
-    bookmarksDatabaseFile: "/tmp/codetrail.bookmarks.sqlite",
-    userDataDir: "/tmp",
-  },
-  discovery: {
-    claudeRoot: "/Users/test/.claude/projects",
-    codexRoot: "/Users/test/.codex/sessions",
-    geminiRoot: "/Users/test/.gemini/tmp",
-    geminiHistoryRoot: "/Users/test/.gemini/history",
-    geminiProjectsPath: "/Users/test/.gemini/projects.json",
-    cursorRoot: "/Users/test/.cursor/projects",
-  },
-} as const;
+const SETTINGS_INFO = createSettingsInfoFixture();
 
 export function getFocusedHistoryMessageId(container: HTMLElement): string | null {
   return container.querySelector<HTMLElement>(".message.focused")?.dataset.historyMessageId ?? null;
@@ -100,10 +85,22 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
         },
         jobs: {
           startupIncremental: makeDiagnosticsBucket(),
-          manualIncremental: makeDiagnosticsBucket({ runs: 1, averageDurationMs: 140, maxDurationMs: 140 }),
+          manualIncremental: makeDiagnosticsBucket({
+            runs: 1,
+            averageDurationMs: 140,
+            maxDurationMs: 140,
+          }),
           manualForceReindex: makeDiagnosticsBucket(),
-          watchTriggered: makeDiagnosticsBucket({ runs: 2, averageDurationMs: 90, maxDurationMs: 120 }),
-          watchTargeted: makeDiagnosticsBucket({ runs: 1, averageDurationMs: 60, maxDurationMs: 60 }),
+          watchTriggered: makeDiagnosticsBucket({
+            runs: 2,
+            averageDurationMs: 90,
+            maxDurationMs: 120,
+          }),
+          watchTargeted: makeDiagnosticsBucket({
+            runs: 1,
+            averageDurationMs: 60,
+            maxDurationMs: 60,
+          }),
           watchFallbackIncremental: makeDiagnosticsBucket({
             runs: 1,
             averageDurationMs: 120,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { IpcRequest } from "@codetrail/core";
+import type { IpcRequest } from "@codetrail/core/browser";
 
 import type {
   MonoFontFamily,

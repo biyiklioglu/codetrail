@@ -1,11 +1,12 @@
 import { useState } from "react";
 
-import type {
-  IpcResponse,
-  MessageCategory,
-  Provider,
-  SystemMessageRegexRules,
-} from "@codetrail/core";
+import {
+  type IpcResponse,
+  type MessageCategory,
+  PROVIDER_LIST,
+  type Provider,
+  type SystemMessageRegexRules,
+} from "@codetrail/core/browser";
 
 import {
   type MonoFontFamily,
@@ -114,23 +115,13 @@ export function SettingsView({
     : [];
 
   const discoveryRows: Array<{ label: string; value: string; provider: Provider }> = info
-    ? [
-        { label: "Claude root", value: info.discovery.claudeRoot, provider: "claude" },
-        { label: "Codex root", value: info.discovery.codexRoot, provider: "codex" },
-        { label: "Gemini tmp root", value: info.discovery.geminiRoot, provider: "gemini" },
-        {
-          label: "Gemini history root",
-          value: info.discovery.geminiHistoryRoot,
-          provider: "gemini",
-        },
-        {
-          label: "Gemini projects file",
-          value: info.discovery.geminiProjectsPath,
-          provider: "gemini",
-        },
-        { label: "Cursor root", value: info.discovery.cursorRoot, provider: "cursor" },
-        { label: "Copilot root", value: info.discovery.copilotRoot, provider: "copilot" },
-      ]
+    ? info.discovery.providers.flatMap((provider) =>
+        provider.paths.map((path) => ({
+          label: path.label,
+          value: path.value,
+          provider: provider.provider,
+        })),
+      )
     : [];
 
   return (
@@ -166,308 +157,320 @@ export function SettingsView({
 
         {activeTab === "settings" ? (
           <>
-        <section className="settings-section">
-          <div className="settings-section-header">
-            <div className="settings-section-icon settings-section-icon-theme" aria-hidden>
-              ◐
-            </div>
-            <div>
-              <h3>Appearance</h3>
-              <p>Theme and zoom used across history, search, help, and settings.</p>
-            </div>
-          </div>
-          <div className="settings-section-body">
-            <div className="settings-font-grid">
-              <label className="settings-field">
-                <span className="settings-field-label">Application theme</span>
-                <select
-                  className="settings-select"
-                  aria-label="Theme"
-                  value={theme}
-                  onChange={(event) => onThemeChange(event.target.value as ThemeMode)}
-                >
-                  {THEME_GROUPS.map((group) => (
-                    <optgroup key={group.value} label={group.label}>
-                      {group.options.map((option) => (
+            <section className="settings-section">
+              <div className="settings-section-header">
+                <div className="settings-section-icon settings-section-icon-theme" aria-hidden>
+                  ◐
+                </div>
+                <div>
+                  <h3>Appearance</h3>
+                  <p>Theme and zoom used across history, search, help, and settings.</p>
+                </div>
+              </div>
+              <div className="settings-section-body">
+                <div className="settings-font-grid">
+                  <label className="settings-field">
+                    <span className="settings-field-label">Application theme</span>
+                    <select
+                      className="settings-select"
+                      aria-label="Theme"
+                      value={theme}
+                      onChange={(event) => onThemeChange(event.target.value as ThemeMode)}
+                    >
+                      {THEME_GROUPS.map((group) => (
+                        <optgroup key={group.value} label={group.label}>
+                          {group.options.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div className="settings-field">
+                    <span className="settings-field-label">Zoom</span>
+                    <ZoomPercentInput
+                      value={zoomPercent}
+                      onCommit={onZoomPercentChange}
+                      ariaLabel="Zoom"
+                      title="Zoom level (60%-175%)"
+                      wrapperClassName="settings-zoom-control"
+                      inputClassName="settings-zoom-input"
+                    />
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section-header">
+                <div className="settings-section-icon settings-section-icon-fonts" aria-hidden>
+                  Aa
+                </div>
+                <div>
+                  <h3>Fonts</h3>
+                  <p>Regular and monospaced fonts used in the UI and message content.</p>
+                </div>
+              </div>
+              <div className="settings-section-body">
+                <div className="settings-font-grid">
+                  <label className="settings-field">
+                    <span className="settings-field-label">Monospaced font</span>
+                    <select
+                      className="settings-select"
+                      value={monoFontFamily}
+                      onChange={(event) =>
+                        onMonoFontFamilyChange(event.target.value as MonoFontFamily)
+                      }
+                    >
+                      {MONO_FONT_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
                       ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </label>
+                    </select>
+                  </label>
 
-              <div className="settings-field">
-                <span className="settings-field-label">Zoom</span>
-                <ZoomPercentInput
-                  value={zoomPercent}
-                  onCommit={onZoomPercentChange}
-                  ariaLabel="Zoom"
-                  title="Zoom level (60%-175%)"
-                  wrapperClassName="settings-zoom-control"
-                  inputClassName="settings-zoom-input"
-                />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="settings-section">
-          <div className="settings-section-header">
-            <div className="settings-section-icon settings-section-icon-fonts" aria-hidden>
-              Aa
-            </div>
-            <div>
-              <h3>Fonts</h3>
-              <p>Regular and monospaced fonts used in the UI and message content.</p>
-            </div>
-          </div>
-          <div className="settings-section-body">
-            <div className="settings-font-grid">
-              <label className="settings-field">
-                <span className="settings-field-label">Monospaced font</span>
-                <select
-                  className="settings-select"
-                  value={monoFontFamily}
-                  onChange={(event) => onMonoFontFamilyChange(event.target.value as MonoFontFamily)}
-                >
-                  {MONO_FONT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="settings-field">
-                <span className="settings-field-label">Monospaced size</span>
-                <select
-                  className="settings-select"
-                  value={monoFontSize}
-                  onChange={(event) => onMonoFontSizeChange(event.target.value as MonoFontSize)}
-                >
-                  {MONO_FONT_SIZE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="settings-field">
-                <span className="settings-field-label">Regular font</span>
-                <select
-                  className="settings-select"
-                  value={regularFontFamily}
-                  onChange={(event) =>
-                    onRegularFontFamilyChange(event.target.value as RegularFontFamily)
-                  }
-                >
-                  {REGULAR_FONT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="settings-field">
-                <span className="settings-field-label">Regular size</span>
-                <select
-                  className="settings-select"
-                  value={regularFontSize}
-                  onChange={(event) =>
-                    onRegularFontSizeChange(event.target.value as RegularFontSize)
-                  }
-                >
-                  {REGULAR_FONT_SIZE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="settings-checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={useMonospaceForAllMessages}
-                  onChange={(event) => onUseMonospaceForAllMessagesChange(event.target.checked)}
-                />
-                <span>Use monospaced fonts for all messages</span>
-              </label>
-            </div>
-          </div>
-        </section>
-
-        <section className="settings-section">
-          <div className="settings-section-header">
-            <div className="settings-section-icon settings-section-icon-expansion" aria-hidden>
-              []
-            </div>
-            <div>
-              <h3>Default Expansion</h3>
-              <p>Which message types should start expanded in session view.</p>
-            </div>
-          </div>
-          <div className="settings-section-body">
-            <div className="settings-category-row">
-              {UI_MESSAGE_CATEGORY_VALUES.map((category) => {
-                const active = expandedByDefaultCategories.includes(category);
-                return (
-                  <button
-                    key={category}
-                    type="button"
-                    className={`settings-chip${active ? " active" : ""}`}
-                    onClick={() => onToggleExpandedByDefault(category)}
-                    aria-pressed={active}
-                    title={`Toggle default expansion for ${prettyCategory(category)}`}
-                  >
-                    <span className="settings-chip-check" aria-hidden>
-                      <svg viewBox="0 0 24 24">
-                        <title>Selected</title>
-                        <path d="M20 6L9 17l-5-5" />
-                      </svg>
-                    </span>
-                    <span>{prettyCategory(category)}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-
-        <section className="settings-section">
-          <div className="settings-section-header">
-            <div className="settings-section-icon settings-section-icon-rules" aria-hidden>
-              {"//"}
-            </div>
-            <div>
-              <h3>System Message Rules</h3>
-              <p>
-                Regex patterns applied during ingestion to classify messages. Run Reindex after
-                changes.
-              </p>
-            </div>
-          </div>
-          <div className="settings-section-body">
-            {(["claude", "codex", "gemini", "cursor", "copilot"] as const).map((provider) => {
-              const patterns = systemMessageRegexRules[provider] ?? [];
-              return (
-                <div key={provider} className="settings-rule-group">
-                  <div className="settings-rule-group-header">
-                    <span className={`settings-provider-badge settings-provider-${provider}`}>
-                      {provider}
-                    </span>
-                    <button
-                      type="button"
-                      className="settings-rule-button settings-rule-add-button"
-                      onClick={() => onAddSystemMessageRegexRule(provider)}
-                      aria-label={`Add ${provider} regex rule`}
-                      title={`Add ${provider} regex rule`}
+                  <label className="settings-field">
+                    <span className="settings-field-label">Monospaced size</span>
+                    <select
+                      className="settings-select"
+                      value={monoFontSize}
+                      onChange={(event) => onMonoFontSizeChange(event.target.value as MonoFontSize)}
                     >
-                      Add Pattern
-                    </button>
-                  </div>
-                  {patterns.length === 0 ? (
-                    <p className="settings-rule-empty">No regex rules configured.</p>
-                  ) : (
-                    <div className="settings-rule-list">
-                      {patterns.map((pattern, index) => {
-                        const duplicateCount = patterns
-                          .slice(0, index)
-                          .filter((existingPattern) => existingPattern === pattern).length;
-                        return (
-                          <div
-                            key={`${provider}-rule-${pattern}-${duplicateCount}`}
-                            className="settings-rule-row"
-                          >
-                            <input
-                              className="settings-rule-input"
-                              type="text"
-                              value={pattern}
-                              onChange={(event) =>
-                                onUpdateSystemMessageRegexRule(provider, index, event.target.value)
-                              }
-                              placeholder="Regex pattern"
-                              aria-label={`${provider} regex rule ${index + 1}`}
-                            />
-                            <button
-                              type="button"
-                              className="settings-rule-button settings-rule-remove-button"
-                              onClick={() => onRemoveSystemMessageRegexRule(provider, index)}
-                              aria-label={`Remove ${provider} regex rule ${index + 1}`}
-                              title={`Remove ${provider} regex rule ${index + 1}`}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
+                      {MONO_FONT_SIZE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-        {loading ? (
-          <section className="settings-section settings-status-card">
-            <p className="empty-state">Loading settings...</p>
-          </section>
-        ) : null}
-        {!loading && error ? (
-          <section className="settings-section settings-status-card">
-            <p className="empty-state">{error}</p>
-          </section>
-        ) : null}
-        {!loading && !error && info ? (
-          <>
-            <section className="settings-section">
-              <div className="settings-section-header">
-                <div className="settings-section-icon settings-section-icon-storage" aria-hidden>
-                  DB
-                </div>
-                <div>
-                  <h3>Storage</h3>
-                  <p>File and directory locations used by the application.</p>
-                </div>
-              </div>
-              <div className="settings-section-body">
-                <div className="settings-grid">
-                  {storageRows.map((row) => (
-                    <SettingsInfoRow key={row.label} label={row.label} value={row.value} />
-                  ))}
-                </div>
-              </div>
-            </section>
-            <section className="settings-section">
-              <div className="settings-section-header">
-                <div className="settings-section-icon settings-section-icon-discovery" aria-hidden>
-                  /\
-                </div>
-                <div>
-                  <h3>Discovery Roots</h3>
-                  <p>Session and project directories scanned for each provider.</p>
-                </div>
-              </div>
-              <div className="settings-section-body">
-                <div className="settings-grid">
-                  {discoveryRows.map((row) => (
-                    <SettingsInfoRow
-                      key={row.label}
-                      label={row.label}
-                      value={row.value}
-                      provider={row.provider}
+                  <label className="settings-field">
+                    <span className="settings-field-label">Regular font</span>
+                    <select
+                      className="settings-select"
+                      value={regularFontFamily}
+                      onChange={(event) =>
+                        onRegularFontFamilyChange(event.target.value as RegularFontFamily)
+                      }
+                    >
+                      {REGULAR_FONT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="settings-field">
+                    <span className="settings-field-label">Regular size</span>
+                    <select
+                      className="settings-select"
+                      value={regularFontSize}
+                      onChange={(event) =>
+                        onRegularFontSizeChange(event.target.value as RegularFontSize)
+                      }
+                    >
+                      {REGULAR_FONT_SIZE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="settings-checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={useMonospaceForAllMessages}
+                      onChange={(event) => onUseMonospaceForAllMessagesChange(event.target.checked)}
                     />
-                  ))}
+                    <span>Use monospaced fonts for all messages</span>
+                  </label>
                 </div>
               </div>
             </section>
-          </>
-        ) : null}
+
+            <section className="settings-section">
+              <div className="settings-section-header">
+                <div className="settings-section-icon settings-section-icon-expansion" aria-hidden>
+                  []
+                </div>
+                <div>
+                  <h3>Default Expansion</h3>
+                  <p>Which message types should start expanded in session view.</p>
+                </div>
+              </div>
+              <div className="settings-section-body">
+                <div className="settings-category-row">
+                  {UI_MESSAGE_CATEGORY_VALUES.map((category) => {
+                    const active = expandedByDefaultCategories.includes(category);
+                    return (
+                      <button
+                        key={category}
+                        type="button"
+                        className={`settings-chip${active ? " active" : ""}`}
+                        onClick={() => onToggleExpandedByDefault(category)}
+                        aria-pressed={active}
+                        title={`Toggle default expansion for ${prettyCategory(category)}`}
+                      >
+                        <span className="settings-chip-check" aria-hidden>
+                          <svg viewBox="0 0 24 24">
+                            <title>Selected</title>
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                        </span>
+                        <span>{prettyCategory(category)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section-header">
+                <div className="settings-section-icon settings-section-icon-rules" aria-hidden>
+                  {"//"}
+                </div>
+                <div>
+                  <h3>System Message Rules</h3>
+                  <p>
+                    Regex patterns applied during ingestion to classify messages. Run Reindex after
+                    changes.
+                  </p>
+                </div>
+              </div>
+              <div className="settings-section-body">
+                {PROVIDER_LIST.map(({ id: provider, label }) => {
+                  const patterns = systemMessageRegexRules[provider] ?? [];
+                  return (
+                    <div key={provider} className="settings-rule-group">
+                      <div className="settings-rule-group-header">
+                        <span className={`settings-provider-badge settings-provider-${provider}`}>
+                          {label}
+                        </span>
+                        <button
+                          type="button"
+                          className="settings-rule-button settings-rule-add-button"
+                          onClick={() => onAddSystemMessageRegexRule(provider)}
+                          aria-label={`Add ${provider} regex rule`}
+                          title={`Add ${provider} regex rule`}
+                        >
+                          Add Pattern
+                        </button>
+                      </div>
+                      {patterns.length === 0 ? (
+                        <p className="settings-rule-empty">No regex rules configured.</p>
+                      ) : (
+                        <div className="settings-rule-list">
+                          {patterns.map((pattern, index) => {
+                            const duplicateCount = patterns
+                              .slice(0, index)
+                              .filter((existingPattern) => existingPattern === pattern).length;
+                            return (
+                              <div
+                                key={`${provider}-rule-${pattern}-${duplicateCount}`}
+                                className="settings-rule-row"
+                              >
+                                <input
+                                  className="settings-rule-input"
+                                  type="text"
+                                  value={pattern}
+                                  onChange={(event) =>
+                                    onUpdateSystemMessageRegexRule(
+                                      provider,
+                                      index,
+                                      event.target.value,
+                                    )
+                                  }
+                                  placeholder="Regex pattern"
+                                  aria-label={`${provider} regex rule ${index + 1}`}
+                                />
+                                <button
+                                  type="button"
+                                  className="settings-rule-button settings-rule-remove-button"
+                                  onClick={() => onRemoveSystemMessageRegexRule(provider, index)}
+                                  aria-label={`Remove ${provider} regex rule ${index + 1}`}
+                                  title={`Remove ${provider} regex rule ${index + 1}`}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            {loading ? (
+              <section className="settings-section settings-status-card">
+                <p className="empty-state">Loading settings...</p>
+              </section>
+            ) : null}
+            {!loading && error ? (
+              <section className="settings-section settings-status-card">
+                <p className="empty-state">{error}</p>
+              </section>
+            ) : null}
+            {!loading && !error && info ? (
+              <>
+                <section className="settings-section">
+                  <div className="settings-section-header">
+                    <div
+                      className="settings-section-icon settings-section-icon-storage"
+                      aria-hidden
+                    >
+                      DB
+                    </div>
+                    <div>
+                      <h3>Storage</h3>
+                      <p>File and directory locations used by the application.</p>
+                    </div>
+                  </div>
+                  <div className="settings-section-body">
+                    <div className="settings-grid">
+                      {storageRows.map((row) => (
+                        <SettingsInfoRow key={row.label} label={row.label} value={row.value} />
+                      ))}
+                    </div>
+                  </div>
+                </section>
+                <section className="settings-section">
+                  <div className="settings-section-header">
+                    <div
+                      className="settings-section-icon settings-section-icon-discovery"
+                      aria-hidden
+                    >
+                      /\
+                    </div>
+                    <div>
+                      <h3>Discovery Roots</h3>
+                      <p>Session and project directories scanned for each provider.</p>
+                    </div>
+                  </div>
+                  <div className="settings-section-body">
+                    <div className="settings-grid">
+                      {discoveryRows.map((row) => (
+                        <SettingsInfoRow
+                          key={row.label}
+                          label={row.label}
+                          value={row.value}
+                          provider={row.provider}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </section>
+              </>
+            ) : null}
           </>
         ) : (
           <DiagnosticsTab
@@ -696,10 +699,7 @@ function DiagnosticsTab({
         </div>
         <div className="settings-section-body">
           <div className="settings-runtime-grid">
-            <RuntimeStat
-              label="Started"
-              value={formatTimestamp(diagnostics.startedAt)}
-            />
+            <RuntimeStat label="Started" value={formatTimestamp(diagnostics.startedAt)} />
             <RuntimeStat
               label="Watcher backend"
               value={diagnostics.watcher.backend ?? "not started"}
@@ -710,7 +710,10 @@ function DiagnosticsTab({
             />
             <RuntimeStat
               label="Last trigger"
-              value={formatOptionalTrigger(diagnostics.watcher.lastTriggerAt, diagnostics.watcher.lastTriggerPathCount)}
+              value={formatOptionalTrigger(
+                diagnostics.watcher.lastTriggerAt,
+                diagnostics.watcher.lastTriggerPathCount,
+              )}
             />
             <RuntimeStat
               label="Manual avg duration"

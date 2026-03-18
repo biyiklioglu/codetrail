@@ -1,29 +1,19 @@
 import { PROVIDER_VALUES, type Provider } from "../contracts/canonical";
+import { PROVIDER_METADATA, createProviderRecord } from "../contracts/providerMetadata";
 
 export type SystemMessageRegexRules = Record<Provider, string[]>;
 export type SystemMessageRegexRuleOverrides = Partial<Record<Provider, string[]>>;
 
-export const DEFAULT_SYSTEM_MESSAGE_REGEX_RULES: SystemMessageRegexRules = {
-  claude: ["^<command-name>", "^<local-command-stdout>", "^<local-command-caveat>"],
-  codex: [
-    "^#?\\s*AGENTS\\.md instructions for [^\\r\\n]+\\r?\\n(?:\\r?\\n)?<INSTRUCTIONS>",
-    "^\\s*<environment_context>",
-  ],
-  gemini: [],
-  cursor: [],
-  copilot: [],
-};
+export const DEFAULT_SYSTEM_MESSAGE_REGEX_RULES: SystemMessageRegexRules = createProviderRecord(
+  (provider) => [...PROVIDER_METADATA[provider].defaultSystemMessageRegexRules],
+);
 
 export function resolveSystemMessageRegexRules(
   overrides?: SystemMessageRegexRuleOverrides,
 ): SystemMessageRegexRules {
-  const resolved: SystemMessageRegexRules = {
-    claude: [...DEFAULT_SYSTEM_MESSAGE_REGEX_RULES.claude],
-    codex: [...DEFAULT_SYSTEM_MESSAGE_REGEX_RULES.codex],
-    gemini: [...DEFAULT_SYSTEM_MESSAGE_REGEX_RULES.gemini],
-    cursor: [...DEFAULT_SYSTEM_MESSAGE_REGEX_RULES.cursor],
-    copilot: [...DEFAULT_SYSTEM_MESSAGE_REGEX_RULES.copilot],
-  };
+  const resolved: SystemMessageRegexRules = createProviderRecord((provider) => [
+    ...DEFAULT_SYSTEM_MESSAGE_REGEX_RULES[provider],
+  ]);
 
   if (!overrides) {
     return resolved;

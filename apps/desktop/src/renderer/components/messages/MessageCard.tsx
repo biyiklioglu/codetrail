@@ -1,4 +1,4 @@
-import type { MessageCategory } from "@codetrail/core";
+import type { MessageCategory } from "@codetrail/core/browser";
 import { type KeyboardEvent, type MouseEvent, type Ref, memo, useMemo } from "react";
 
 import { copyTextToClipboard } from "../../lib/clipboard";

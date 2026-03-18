@@ -1,11 +1,13 @@
 import { z } from "zod";
 
 import {
+  type Provider,
   messageCategorySchema,
   operationDurationConfidenceSchema,
   operationDurationSourceSchema,
   providerSchema,
 } from "./canonical";
+import { PROVIDER_LIST, createProviderRecord } from "./providerMetadata";
 
 const projectSummarySchema = z.object({
   id: z.string().min(1),
@@ -140,13 +142,17 @@ const preferredAutoRefreshStrategySchema = z.enum([
   "scan-1min",
   "scan-5min",
 ]);
-const systemMessageRegexRulesSchema = z.object({
-  claude: z.array(z.string()),
-  codex: z.array(z.string()),
-  gemini: z.array(z.string()),
-  cursor: z.array(z.string()),
-  copilot: z.array(z.string()),
-});
+function buildSystemMessageRegexRulesSchema() {
+  return z.object(createProviderZodShape(() => z.array(z.string())));
+}
+
+function createProviderZodShape<T extends z.ZodTypeAny>(
+  factory: (provider: Provider) => T,
+): { [K in Provider]: T } {
+  return createProviderRecord(factory);
+}
+
+const systemMessageRegexRulesSchema = buildSystemMessageRegexRulesSchema();
 
 // Single source of truth for pane state fields. The non-nullable base schema is used
 // directly as the ui:setState request. The nullable variant (for ui:getState responses
@@ -192,6 +198,13 @@ const uiZoomResponseSchema = z.object({
   percent: z.number().int().positive(),
 });
 
+const discoveryProviderPathSchema = z.object({
+  key: z.string().min(1),
+  label: z.string().min(1),
+  value: z.string().min(1),
+  watch: z.boolean(),
+});
+
 const settingsInfoResponseSchema = z.object({
   storage: z.object({
     settingsFile: z.string().min(1),
@@ -201,13 +214,15 @@ const settingsInfoResponseSchema = z.object({
     userDataDir: z.string().min(1),
   }),
   discovery: z.object({
-    claudeRoot: z.string().min(1),
-    codexRoot: z.string().min(1),
-    geminiRoot: z.string().min(1),
-    geminiHistoryRoot: z.string().min(1),
-    geminiProjectsPath: z.string().min(1),
-    cursorRoot: z.string().min(1),
-    copilotRoot: z.string().min(1),
+    providers: z
+      .array(
+        z.object({
+          provider: providerSchema,
+          label: z.string().min(1),
+          paths: z.array(discoveryProviderPathSchema),
+        }),
+      )
+      .length(PROVIDER_LIST.length),
   }),
 });
 

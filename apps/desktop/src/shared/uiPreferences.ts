@@ -1,4 +1,4 @@
-import type { MessageCategory, Provider } from "@codetrail/core";
+import { type MessageCategory, PROVIDER_VALUES, type Provider } from "@codetrail/core/browser";
 
 export const UI_THEME_VALUES = [
   "light",
@@ -41,7 +41,7 @@ export type RegularFontSize =
   | "18px"
   | "20px";
 
-export const UI_PROVIDER_VALUES: Provider[] = ["claude", "codex", "gemini", "cursor", "copilot"];
+export const UI_PROVIDER_VALUES: Provider[] = [...PROVIDER_VALUES];
 
 export const UI_MESSAGE_CATEGORY_VALUES: MessageCategory[] = [
   "user",

@@ -10,7 +10,7 @@ import type {
 
 import type { RefreshContext } from "./useHistoryController";
 
-import type { MessageCategory } from "@codetrail/core";
+import type { MessageCategory, Provider } from "@codetrail/core/browser";
 
 import { BOOKMARKS_NAV_ID, PAGE_SIZE, PROJECT_ALL_NAV_ID, PROVIDERS } from "../app/constants";
 import { createHistorySelection, setHistorySelectionProjectId } from "../app/historySelection";
@@ -144,7 +144,7 @@ export function useHistoryInteractions({
   sessionSearchInputRef: RefObject<HTMLInputElement | null>;
   loadProjects: () => Promise<void>;
   loadSessions: () => Promise<void>;
-  setProjectProviders: Dispatch<SetStateAction<("claude" | "codex" | "gemini" | "cursor" | "copilot")[]>>;
+  setProjectProviders: Dispatch<SetStateAction<Provider[]>>;
   setProjectQueryInput: Dispatch<SetStateAction<string>>;
   prettyProvider: (provider: ProjectSummary["provider"]) => string;
   refreshContextRef: MutableRefObject<RefreshContext | null>;

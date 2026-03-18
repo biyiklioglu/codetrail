@@ -1,4 +1,4 @@
-import type { IpcResponse, Provider } from "@codetrail/core";
+import type { IpcResponse, Provider } from "@codetrail/core/browser";
 import { type Ref, useEffect, useRef } from "react";
 
 import { SEARCH_PLACEHOLDERS } from "../../lib/searchPlaceholders";

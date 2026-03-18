@@ -1,4 +1,4 @@
-import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core";
+import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core/browser";
 
 declare global {
   interface Window {

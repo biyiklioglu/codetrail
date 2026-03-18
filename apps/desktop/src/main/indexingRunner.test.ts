@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { Provider, SystemMessageRegexRules } from "@codetrail/core";
+
 import { WorkerIndexingRunner, shouldUseIndexingWorker } from "./indexingRunner";
 
 type WorkerMessage =
@@ -8,7 +10,7 @@ type WorkerMessage =
   | {
       type: "file-issue";
       issue: {
-        provider: "claude" | "codex" | "gemini" | "cursor";
+        provider: Provider;
         sessionId: string;
         filePath: string;
         stage: "read" | "parse" | "persist";
@@ -18,7 +20,7 @@ type WorkerMessage =
   | {
       type: "notice";
       notice: {
-        provider: "claude" | "codex" | "gemini" | "cursor";
+        provider: Provider;
         sessionId: string;
         filePath: string;
         stage: "read" | "parse" | "persist";
@@ -33,12 +35,7 @@ type WorkerRequest = {
   dbPath: string;
   forceReindex?: boolean;
   changedFilePaths?: string[];
-  systemMessageRegexRules?: {
-    claude?: string[];
-    codex?: string[];
-    gemini?: string[];
-    cursor?: string[];
-  };
+  systemMessageRegexRules?: Partial<SystemMessageRegexRules>;
 };
 
 type WorkerController = {
@@ -219,6 +216,7 @@ describe("WorkerIndexingRunner", () => {
         codex: ["^<environment_context>"],
         gemini: [],
         cursor: [],
+        copilot: [],
       }),
     });
 
@@ -233,6 +231,7 @@ describe("WorkerIndexingRunner", () => {
           codex: ["^<environment_context>"],
           gemini: [],
           cursor: [],
+          copilot: [],
         },
       },
       {},

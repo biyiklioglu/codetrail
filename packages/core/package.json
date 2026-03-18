@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./browser": "./src/browser.ts",
+    "./testing": "./src/testing/index.ts",
     "./tooling/editOperations": "./src/tooling/editOperations.ts"
   },
   "dependencies": {

@@ -1,4 +1,4 @@
-import type { IpcResponse } from "@codetrail/core";
+import type { IpcResponse } from "@codetrail/core/browser";
 
 export type SessionMessage =
   | IpcResponse<"sessions:getDetail">["messages"][number]

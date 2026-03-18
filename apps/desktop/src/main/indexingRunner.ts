@@ -126,14 +126,12 @@ export class WorkerIndexingRunner {
   private readonly onFileIssue: ((issue: IndexingFileIssue) => void) | undefined;
   private readonly onNotice: ((notice: IndexingNotice) => void) | undefined;
   private readonly onJobSettled:
-    | ((
-        event: {
-          source: IndexingJobSource;
-          request: IndexingWorkerRequest;
-          durationMs: number;
-          success: boolean;
-        },
-      ) => void)
+    | ((event: {
+        source: IndexingJobSource;
+        request: IndexingWorkerRequest;
+        durationMs: number;
+        success: boolean;
+      }) => void)
     | undefined;
   private pendingJobs = 0;
   private completedJobs = 0;
@@ -195,12 +193,16 @@ export class WorkerIndexingRunner {
     options: { source?: IndexingJobSource } = {},
   ): Promise<RefreshJobResponse> {
     const systemMessageRegexRules = this.getSystemMessageRegexRulesFn?.();
-    return this.enqueueJob(`refresh-${++this.sequence}`, {
-      kind: "incremental",
-      dbPath: this.dbPath,
-      forceReindex: request.force,
-      ...(systemMessageRegexRules ? { systemMessageRegexRules } : {}),
-    }, options.source ?? (request.force ? "manual_force_reindex" : "manual_incremental"));
+    return this.enqueueJob(
+      `refresh-${++this.sequence}`,
+      {
+        kind: "incremental",
+        dbPath: this.dbPath,
+        forceReindex: request.force,
+        ...(systemMessageRegexRules ? { systemMessageRegexRules } : {}),
+      },
+      options.source ?? (request.force ? "manual_force_reindex" : "manual_incremental"),
+    );
   }
 
   async enqueueChangedFiles(
@@ -211,12 +213,16 @@ export class WorkerIndexingRunner {
       return { jobId: `changed-${++this.sequence}-noop` };
     }
     const systemMessageRegexRules = this.getSystemMessageRegexRulesFn?.();
-    return this.enqueueJob(`changed-${++this.sequence}`, {
-      kind: "changedFiles",
-      dbPath: this.dbPath,
-      changedFilePaths,
-      ...(systemMessageRegexRules ? { systemMessageRegexRules } : {}),
-    }, options.source ?? "watch_targeted");
+    return this.enqueueJob(
+      `changed-${++this.sequence}`,
+      {
+        kind: "changedFiles",
+        dbPath: this.dbPath,
+        changedFilePaths,
+        ...(systemMessageRegexRules ? { systemMessageRegexRules } : {}),
+      },
+      options.source ?? "watch_targeted",
+    );
   }
 
   private async enqueueJob(

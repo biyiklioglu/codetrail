@@ -1,4 +1,4 @@
-import type { IpcResponse } from "@codetrail/core";
+import type { IpcResponse } from "@codetrail/core/browser";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 

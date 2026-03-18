@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { discoverSessionFiles } from "./discoverSessionFiles";
 
 describe("discoverSessionFiles python fixtures", () => {
-  it("discovers claude/codex/gemini/cursor files from provider fixture tree", () => {
+  it("discovers all provider files from the shared fixture tree", () => {
     const fixturesRoot = join(process.cwd(), "packages", "core", "test-fixtures", "providers");
     const discovered = discoverSessionFiles({
       claudeRoot: join(fixturesRoot, "claude", "projects"),
@@ -18,15 +18,16 @@ describe("discoverSessionFiles python fixtures", () => {
       includeClaudeSubagents: false,
     });
 
-    expect(discovered).toHaveLength(4);
+    expect(discovered).toHaveLength(5);
     expect(new Set(discovered.map((file) => file.provider))).toEqual(
-      new Set(["claude", "codex", "gemini", "cursor"]),
+      new Set(["claude", "codex", "gemini", "cursor", "copilot"]),
     );
 
     const claude = discovered.find((file) => file.provider === "claude");
     const codex = discovered.find((file) => file.provider === "codex");
     const gemini = discovered.find((file) => file.provider === "gemini");
     const cursor = discovered.find((file) => file.provider === "cursor");
+    const copilot = discovered.find((file) => file.provider === "copilot");
 
     expect(claude?.sourceSessionId).toBe("claude-session-redacted-001");
     expect(claude?.projectPath).toBe("/Users/redacted/workspace/demo/claude");
@@ -44,5 +45,10 @@ describe("discoverSessionFiles python fixtures", () => {
     expect(cursor?.projectPath).toBe("/Users/redacted/workspace/demo-cursor");
     expect(cursor?.sessionIdentity.startsWith("cursor:cursor-session-redacted-001:")).toBe(true);
     expect(cursor?.filePath.includes("/agent-transcripts/")).toBe(true);
+
+    expect(copilot?.sourceSessionId).toBe("copilot-session-redacted-001");
+    expect(copilot?.projectPath).toBe("/Users/redacted/workspace/demo-copilot");
+    expect(copilot?.sessionIdentity.startsWith("copilot:copilot-session-redacted-001:")).toBe(true);
+    expect(copilot?.filePath.includes("/chatSessions/")).toBe(true);
   });
 });

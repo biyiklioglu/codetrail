@@ -11,7 +11,7 @@ import type {
   Provider,
   SearchMode,
   SystemMessageRegexRules,
-} from "@codetrail/core";
+} from "@codetrail/core/browser";
 
 import { DEFAULT_PREFERRED_REFRESH_STRATEGY, type NonOffRefreshStrategy } from "../app/autoRefresh";
 import {

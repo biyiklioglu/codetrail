@@ -7,7 +7,7 @@ import type {
   MessageCategory,
   Provider,
   SystemMessageRegexRules,
-} from "@codetrail/core";
+} from "@codetrail/core/browser";
 
 import type {
   MonoFontFamily,
@@ -33,7 +33,12 @@ type HistoryMode = "session" | "bookmarks" | "project_all";
 type SortDirection = "asc" | "desc";
 type PaneStateSnapshot = IpcResponse<"ui:getState">;
 type PaneStatePersistRequest = IpcRequest<"ui:setState">;
-type HydratableKey = Exclude<keyof PaneStateSnapshot, "projectPaneWidth" | "sessionPaneWidth">;
+
+function hydrateIfPresent<T>(value: T | null, setter: (value: T) => void): void {
+  if (value !== null) {
+    setter(value);
+  }
+}
 
 // Pane state hydration/persistence is isolated here so the main history controller can treat
 // stored UI state as another asynchronous data source rather than mixing it into render logic.
@@ -142,47 +147,37 @@ export function usePaneStateSync(args: {
           setSessionPaneWidth(clamp(response.sessionPaneWidth, 250, 620));
         }
 
-        const setters: {
-          [K in HydratableKey]?: (value: Exclude<PaneStateSnapshot[K], null>) => void;
-        } = {
-          projectPaneCollapsed: setProjectPaneCollapsed,
-          sessionPaneCollapsed: setSessionPaneCollapsed,
-          projectProviders: setProjectProviders,
-          historyCategories: setHistoryCategories,
-          expandedByDefaultCategories: setExpandedByDefaultCategories,
-          searchProviders: setSearchProviders,
-          preferredAutoRefreshStrategy: setPreferredAutoRefreshStrategy,
-          theme: setTheme,
-          monoFontFamily: setMonoFontFamily,
-          regularFontFamily: setRegularFontFamily,
-          monoFontSize: setMonoFontSize,
-          regularFontSize: setRegularFontSize,
-          useMonospaceForAllMessages: setUseMonospaceForAllMessages,
-          projectSortDirection: setProjectSortDirection,
-          sessionSortDirection: setSessionSortDirection,
-          messageSortDirection: setMessageSortDirection,
-          bookmarkSortDirection: setBookmarkSortDirection,
-          projectAllSortDirection: setProjectAllSortDirection,
-          sessionPage: setSessionPage,
-          sessionScrollTop: (value) => {
-            sessionScrollTopRef.current = value;
-            setSessionScrollTop(value);
-          },
-          systemMessageRegexRules: setSystemMessageRegexRules,
-        };
-
-        // Hydrate scalar settings generically, then repair selection separately because the three
-        // selection fields form a coupled state machine.
-        for (const [key, setter] of Object.entries(setters) as Array<
-          [HydratableKey, (value: Exclude<PaneStateSnapshot[HydratableKey], null>) => void]
-        >) {
-          let value = response[key];
-          if (value !== null) {
-            if (key === "systemMessageRegexRules" && value && typeof value === "object") {
-              value = { ...EMPTY_SYSTEM_MESSAGE_REGEX_RULES, ...value } as PaneStateSnapshot[typeof key];
-            }
-            setter(value as Exclude<PaneStateSnapshot[HydratableKey], null>);
-          }
+        hydrateIfPresent(response.projectPaneCollapsed, setProjectPaneCollapsed);
+        hydrateIfPresent(response.sessionPaneCollapsed, setSessionPaneCollapsed);
+        hydrateIfPresent(response.projectProviders, setProjectProviders);
+        hydrateIfPresent(response.historyCategories, setHistoryCategories);
+        hydrateIfPresent(response.expandedByDefaultCategories, setExpandedByDefaultCategories);
+        hydrateIfPresent(response.searchProviders, setSearchProviders);
+        hydrateIfPresent(response.preferredAutoRefreshStrategy, setPreferredAutoRefreshStrategy);
+        hydrateIfPresent(response.theme, setTheme);
+        hydrateIfPresent(response.monoFontFamily, setMonoFontFamily);
+        hydrateIfPresent(response.regularFontFamily, setRegularFontFamily);
+        hydrateIfPresent(response.monoFontSize, setMonoFontSize);
+        hydrateIfPresent(response.regularFontSize, setRegularFontSize);
+        hydrateIfPresent(response.useMonospaceForAllMessages, setUseMonospaceForAllMessages);
+        hydrateIfPresent(response.projectSortDirection, setProjectSortDirection);
+        hydrateIfPresent(response.sessionSortDirection, setSessionSortDirection);
+        hydrateIfPresent(response.messageSortDirection, setMessageSortDirection);
+        hydrateIfPresent(response.bookmarkSortDirection, setBookmarkSortDirection);
+        hydrateIfPresent(response.projectAllSortDirection, setProjectAllSortDirection);
+        hydrateIfPresent(response.sessionPage, setSessionPage);
+        hydrateIfPresent(response.sessionScrollTop, (value) => {
+          sessionScrollTopRef.current = value;
+          setSessionScrollTop(value);
+        });
+        if (
+          response.systemMessageRegexRules &&
+          typeof response.systemMessageRegexRules === "object"
+        ) {
+          setSystemMessageRegexRules({
+            ...EMPTY_SYSTEM_MESSAGE_REGEX_RULES,
+            ...response.systemMessageRegexRules,
+          });
         }
         if (setHistorySelection) {
           setHistorySelection(
@@ -193,15 +188,9 @@ export function usePaneStateSync(args: {
             ),
           );
         } else {
-          if (response.selectedProjectId !== null) {
-            setSelectedProjectId(response.selectedProjectId);
-          }
-          if (response.selectedSessionId !== null) {
-            setSelectedSessionId(response.selectedSessionId);
-          }
-          if (response.historyMode !== null) {
-            setHistoryMode(response.historyMode);
-          }
+          hydrateIfPresent(response.selectedProjectId, setSelectedProjectId);
+          hydrateIfPresent(response.selectedSessionId, setSelectedSessionId);
+          hydrateIfPresent(response.historyMode, setHistoryMode);
         }
         if (
           response.selectedSessionId !== null &&

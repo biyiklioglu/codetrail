@@ -9,7 +9,10 @@ import {
   type IndexingFileIssue,
   type IndexingNotice,
   type IpcResponse,
+  PROVIDER_LIST,
   initializeDatabase,
+  listDiscoverySettingsPaths,
+  listDiscoveryWatchRoots,
   paneStateBaseSchema,
   resolveSystemMessageRegexRules,
 } from "@codetrail/core";
@@ -62,6 +65,11 @@ export async function bootstrapMainProcess(
   const geminiProjectsPath =
     DEFAULT_DISCOVERY_CONFIG.geminiProjectsPath ??
     join(app.getPath("home"), ".gemini", "projects.json");
+  const discoveryConfig = {
+    ...DEFAULT_DISCOVERY_CONFIG,
+    geminiHistoryRoot,
+    geminiProjectsPath,
+  };
 
   const dbBootstrap = initializeDatabase(dbPath);
   initializeBookmarkStore(bookmarksDbPath);
@@ -89,8 +97,7 @@ export async function bootstrapMainProcess(
           bookmarksDbPath,
           settingsFilePath,
           queryService,
-          geminiHistoryRoot,
-          geminiProjectsPath,
+          discoveryConfig,
         }),
         expiresAt: now + 5_000,
       };
@@ -101,14 +108,8 @@ export async function bootstrapMainProcess(
     allowedRootsCache = null;
   };
 
-  const watcherRoots = [
-    DEFAULT_DISCOVERY_CONFIG.claudeRoot,
-    DEFAULT_DISCOVERY_CONFIG.codexRoot,
-    DEFAULT_DISCOVERY_CONFIG.geminiRoot,
-    geminiHistoryRoot,
-    DEFAULT_DISCOVERY_CONFIG.cursorRoot,
-    DEFAULT_DISCOVERY_CONFIG.copilotRoot,
-  ];
+  const watcherRoots = listDiscoveryWatchRoots(discoveryConfig);
+  const discoverySettingsPaths = listDiscoverySettingsPaths(discoveryConfig);
   registerIpcHandlers(ipcMain, {
     "app:getHealth": () => ({
       status: "ok",
@@ -123,13 +124,18 @@ export async function bootstrapMainProcess(
         userDataDir: app.getPath("userData"),
       },
       discovery: {
-        claudeRoot: DEFAULT_DISCOVERY_CONFIG.claudeRoot,
-        codexRoot: DEFAULT_DISCOVERY_CONFIG.codexRoot,
-        geminiRoot: DEFAULT_DISCOVERY_CONFIG.geminiRoot,
-        geminiHistoryRoot,
-        geminiProjectsPath,
-        cursorRoot: DEFAULT_DISCOVERY_CONFIG.cursorRoot,
-        copilotRoot: DEFAULT_DISCOVERY_CONFIG.copilotRoot,
+        providers: PROVIDER_LIST.map((provider) => ({
+          provider: provider.id,
+          label: provider.label,
+          paths: discoverySettingsPaths
+            .filter((path) => path.provider === provider.id)
+            .map((path) => ({
+              key: path.key,
+              label: path.label,
+              value: path.value,
+              watch: path.watch,
+            })),
+        })),
       },
     }),
     "db:getSchemaVersion": () => ({
@@ -240,10 +246,7 @@ export async function bootstrapMainProcess(
               requiresFullScan: batch.requiresFullScan,
             });
             const enqueuePromise = batch.requiresFullScan
-              ? indexingRunner.enqueue(
-                  { force: false },
-                  { source: "watch_fallback_incremental" },
-                )
+              ? indexingRunner.enqueue({ force: false }, { source: "watch_fallback_incremental" })
               : indexingRunner.enqueueChangedFiles(batch.changedPaths, {
                   source: "watch_targeted",
                 });
@@ -379,8 +382,7 @@ function getAllowedOpenInFileManagerRoots(input: {
   bookmarksDbPath: string;
   settingsFilePath: string;
   queryService: QueryService;
-  geminiHistoryRoot: string;
-  geminiProjectsPath: string;
+  discoveryConfig: typeof DEFAULT_DISCOVERY_CONFIG;
 }): string[] {
   const roots = new Set<string>();
   const addRoot = (value: string | null | undefined) => {
@@ -399,14 +401,12 @@ function getAllowedOpenInFileManagerRoots(input: {
   addRoot(input.settingsFilePath);
   addRoot(app.getPath("userData"));
   addRoot(app.getPath("sessionData"));
-  addRoot(DEFAULT_DISCOVERY_CONFIG.claudeRoot);
-  addRoot(DEFAULT_DISCOVERY_CONFIG.codexRoot);
-  addRoot(DEFAULT_DISCOVERY_CONFIG.geminiRoot);
-  addRoot(input.geminiHistoryRoot);
-  addRoot(input.geminiProjectsPath);
-  addRoot(dirname(input.geminiProjectsPath));
-  addRoot(DEFAULT_DISCOVERY_CONFIG.cursorRoot);
-  addRoot(DEFAULT_DISCOVERY_CONFIG.copilotRoot);
+  for (const path of listDiscoverySettingsPaths(input.discoveryConfig)) {
+    addRoot(path.value);
+    if (path.key === "geminiProjectsPath") {
+      addRoot(dirname(path.value));
+    }
+  }
 
   try {
     // Indexed project paths are dynamic, so fold them into the static provider/app roots cache.

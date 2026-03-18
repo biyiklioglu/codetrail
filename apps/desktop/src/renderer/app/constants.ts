@@ -1,4 +1,8 @@
-import type { MessageCategory, SystemMessageRegexRules } from "@codetrail/core";
+import {
+  type MessageCategory,
+  type SystemMessageRegexRules,
+  createProviderRecord,
+} from "@codetrail/core/browser";
 
 import {
   type MonoFontFamily,
@@ -59,13 +63,9 @@ export const EMPTY_BOOKMARKS_RESPONSE: BookmarkListResponse = {
   results: [],
 };
 
-export const EMPTY_SYSTEM_MESSAGE_REGEX_RULES: SystemMessageRegexRules = {
-  claude: [],
-  codex: [],
-  gemini: [],
-  cursor: [],
-  copilot: [],
-};
+export const EMPTY_SYSTEM_MESSAGE_REGEX_RULES: SystemMessageRegexRules = createProviderRecord(
+  () => [],
+);
 
 export const SHORTCUT_ITEMS = [
   { group: "Search & Navigation", shortcut: "Cmd/Ctrl+F", description: "Search messages" },

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import type { MessageCategory } from "@codetrail/core";
+import type { IpcResponse, MessageCategory } from "@codetrail/core/browser";
+import { createSettingsInfoFixture } from "@codetrail/core/testing";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -20,24 +21,7 @@ vi.mock("../lib/pathActions", () => ({
 
 import { SettingsView } from "./SettingsView";
 
-const info = {
-  storage: {
-    settingsFile: "/tmp/ui-state.json",
-    cacheDir: "/tmp/cache",
-    databaseFile: "/tmp/codetrail.sqlite",
-    bookmarksDatabaseFile: "/tmp/codetrail.bookmarks.sqlite",
-    userDataDir: "/tmp",
-  },
-  discovery: {
-    claudeRoot: "/Users/test/.claude/projects",
-    codexRoot: "/Users/test/.codex/sessions",
-    geminiRoot: "/Users/test/.gemini/tmp",
-    geminiHistoryRoot: "/Users/test/.gemini/history",
-    geminiProjectsPath: "/Users/test/.gemini/projects.json",
-    cursorRoot: "/Users/test/.cursor/projects",
-    copilotRoot: "/Users/test/.copilot/projects",
-  },
-};
+const info = createSettingsInfoFixture() satisfies IpcResponse<"app:getSettingsInfo">;
 
 const diagnostics = {
   startedAt: "2026-03-16T10:00:00.000Z",

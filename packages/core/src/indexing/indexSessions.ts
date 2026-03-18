@@ -1,10 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  closeSync,
-  openSync,
-  readFileSync,
-  readSync,
-} from "node:fs";
+import { closeSync, openSync, readFileSync, readSync } from "node:fs";
 
 import { type MessageCategory, PROVIDER_VALUES, type Provider } from "../contracts/canonical";
 import {
@@ -21,6 +16,12 @@ import {
 } from "../discovery";
 import { type ParserDiagnostic, parseSession, parseSessionEvent } from "../parsing";
 import { asArray, asRecord, readString } from "../parsing/helpers";
+import {
+  type ProviderSourceMetadata,
+  type ProviderSourceMetadataAccumulator,
+  type ReadFileText,
+  getProviderAdapter,
+} from "../providers";
 
 import { makeMessageId, makeProjectId, makeSessionId, makeToolCallId } from "./ids";
 import {
@@ -46,8 +47,6 @@ export type IndexingResult = {
     errors: number;
   };
 };
-
-type ReadFileText = (filePath: string) => string;
 
 export type IndexingDependencies = {
   discoverSessionFiles?: typeof discoverSessionFiles;
@@ -102,16 +101,8 @@ type SessionFileRow = {
 };
 
 type IndexedMessage = ReturnType<typeof parseSession>["messages"][number];
-type SourceMetadata = {
-  models: string[];
-  gitBranch: string | null;
-  cwd: string | null;
-};
-type SourceMetadataAccumulator = {
-  models: Set<string>;
-  gitBranch: string | null;
-  cwd: string | null;
-};
+type SourceMetadata = ProviderSourceMetadata;
+type SourceMetadataAccumulator = ProviderSourceMetadataAccumulator;
 type SerializedSourceMetadataAccumulator = {
   models: string[];
   gitBranch: string | null;
@@ -131,14 +122,15 @@ type MessageProcessingState = {
   fileMtimeMs: number;
   systemMessageRules: RegExp[];
   previousMessage: IndexedMessage | null;
-  previousCursorTimestampMs: number;
+  previousTimestampMs: number;
   assistantThinkingRunRoot: string | null;
   assistantThinkingRunBaseline: IndexedMessage | null;
   aggregate: SessionAggregateState;
 };
 type SerializableMessageProcessingState = {
   previousMessage: IndexedMessage | null;
-  previousCursorTimestampMs: number;
+  previousTimestampMs: number;
+  previousCursorTimestampMs?: number;
   assistantThinkingRunRoot: string | null;
   assistantThinkingRunBaseline: IndexedMessage | null;
   aggregate: SessionAggregateState;
@@ -229,7 +221,10 @@ export function runIncrementalIndexing(
   dependencies: IndexingDependencies = {},
 ): IndexingResult {
   const resolvedDependencies = resolveIndexingDependencies(dependencies);
-  const discoveryConfig = resolveDiscoveryConfig(config.discoveryConfig);
+  const discoveryConfig: DiscoveryConfig = {
+    ...DEFAULT_DISCOVERY_CONFIG,
+    ...config.discoveryConfig,
+  };
   const discoveredFiles = resolvedDependencies.discoverSessionFiles(discoveryConfig);
   const discoveredByFilePath = new Map(discoveredFiles.map((file) => [file.filePath, file]));
 
@@ -322,7 +317,10 @@ export function indexChangedFiles(
   dependencies: IndexingDependencies = {},
 ): IndexingResult {
   const resolvedDependencies = resolveIndexingDependencies(dependencies);
-  const discoveryConfig = resolveDiscoveryConfig(config.discoveryConfig);
+  const discoveryConfig: DiscoveryConfig = {
+    ...DEFAULT_DISCOVERY_CONFIG,
+    ...config.discoveryConfig,
+  };
 
   const discoveredFiles = changedFilePaths
     .map((filePath) => discoverSingleFile(filePath, discoveryConfig))
@@ -575,8 +573,9 @@ function processDiscoveredFiles(args: {
         : null;
 
     try {
+      const adapter = getProviderAdapter(discovered.provider);
       const fileDiagnostics =
-        discovered.provider === "gemini" || discovered.provider === "copilot"
+        adapter.sourceFormat === "materialized_json"
           ? indexMaterializedSessionFile({
               db: args.db,
               discovered,
@@ -612,13 +611,6 @@ function processDiscoveredFiles(args: {
   return { indexedFiles, skippedFiles };
 }
 
-function resolveDiscoveryConfig(config?: Partial<DiscoveryConfig>): DiscoveryConfig {
-  return {
-    ...DEFAULT_DISCOVERY_CONFIG,
-    ...config,
-  };
-}
-
 function resolveIndexingDependencies(
   dependencies: IndexingDependencies = {},
 ): ResolvedIndexingDependencies {
@@ -644,12 +636,10 @@ function indexMaterializedSessionFile(args: {
   statements: IndexingStatements;
   onNotice: (notice: IndexingNotice) => void;
 }): ParserDiagnostic[] {
-  let source: {
-    rawPayload: unknown[] | Record<string, unknown>;
-    parsePayload: unknown[] | Record<string, unknown>;
-  };
+  const adapter = getProviderAdapter(args.discovered.provider);
+  let source: { payload: unknown[] | Record<string, unknown> };
   try {
-    const loaded = readProviderSource(args.discovered.provider, args.discovered.filePath, args.readFileText);
+    const loaded = adapter.readSource(args.discovered.filePath, args.readFileText);
     if (!loaded) {
       throw new Error("Unable to read provider source.");
     }
@@ -669,7 +659,7 @@ function indexMaterializedSessionFile(args: {
     parsed = parseSession({
       provider: args.discovered.provider,
       sessionId: args.discovered.sourceSessionId,
-      payload: source.parsePayload,
+      payload: source.payload,
     });
   } catch (error) {
     throw new IndexingFileProcessingError({
@@ -682,13 +672,13 @@ function indexMaterializedSessionFile(args: {
   }
 
   const projectId = makeProjectId(args.discovered.provider, args.discovered.projectPath);
-  const sourceMeta = extractSourceMetadata(args.discovered.provider, source.rawPayload);
+  const sourceMeta = adapter.extractSourceMetadata(source.payload);
   const normalizedMessages = reclassifySystemMessages(parsed.messages, args.systemMessageRules);
   const messagesWithDuration = deriveOperationDurations(normalizedMessages);
   const messagesWithLimits = messagesWithDuration.map(applyIndexingContentLimits);
   const messagesWithTimestamps = normalizeMessageTimestamps(
     messagesWithLimits,
-    args.discovered.provider,
+    adapter,
     args.discovered.fileMtimeMs,
   );
   const sessionTitle = deriveSessionTitle(messagesWithTimestamps);
@@ -775,6 +765,7 @@ function indexStreamedJsonlSessionFile(args: {
   resumeCheckpoint: ResumeCheckpoint | null;
   onNotice: (notice: IndexingNotice) => void;
 }): ParserDiagnostic[] {
+  const adapter = getProviderAdapter(args.discovered.provider);
   const parserDiagnostics: ParserDiagnostic[] = [];
   const sourceMetaAccumulator = createSourceMetadataAccumulator(
     args.resumeCheckpoint?.sourceMetadata,
@@ -834,7 +825,7 @@ function indexStreamedJsonlSessionFile(args: {
           startEventIndex: args.resumeCheckpoint?.lastEventIndex ?? 0,
           onEvent: (event, eventIndex) => {
             emittedEvents += 1;
-            updateSourceMetadataFromEvent(args.discovered.provider, event, sourceMetaAccumulator);
+            adapter.updateSourceMetadataFromEvent(event, sourceMetaAccumulator);
             let parsedEvent: ReturnType<typeof parseSessionEvent>;
             try {
               parsedEvent = parseSessionEvent({
@@ -945,10 +936,7 @@ function indexStreamedJsonlSessionFile(args: {
         args.discovered.fileMtimeMs,
         args.nowIso,
       );
-      const hashes = computeFileHashes(
-        args.discovered.filePath,
-        args.discovered.fileSize,
-      );
+      const hashes = computeFileHashes(args.discovered.filePath, args.discovered.fileSize);
       const checkpoint = buildStreamCheckpointState({
         discovered: args.discovered,
         sessionDbId: args.sessionDbId,
@@ -1010,7 +998,10 @@ function createMessageProcessingState(
     fileMtimeMs,
     systemMessageRules,
     previousMessage: checkpoint?.previousMessage ?? null,
-    previousCursorTimestampMs: checkpoint?.previousCursorTimestampMs ?? Number.NEGATIVE_INFINITY,
+    previousTimestampMs:
+      checkpoint?.previousTimestampMs ??
+      checkpoint?.previousCursorTimestampMs ??
+      Number.NEGATIVE_INFINITY,
     assistantThinkingRunRoot: checkpoint?.assistantThinkingRunRoot ?? null,
     assistantThinkingRunBaseline: checkpoint?.assistantThinkingRunBaseline ?? null,
     aggregate: checkpoint?.aggregate ?? {
@@ -1055,29 +1046,12 @@ function normalizeMessageTimestamp(
   message: IndexedMessage,
   state: MessageProcessingState,
 ): IndexedMessage {
-  const fallbackBaseMs =
-    Number.isFinite(state.fileMtimeMs) && state.fileMtimeMs > 0 ? state.fileMtimeMs : Date.now();
-  if (state.provider !== "cursor") {
-    const createdAtMs = Date.parse(message.createdAt);
-    if (Number.isFinite(createdAtMs) && createdAtMs > 0) {
-      return message;
-    }
-    return {
-      ...message,
-      createdAt: new Date(fallbackBaseMs).toISOString(),
-    };
-  }
-
-  const parsedMs = Date.parse(message.createdAt);
-  let nextMs = Number.isFinite(parsedMs) && parsedMs > 0 ? parsedMs : fallbackBaseMs;
-  if (nextMs <= state.previousCursorTimestampMs) {
-    nextMs = state.previousCursorTimestampMs + 1;
-  }
-  state.previousCursorTimestampMs = nextMs;
-  return {
-    ...message,
-    createdAt: new Date(nextMs).toISOString(),
-  };
+  const normalized = getProviderAdapter(state.provider).normalizeMessageTimestamp(message, {
+    fileMtimeMs: state.fileMtimeMs,
+    previousTimestampMs: state.previousTimestampMs,
+  });
+  state.previousTimestampMs = normalized.previousTimestampMs;
+  return normalized.message;
 }
 
 function deriveOperationDuration(
@@ -1260,7 +1234,7 @@ function serializeProcessingState(
 ): SerializableMessageProcessingState {
   return {
     previousMessage: state.previousMessage,
-    previousCursorTimestampMs: state.previousCursorTimestampMs,
+    previousTimestampMs: state.previousTimestampMs,
     assistantThinkingRunRoot: state.assistantThinkingRunRoot,
     assistantThinkingRunBaseline: state.assistantThinkingRunBaseline,
     aggregate: state.aggregate,
@@ -1328,54 +1302,6 @@ function upsertSessionSummary(
     args.tokenInputTotal,
     args.tokenOutputTotal,
   );
-}
-
-function updateSourceMetadataFromEvent(
-  provider: Provider,
-  event: unknown,
-  accumulator: SourceMetadataAccumulator,
-): void {
-  const record = asRecord(event);
-  if (!record) {
-    return;
-  }
-
-  if (provider === "claude") {
-    const message = asRecord(record.message);
-    const model = readString(message?.model);
-    if (model) {
-      accumulator.models.add(model);
-    }
-    accumulator.gitBranch ??= readString(record.gitBranch);
-    accumulator.cwd ??= readString(record.cwd);
-    return;
-  }
-
-  if (provider === "codex") {
-    const payloadRecord = asRecord(record.payload);
-    const payloadGit = asRecord(payloadRecord?.git);
-    const model =
-      readString(payloadRecord?.model) ??
-      (readString(record.type) === "turn_context" ? readString(payloadRecord?.model) : null);
-    if (model) {
-      accumulator.models.add(model);
-    }
-    accumulator.cwd ??= readString(payloadRecord?.cwd);
-    accumulator.gitBranch ??= readString(payloadGit?.branch);
-    return;
-  }
-
-  const messageRecord = asRecord(record.message);
-  const metadataRecord = asRecord(record.metadata);
-  const gitRecord = asRecord(record.git) ?? asRecord(metadataRecord?.git);
-  const model = readString(messageRecord?.model) ?? readString(record.model);
-  if (model) {
-    accumulator.models.add(model);
-  }
-  accumulator.cwd ??=
-    readString(record.cwd) ?? readString(messageRecord?.cwd) ?? readString(metadataRecord?.cwd);
-  accumulator.gitBranch ??=
-    readString(gitRecord?.branch) ?? readString(record.gitBranch) ?? readString(record.branch);
 }
 
 function applyIndexingContentLimits(message: IndexedMessage): IndexedMessage {
@@ -1692,10 +1618,11 @@ function shouldResumeFromCheckpoint(args: {
   expectedSessionDbId: string;
   existingSessionId: string;
 } {
+  const adapter = getProviderAdapter(args.discovered.provider);
   if (!args.existing || !args.checkpoint || !args.existingSessionId) {
     return false;
   }
-  if (args.discovered.provider === "gemini") {
+  if (!adapter.supportsIncrementalCheckpoints) {
     return false;
   }
   if (args.existingSessionId !== args.expectedSessionDbId) {
@@ -1744,10 +1671,12 @@ function deserializeResumeCheckpoint(checkpoint: IndexCheckpointRow): ResumeChec
       nextMessageSequence: checkpoint.next_message_sequence,
       processingState: {
         previousMessage: parseCheckpointMessage(processingRecord?.previousMessage),
-        previousCursorTimestampMs:
-          typeof processingRecord?.previousCursorTimestampMs === "number"
-            ? processingRecord.previousCursorTimestampMs
-            : Number.NEGATIVE_INFINITY,
+        previousTimestampMs:
+          typeof processingRecord?.previousTimestampMs === "number"
+            ? processingRecord.previousTimestampMs
+            : typeof processingRecord?.previousCursorTimestampMs === "number"
+              ? processingRecord.previousCursorTimestampMs
+              : Number.NEGATIVE_INFINITY,
         assistantThinkingRunRoot: readString(processingRecord?.assistantThinkingRunRoot) ?? null,
         assistantThinkingRunBaseline: parseCheckpointMessage(
           processingRecord?.assistantThinkingRunBaseline,
@@ -1845,11 +1774,7 @@ function computeFileHashes(
   tailHash: string;
 } {
   return {
-    headHash: hashFileSlice(
-      filePath,
-      0,
-      Math.min(fileSize, JSONL_FINGERPRINT_WINDOW_BYTES),
-    ),
+    headHash: hashFileSlice(filePath, 0, Math.min(fileSize, JSONL_FINGERPRINT_WINDOW_BYTES)),
     tailHash: hashFileSlice(
       filePath,
       Math.max(0, fileSize - JSONL_FINGERPRINT_WINDOW_BYTES),
@@ -1865,11 +1790,8 @@ function verifyAppendOnlyFingerprint(
   expectedTailHash: string,
 ): boolean {
   return (
-    hashFileSlice(
-      filePath,
-      0,
-      Math.min(previousFileSize, JSONL_FINGERPRINT_WINDOW_BYTES),
-    ) === expectedHeadHash &&
+    hashFileSlice(filePath, 0, Math.min(previousFileSize, JSONL_FINGERPRINT_WINDOW_BYTES)) ===
+      expectedHeadHash &&
     hashFileSlice(
       filePath,
       Math.max(0, previousFileSize - JSONL_FINGERPRINT_WINDOW_BYTES),
@@ -1878,11 +1800,7 @@ function verifyAppendOnlyFingerprint(
   );
 }
 
-function hashFileSlice(
-  filePath: string,
-  start: number,
-  length: number,
-): string {
+function hashFileSlice(filePath: string, start: number, length: number): string {
   const hash = createHash("sha256");
   if (length <= 0) {
     return hash.digest("hex");
@@ -1945,151 +1863,6 @@ function deleteSessionDataForFilePath(db: SqliteDatabase, filePath: string): voi
   }
 }
 
-function readProviderSource(
-  provider: Provider,
-  filePath: string,
-  readFileText: ReadFileText,
-): {
-  rawPayload: unknown[] | Record<string, unknown>;
-  parsePayload: unknown[] | Record<string, unknown>;
-} | null {
-  try {
-    // Gemini and Copilot store one JSON document per session, while the other providers emit JSONL.
-    if (provider === "gemini" || provider === "copilot") {
-      const parsed = JSON.parse(readFileText(filePath)) as Record<string, unknown>;
-      return {
-        rawPayload: parsed,
-        parsePayload: parsed,
-      };
-    }
-
-    const lines = readFileText(filePath)
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-
-    const parsedLines = lines
-      .map((line) => {
-        try {
-          return JSON.parse(line) as unknown;
-        } catch {
-          return null;
-        }
-      })
-      .filter((entry) => entry !== null) as unknown[];
-
-    return {
-      rawPayload: parsedLines,
-      parsePayload: parsedLines,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function extractSourceMetadata(
-  provider: Provider,
-  payload: unknown[] | Record<string, unknown>,
-): {
-  models: string[];
-  gitBranch: string | null;
-  cwd: string | null;
-} {
-  const models = new Set<string>();
-  let gitBranch: string | null = null;
-  let cwd: string | null = null;
-
-  if (provider === "gemini") {
-    const root = asRecord(payload);
-    const messages = asArray(root?.messages);
-
-    for (const message of messages) {
-      const record = asRecord(message);
-      if (!record) {
-        continue;
-      }
-
-      const model = readString(record.model);
-      if (model) {
-        models.add(model);
-      }
-    }
-  }
-
-  if (provider === "claude") {
-    for (const entry of asArray(payload)) {
-      const record = asRecord(entry);
-      const message = asRecord(record?.message);
-      const model = readString(message?.model);
-      if (model) {
-        models.add(model);
-      }
-
-      gitBranch ??= readString(record?.gitBranch);
-      cwd ??= readString(record?.cwd);
-    }
-  }
-
-  if (provider === "codex") {
-    for (const entry of asArray(payload)) {
-      const record = asRecord(entry);
-      const payloadRecord = asRecord(record?.payload);
-      const payloadGit = asRecord(payloadRecord?.git);
-
-      const model =
-        readString(payloadRecord?.model) ??
-        (readString(record?.type) === "turn_context" ? readString(payloadRecord?.model) : null);
-      if (model) {
-        models.add(model);
-      }
-
-      cwd ??= readString(payloadRecord?.cwd);
-      gitBranch ??= readString(payloadGit?.branch);
-    }
-  }
-
-  if (provider === "cursor") {
-    for (const entry of asArray(payload)) {
-      const record = asRecord(entry);
-      if (!record) {
-        continue;
-      }
-      const messageRecord = asRecord(record.message);
-      const metadataRecord = asRecord(record.metadata);
-      const gitRecord = asRecord(record.git) ?? asRecord(metadataRecord?.git);
-      const model = readString(messageRecord?.model) ?? readString(record.model);
-      if (model) {
-        models.add(model);
-      }
-      cwd ??=
-        readString(record.cwd) ?? readString(messageRecord?.cwd) ?? readString(metadataRecord?.cwd);
-      gitBranch ??=
-        readString(gitRecord?.branch) ?? readString(record.gitBranch) ?? readString(record.branch);
-    }
-  }
-
-  if (provider === "copilot") {
-    const root = asRecord(payload);
-    const requests = asArray(root?.requests);
-    for (const request of requests) {
-      const record = asRecord(request);
-      if (!record) {
-        continue;
-      }
-      const model = readString(record.modelId);
-      if (model) {
-        models.add(model);
-      }
-    }
-  }
-
-  return {
-    models: [...models].sort(),
-    gitBranch,
-    cwd,
-  };
-}
-
 function deriveOperationDurations(messages: IndexedMessage[]): IndexedMessage[] {
   return messages.map((message, index) => {
     if (message.operationDurationMs !== null) {
@@ -2129,35 +1902,17 @@ function deriveOperationDurations(messages: IndexedMessage[]): IndexedMessage[] 
 
 function normalizeMessageTimestamps(
   messages: IndexedMessage[],
-  provider: Provider,
+  adapter: ReturnType<typeof getProviderAdapter>,
   fileMtimeMs: number,
 ): IndexedMessage[] {
-  const fallbackBaseMs = Number.isFinite(fileMtimeMs) && fileMtimeMs > 0 ? fileMtimeMs : Date.now();
-  if (provider !== "cursor") {
-    const fallbackIso = new Date(fallbackBaseMs).toISOString();
-    return messages.map((message) => {
-      const createdAtMs = Date.parse(message.createdAt);
-      if (!Number.isFinite(createdAtMs) || createdAtMs <= 0) {
-        return { ...message, createdAt: fallbackIso };
-      }
-      return message;
-    });
-  }
-
   let previousMs = Number.NEGATIVE_INFINITY;
-  return messages.map((message, index) => {
-    // Cursor transcripts can contain duplicate or missing timestamps. Force a monotonic sequence so
-    // sort order and pagination stay stable across reloads.
-    const parsedMs = Date.parse(message.createdAt);
-    let nextMs = Number.isFinite(parsedMs) && parsedMs > 0 ? parsedMs : fallbackBaseMs + index;
-    if (!Number.isFinite(nextMs) || nextMs <= 0) {
-      nextMs = fallbackBaseMs + index;
-    }
-    if (nextMs <= previousMs) {
-      nextMs = previousMs + 1;
-    }
-    previousMs = nextMs;
-    return { ...message, createdAt: new Date(nextMs).toISOString() };
+  return messages.map((message) => {
+    const normalized = adapter.normalizeMessageTimestamp(message, {
+      fileMtimeMs,
+      previousTimestampMs: previousMs,
+    });
+    previousMs = normalized.previousTimestampMs;
+    return normalized.message;
   });
 }
 

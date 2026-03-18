@@ -102,9 +102,7 @@ describe("parseProviderPayload (Copilot)", () => {
           requestId: "req-1",
           timestamp: 1741615200000,
           message: { text: "Hello Copilot" },
-          response: [
-            { kind: "markdownContent", value: "Hello! How can I help?" },
-          ],
+          response: [{ kind: "markdownContent", value: "Hello! How can I help?" }],
         },
       ],
     };

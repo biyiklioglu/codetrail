@@ -1,4 +1,4 @@
-import type { IpcResponse, MessageCategory, Provider } from "@codetrail/core";
+import type { IpcResponse, MessageCategory, Provider } from "@codetrail/core/browser";
 
 export type ProjectSummary = IpcResponse<"projects:list">["projects"][number];
 export type SessionSummary = IpcResponse<"sessions:list">["sessions"][number];

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
-import type { MessageCategory, Provider, SearchMode } from "@codetrail/core";
+import type { MessageCategory, Provider, SearchMode } from "@codetrail/core/browser";
 
 import { CATEGORIES, EMPTY_CATEGORY_COUNTS, SEARCH_PAGE_SIZE } from "../app/constants";
 import type { SearchQueryResponse } from "../app/types";

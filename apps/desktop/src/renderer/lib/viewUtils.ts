@@ -1,4 +1,9 @@
-import type { MessageCategory, Provider } from "@codetrail/core";
+import {
+  type MessageCategory,
+  type Provider,
+  createProviderRecord,
+  getProviderLabel,
+} from "@codetrail/core/browser";
 
 const TODAY_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
@@ -6,13 +11,9 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short",
 });
 
-export const PROVIDER_LABELS: Record<Provider, string> = {
-  claude: "Claude",
-  codex: "Codex",
-  gemini: "Gemini",
-  cursor: "Cursor",
-  copilot: "Copilot",
-};
+export const PROVIDER_LABELS: Record<Provider, string> = createProviderRecord((provider) =>
+  getProviderLabel(provider),
+);
 
 export const CATEGORY_LABELS: Record<MessageCategory, string> = {
   user: "User",
@@ -83,7 +84,7 @@ export function prettyProvider(provider: Provider): string {
 }
 
 export function countProviders(values: Provider[]): Record<Provider, number> {
-  const counts: Record<Provider, number> = { claude: 0, codex: 0, gemini: 0, cursor: 0, copilot: 0 };
+  const counts: Record<Provider, number> = createProviderRecord(() => 0);
   for (const value of values) {
     counts[value] += 1;
   }

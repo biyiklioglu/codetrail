@@ -1,8 +1,19 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { discoverSingleFile } from "./discoverSessionFiles";
 import type { DiscoveryConfig } from "./types";
@@ -229,6 +240,72 @@ describe("discoverSingleFile", () => {
     expect(discovered.sourceSessionId).toBe("gem-1");
     expect(discovered.projectPath).toBe("/workspace/dux");
     expect(discovered.metadata.unresolvedProject).toBe(false);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("does not build Gemini project resolution for non-Gemini files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-single-gemini-lazy-"));
+    const config = makeConfig(dir);
+    const codexDir = join(config.codexRoot, "2026", "02", "27");
+    mkdirSync(codexDir, { recursive: true });
+
+    writeFileSync(
+      join(codexDir, "rollout-test.jsonl"),
+      `${JSON.stringify({
+        type: "session_meta",
+        payload: {
+          id: "codex-1",
+          cwd: "/workspace/codex",
+        },
+      })}\n`,
+    );
+
+    const fs = {
+      existsSync: vi.fn((path: string) => {
+        if (path === config.geminiProjectsPath) {
+          throw new Error("unexpected gemini project resolution");
+        }
+        return true;
+      }),
+      lstatSync: vi.fn((path: string) => {
+        if (path === config.geminiProjectsPath) {
+          throw new Error("unexpected gemini project resolution");
+        }
+        return {
+          size: 0,
+          mtimeMs: 0,
+          isDirectory: () => false,
+        };
+      }),
+      statSync: vi.fn((path: string) => {
+        const stat = statSync(path);
+        return {
+          size: stat.size,
+          mtimeMs: stat.mtimeMs,
+          isDirectory: () => stat.isDirectory(),
+        };
+      }),
+      openSync: vi.fn((path: string, flags: "r") => openSync(path, flags)),
+      closeSync: vi.fn((fd: number) => closeSync(fd)),
+      readSync: vi.fn(
+        (fd: number, buffer: Buffer, offset: number, length: number, position: number | null) =>
+          readSync(fd, buffer, offset, length, position),
+      ),
+      readFileSync: vi.fn((path: string, encoding: "utf8") => {
+        if (path === config.geminiProjectsPath) {
+          throw new Error("unexpected gemini project resolution");
+        }
+        return readFileSync(path, encoding);
+      }),
+      readdirSync: vi.fn((path: string, options: { withFileTypes: true }) =>
+        readdirSync(path, options),
+      ),
+    };
+
+    const result = discoverSingleFile(join(codexDir, "rollout-test.jsonl"), config, { fs });
+
+    expect(result?.provider).toBe("codex");
 
     rmSync(dir, { recursive: true, force: true });
   });

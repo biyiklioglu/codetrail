@@ -41,7 +41,7 @@ export type ParsedProviderMessage = {
   operationDurationConfidence: OperationDurationConfidence | null;
 };
 
-type ParseProviderPayloadArgs = {
+export type ParseProviderPayloadArgs = {
   provider: Provider;
   sessionId: string;
   payload: unknown;
@@ -62,15 +62,14 @@ export type ParseProviderEventResult = {
   nextSequence: number;
 };
 
-// Each provider emits different event shapes, but all parsers normalize into the same stream of
-// split messages so indexing/search can stay provider-agnostic.
-export function parseProviderPayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
-  if (args.provider === "copilot") {
-    return parseCopilotPayload(args);
-  }
+type ProviderPayloadParser = (args: ParseProviderPayloadArgs) => ParsedProviderMessage[];
+type ProviderEventParser = (args: ParseProviderEventArgs) => ParseProviderEventResult;
 
-  const events =
-    args.provider === "gemini" ? extractGeminiEvents(args.payload) : extractEvents(args.payload);
+function parseEventStreamPayload(
+  args: ParseProviderPayloadArgs,
+  eventExtractor: (payload: unknown) => unknown[],
+): ParsedProviderMessage[] {
+  const events = eventExtractor(args.payload);
   const output: ParsedProviderMessage[] = [];
   let sequence = 0;
 
@@ -90,24 +89,30 @@ export function parseProviderPayload(args: ParseProviderPayloadArgs): ParsedProv
   return output;
 }
 
+export const PROVIDER_EVENT_PARSERS: Record<Provider, ProviderEventParser> = {
+  claude: parseClaudeEvent,
+  codex: parseCodexEvent,
+  gemini: parseGeminiEvent,
+  cursor: parseCursorEvent,
+  copilot: parseCopilotEvent,
+};
+
+export const PROVIDER_PAYLOAD_PARSERS: Record<Provider, ProviderPayloadParser> = {
+  claude: (args) => parseEventStreamPayload(args, extractEvents),
+  codex: (args) => parseEventStreamPayload(args, extractEvents),
+  gemini: (args) => parseEventStreamPayload(args, extractGeminiEvents),
+  cursor: (args) => parseEventStreamPayload(args, extractEvents),
+  copilot: parseCopilotPayload,
+};
+
+// Each provider emits different event shapes, but all parsers normalize into the same stream of
+// split messages so indexing/search can stay provider-agnostic.
+export function parseProviderPayload(args: ParseProviderPayloadArgs): ParsedProviderMessage[] {
+  return PROVIDER_PAYLOAD_PARSERS[args.provider](args);
+}
+
 export function parseProviderEvent(args: ParseProviderEventArgs): ParseProviderEventResult {
-  if (args.provider === "claude") {
-    return parseClaudeEvent(args);
-  }
-
-  if (args.provider === "codex") {
-    return parseCodexEvent(args);
-  }
-
-  if (args.provider === "cursor") {
-    return parseCursorEvent(args);
-  }
-
-  if (args.provider === "copilot") {
-    return parseCopilotEvent(args);
-  }
-
-  return parseGeminiEvent(args);
+  return PROVIDER_EVENT_PARSERS[args.provider](args);
 }
 
 function parseClaudeEvent(args: ParseProviderEventArgs): ParseProviderEventResult {
@@ -606,7 +611,6 @@ function parseCopilotEvent(args: ParseProviderEventArgs): ParseProviderEventResu
         });
         nextSequence += 1;
       }
-      continue;
     }
   }
 

@@ -2,10 +2,10 @@
 
 import { useRef, useState } from "react";
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { MessageCategory, Provider } from "@codetrail/core";
+import type { IpcResponse, MessageCategory, Provider } from "@codetrail/core/browser";
 
 import type {
   MonoFontFamily,
@@ -18,6 +18,46 @@ import type { NonOffRefreshStrategy } from "../app/autoRefresh";
 import { createMockCodetrailClient } from "../test/mockCodetrailClient";
 import { renderWithClient } from "../test/renderWithClient";
 import { usePaneStateSync } from "./usePaneStateSync";
+
+// Hydration settles across two async phases in this hook: the `ui:getState` promise schedules a
+// requestAnimationFrame flip to "hydrated", and the hydrated effect then schedules the debounced
+// `ui:setState` persistence timer. Flush both phases before asserting persisted state.
+async function flushPaneStateTimers(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+  });
+  await act(async () => {
+    await vi.runOnlyPendingTimersAsync();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  await act(async () => {
+    await vi.runOnlyPendingTimersAsync();
+  });
+}
+
+function installAnimationFrameTimerMocks() {
+  vi.useFakeTimers();
+  const requestAnimationFrameSpy = vi
+    .spyOn(window, "requestAnimationFrame")
+    .mockImplementation((callback: FrameRequestCallback) =>
+      window.setTimeout(() => callback(0), 0),
+    );
+  const cancelAnimationFrameSpy = vi
+    .spyOn(window, "cancelAnimationFrame")
+    .mockImplementation((handle: number) => {
+      window.clearTimeout(handle);
+    });
+
+  return {
+    restore() {
+      requestAnimationFrameSpy.mockRestore();
+      cancelAnimationFrameSpy.mockRestore();
+      vi.useRealTimers();
+    },
+  };
+}
 
 function Harness({ logError }: { logError: (context: string, error: unknown) => void }) {
   const [projectPaneWidth, setProjectPaneWidth] = useState(280);
@@ -139,90 +179,161 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
 describe("usePaneStateSync", () => {
   it("hydrates state from ui:getState and persists updates via ui:setState", async () => {
     const client = createMockCodetrailClient();
-    client.invoke.mockImplementation(async (channel) => {
-      if (channel === "ui:getState") {
-        return {
-          projectPaneWidth: 340,
-          sessionPaneWidth: 410,
-          projectPaneCollapsed: true,
-          sessionPaneCollapsed: false,
-          projectProviders: ["claude", "codex"],
-          historyCategories: ["assistant", "user"],
-          expandedByDefaultCategories: ["assistant"],
-          searchProviders: ["claude"],
-          preferredAutoRefreshStrategy: "scan-10s",
-          theme: "dark",
-          monoFontFamily: "droid_sans_mono",
-          regularFontFamily: "inter",
-          monoFontSize: "13px",
-          regularFontSize: "14px",
-          useMonospaceForAllMessages: true,
-          selectedProjectId: "project_1",
-          selectedSessionId: "session_1",
-          historyMode: "bookmarks",
-          projectSortDirection: "desc",
-          sessionSortDirection: "desc",
-          messageSortDirection: "asc",
-          bookmarkSortDirection: "asc",
-          projectAllSortDirection: "desc",
-          sessionPage: 2,
-          sessionScrollTop: 222,
-          systemMessageRegexRules: {
-            claude: ["^<command-name>"],
-            codex: ["^<environment_context>"],
-            gemini: [],
-            cursor: [],
-            copilot: [],
-          },
-        };
-      }
-      return { ok: true };
-    });
+    const animationFrameMocks = installAnimationFrameTimerMocks();
 
-    const logError = vi.fn();
-    renderWithClient(<Harness logError={logError} />, client);
+    try {
+      client.invoke.mockImplementation(async (channel) => {
+        if (channel === "ui:getState") {
+          return {
+            projectPaneWidth: 340,
+            sessionPaneWidth: 410,
+            projectPaneCollapsed: true,
+            sessionPaneCollapsed: false,
+            projectProviders: ["claude", "codex"],
+            historyCategories: ["assistant", "user"],
+            expandedByDefaultCategories: ["assistant"],
+            searchProviders: ["claude"],
+            preferredAutoRefreshStrategy: "scan-10s",
+            theme: "dark",
+            monoFontFamily: "droid_sans_mono",
+            regularFontFamily: "inter",
+            monoFontSize: "13px",
+            regularFontSize: "14px",
+            useMonospaceForAllMessages: true,
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "bookmarks",
+            projectSortDirection: "desc",
+            sessionSortDirection: "desc",
+            messageSortDirection: "asc",
+            bookmarkSortDirection: "asc",
+            projectAllSortDirection: "desc",
+            sessionPage: 2,
+            sessionScrollTop: 222,
+            systemMessageRegexRules: {
+              claude: ["^<command-name>"],
+              codex: ["^<environment_context>"],
+              gemini: [],
+              cursor: [],
+              copilot: [],
+            },
+          };
+        }
+        return { ok: true };
+      });
 
-    await waitFor(() => {
+      const logError = vi.fn();
+      renderWithClient(<Harness logError={logError} />, client);
+
+      await flushPaneStateTimers();
+
       expect(screen.getByTestId("hydrated").textContent).toBe("yes");
-    });
 
-    expect(screen.getByTestId("project-width").textContent).toBe("340");
-    expect(screen.getByTestId("history-mode").textContent).toBe("bookmarks");
-    expect(screen.getByTestId("scroll").textContent).toBe("222");
+      expect(screen.getByTestId("project-width").textContent).toBe("340");
+      expect(screen.getByTestId("history-mode").textContent).toBe("bookmarks");
+      expect(screen.getByTestId("scroll").textContent).toBe("222");
 
-    await new Promise((resolve) => window.setTimeout(resolve, 220));
-
-    const saveCalls = client.invoke.mock.calls.filter(([channel]) => channel === "ui:setState");
-    expect(saveCalls.length).toBeGreaterThan(0);
-    const lastSavePayload = saveCalls.at(-1)?.[1];
-    expect(lastSavePayload).toMatchObject({
-      preferredAutoRefreshStrategy: "scan-10s",
-      systemMessageRegexRules: {
-        claude: ["^<command-name>"],
-        codex: ["^<environment_context>"],
-        gemini: [],
-        cursor: [],
-      },
-    });
-    expect(logError).not.toHaveBeenCalled();
+      const saveCalls = client.invoke.mock.calls.filter(([channel]) => channel === "ui:setState");
+      expect(saveCalls.length).toBeGreaterThan(0);
+      const lastSavePayload = saveCalls.at(-1)?.[1];
+      expect(lastSavePayload).toMatchObject({
+        preferredAutoRefreshStrategy: "scan-10s",
+        systemMessageRegexRules: {
+          claude: ["^<command-name>"],
+          codex: ["^<environment_context>"],
+          gemini: [],
+          cursor: [],
+        },
+      });
+      expect(logError).not.toHaveBeenCalled();
+    } finally {
+      animationFrameMocks.restore();
+    }
   });
 
   it("logs errors when ui:getState fails", async () => {
+    const animationFrameMocks = installAnimationFrameTimerMocks();
     const client = createMockCodetrailClient();
-    client.invoke.mockImplementation(async (channel) => {
-      if (channel === "ui:getState") {
-        throw new Error("load failed");
-      }
-      return { ok: true };
-    });
+    try {
+      client.invoke.mockImplementation(async (channel) => {
+        if (channel === "ui:getState") {
+          throw new Error("load failed");
+        }
+        return { ok: true };
+      });
 
-    const logError = vi.fn();
-    renderWithClient(<Harness logError={logError} />, client);
+      const logError = vi.fn();
+      renderWithClient(<Harness logError={logError} />, client);
 
-    await waitFor(() => {
+      await flushPaneStateTimers();
+
       expect(screen.getByTestId("hydrated").textContent).toBe("yes");
-    });
+      expect(logError).toHaveBeenCalledWith("Failed loading UI state", expect.any(Error));
+    } finally {
+      animationFrameMocks.restore();
+    }
+  });
 
-    expect(logError).toHaveBeenCalledWith("Failed loading UI state", expect.any(Error));
+  it("merges partial system message rules with empty defaults during hydration", async () => {
+    const client = createMockCodetrailClient();
+    const animationFrameMocks = installAnimationFrameTimerMocks();
+
+    try {
+      client.invoke.mockImplementation(async (channel) => {
+        if (channel === "ui:getState") {
+          return {
+            projectPaneWidth: null,
+            sessionPaneWidth: null,
+            projectPaneCollapsed: null,
+            sessionPaneCollapsed: null,
+            projectProviders: null,
+            historyCategories: null,
+            expandedByDefaultCategories: null,
+            searchProviders: null,
+            preferredAutoRefreshStrategy: null,
+            theme: null,
+            monoFontFamily: null,
+            regularFontFamily: null,
+            monoFontSize: null,
+            regularFontSize: null,
+            useMonospaceForAllMessages: null,
+            selectedProjectId: null,
+            selectedSessionId: null,
+            historyMode: null,
+            projectSortDirection: null,
+            sessionSortDirection: null,
+            messageSortDirection: null,
+            bookmarkSortDirection: null,
+            projectAllSortDirection: null,
+            sessionPage: null,
+            sessionScrollTop: null,
+            systemMessageRegexRules: {
+              claude: ["^<command-name>"],
+            },
+          } as IpcResponse<"ui:getState">;
+        }
+        return { ok: true };
+      });
+
+      renderWithClient(<Harness logError={vi.fn()} />, client);
+
+      await flushPaneStateTimers();
+
+      expect(screen.getByTestId("hydrated").textContent).toBe("yes");
+
+      const saveCalls = client.invoke.mock.calls.filter(([channel]) => channel === "ui:setState");
+      const lastSavePayload = saveCalls.at(-1)?.[1];
+      expect(lastSavePayload).toMatchObject({
+        systemMessageRegexRules: {
+          claude: ["^<command-name>"],
+          codex: [],
+          gemini: [],
+          cursor: [],
+          copilot: [],
+        },
+      });
+    } finally {
+      animationFrameMocks.restore();
+    }
   });
 });

@@ -1,4 +1,4 @@
-import type { MessageCategory } from "@codetrail/core";
+import type { MessageCategory } from "@codetrail/core/browser";
 import { type RefObject, useEffect, useRef } from "react";
 
 type MainView = "history" | "search" | "settings" | "help";

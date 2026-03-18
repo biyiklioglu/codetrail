@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from "react";
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from "react";
 
-import type { MessageCategory, Provider, SearchMode } from "@codetrail/core";
+import type { MessageCategory, Provider, SearchMode } from "@codetrail/core/browser";
 
 import { CATEGORIES, EMPTY_BOOKMARKS_RESPONSE, PAGE_SIZE } from "../app/constants";
 import {

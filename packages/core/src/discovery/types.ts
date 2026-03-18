@@ -1,4 +1,5 @@
 import type { Provider } from "../contracts/canonical";
+import type { ProviderDiscoveryPathKey } from "../contracts/providerMetadata";
 
 export type DiscoveredSessionFile = {
   provider: Provider;
@@ -27,6 +28,17 @@ export type DiscoveryConfig = {
   cursorRoot: string;
   copilotRoot: string;
   includeClaudeSubagents: boolean;
+};
+
+export type ResolvedDiscoveryProviderConfig = {
+  paths: Partial<Record<ProviderDiscoveryPathKey, string>>;
+  options: {
+    includeSubagents: boolean;
+  };
+};
+
+export type ResolvedDiscoveryConfig = {
+  providers: Record<Provider, ResolvedDiscoveryProviderConfig>;
 };
 
 export type GeminiProjectResolution = {

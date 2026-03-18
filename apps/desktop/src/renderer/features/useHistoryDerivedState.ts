@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react";
 import type { CSSProperties } from "react";
 
-import type { MessageCategory } from "@codetrail/core";
+import type { MessageCategory } from "@codetrail/core/browser";
 
 import {
   BOOKMARKS_NAV_ID,

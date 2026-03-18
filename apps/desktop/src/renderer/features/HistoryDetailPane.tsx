@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 
-import type { MessageCategory } from "@codetrail/core";
+import type { MessageCategory } from "@codetrail/core/browser";
 
 import { CATEGORIES } from "../app/constants";
 import { ToolbarIcon } from "../components/ToolbarIcon";

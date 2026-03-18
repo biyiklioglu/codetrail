@@ -1,4 +1,4 @@
-import type { MessageCategory } from "@codetrail/core";
+import type { MessageCategory } from "@codetrail/core/browser";
 
 import {
   CodeBlock,

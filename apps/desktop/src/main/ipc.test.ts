@@ -1,12 +1,25 @@
 import { describe, expect, it } from "vitest";
 
 import { type IpcResponse, paneStateBaseSchema } from "@codetrail/core";
+import { createSettingsInfoFixture } from "@codetrail/core/testing";
 
 import { registerIpcHandlers } from "./ipc";
 
 const allNullPaneState = Object.fromEntries(
   Object.keys(paneStateBaseSchema.shape).map((k) => [k, null]),
 ) as IpcResponse<"ui:getState">;
+const settingsInfo = createSettingsInfoFixture({
+  storage: {
+    settingsFile: "/tmp/codetrail/ui-state.json",
+    cacheDir: "/tmp/codetrail/cache",
+    databaseFile: "/tmp/codetrail/codetrail.sqlite",
+    bookmarksDatabaseFile: "/tmp/codetrail/codetrail.bookmarks.sqlite",
+    userDataDir: "/tmp/codetrail",
+  },
+  pathValues: {
+    copilotRoot: "/Users/test/.copilot/projects",
+  },
+});
 
 describe("registerIpcHandlers", () => {
   it("validates request payloads before invoking handlers", async () => {
@@ -20,24 +33,7 @@ describe("registerIpcHandlers", () => {
       },
       {
         "app:getHealth": () => ({ status: "ok", version: "0.1.0" }),
-        "app:getSettingsInfo": () => ({
-          storage: {
-            settingsFile: "/tmp/codetrail/ui-state.json",
-            cacheDir: "/tmp/codetrail/cache",
-            databaseFile: "/tmp/codetrail/codetrail.sqlite",
-            bookmarksDatabaseFile: "/tmp/codetrail/codetrail.bookmarks.sqlite",
-            userDataDir: "/tmp/codetrail",
-          },
-          discovery: {
-            claudeRoot: "/Users/test/.claude/projects",
-            codexRoot: "/Users/test/.codex/sessions",
-            geminiRoot: "/Users/test/.gemini/tmp",
-            geminiHistoryRoot: "/Users/test/.gemini/history",
-            geminiProjectsPath: "/Users/test/.gemini/projects.json",
-            cursorRoot: "/Users/test/.cursor/projects",
-            copilotRoot: "/Users/test/.copilot/projects",
-          },
-        }),
+        "app:getSettingsInfo": () => settingsInfo,
         "db:getSchemaVersion": () => ({ schemaVersion: 1 }),
         "indexer:refresh": (payload) => ({ jobId: payload.force ? "force-1" : "normal-1" }),
         "indexer:getStatus": () => ({
@@ -174,24 +170,7 @@ describe("registerIpcHandlers", () => {
       },
       {
         "app:getHealth": () => ({ status: "ok", version: "0.1.0" }),
-        "app:getSettingsInfo": () => ({
-          storage: {
-            settingsFile: "/tmp/codetrail/ui-state.json",
-            cacheDir: "/tmp/codetrail/cache",
-            databaseFile: "/tmp/codetrail/codetrail.sqlite",
-            bookmarksDatabaseFile: "/tmp/codetrail/codetrail.bookmarks.sqlite",
-            userDataDir: "/tmp/codetrail",
-          },
-          discovery: {
-            claudeRoot: "/Users/test/.claude/projects",
-            codexRoot: "/Users/test/.codex/sessions",
-            geminiRoot: "/Users/test/.gemini/tmp",
-            geminiHistoryRoot: "/Users/test/.gemini/history",
-            geminiProjectsPath: "/Users/test/.gemini/projects.json",
-            cursorRoot: "/Users/test/.cursor/projects",
-            copilotRoot: "/Users/test/.copilot/projects",
-          },
-        }),
+        "app:getSettingsInfo": () => settingsInfo,
         "db:getSchemaVersion": () => ({ schemaVersion: 1 }),
         "indexer:refresh": () => ({ jobId: "refresh-1" }),
         "indexer:getStatus": () => ({
