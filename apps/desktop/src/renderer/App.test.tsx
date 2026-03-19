@@ -156,6 +156,7 @@ describe("App shell", () => {
             name: "Project One",
             path: "/workspace/project-one",
             sessionCount: 1,
+            messageCount: 1,
             lastActivity: "2026-03-01T10:00:05.000Z",
           },
           {
@@ -164,6 +165,7 @@ describe("App shell", () => {
             name: "Project Two",
             path: "/workspace/project-two",
             sessionCount: 1,
+            messageCount: 1,
             lastActivity: "2026-03-01T10:00:06.000Z",
           },
         ],

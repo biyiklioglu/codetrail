@@ -43,6 +43,7 @@ import { useReconcileProviderSelection } from "../hooks/useReconcileProviderSele
 import { useResizablePanes } from "../hooks/useResizablePanes";
 import { useCodetrailClient } from "../lib/codetrailClient";
 import { getEdgeItemId } from "../lib/historyNavigation";
+import { mergeStableProjectOrder } from "../lib/projectUpdates";
 import { clamp, compareRecent, sessionActivityOf } from "../lib/viewUtils";
 import {
   type AppearanceState,
@@ -74,7 +75,13 @@ export type HistoryExportState = {
   message: string;
 };
 
+type ProjectUpdateState = {
+  messageDelta: number;
+  updatedAt: number;
+};
+
 const MESSAGE_PAGE_SCROLL_OVERLAP_PX = 20;
+const PROJECT_UPDATE_HIGHLIGHT_MS = 8_000;
 
 // ── Periodic-refresh scroll policy ──────────────────────────────────────────
 //
@@ -144,6 +151,11 @@ export function useHistoryController({
     ),
   );
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectListUpdateSource, setProjectListUpdateSource] = useState<"auto" | "resort">(
+    "resort",
+  );
+  const [projectOrderIds, setProjectOrderIds] = useState<string[]>([]);
+  const [projectUpdates, setProjectUpdates] = useState<Record<string, ProjectUpdateState>>({});
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [selection, setHistorySelection] = useState<HistorySelection>(() =>
     createHistorySelectionFromPaneState(initialPaneState),
@@ -257,6 +269,9 @@ export function useHistoryController({
   const refreshContextRef = useRef<RefreshContext | null>(null);
   const refreshIdCounterRef = useRef(0);
   const initialHistoryPaneFocusAppliedRef = useRef(false);
+  const projectsRef = useRef<ProjectSummary[]>([]);
+  const projectUpdateTimeoutsRef = useRef<Map<string, number>>(new Map());
+  const projectOrderControlKeyRef = useRef("");
 
   const projectsLoadTokenRef = useRef(0);
   const sessionsLoadTokenRef = useRef(0);
@@ -284,7 +299,7 @@ export function useHistoryController({
   const rawSelectedSessionId = selection.mode === "session" ? selection.sessionId : "";
   const historyMode = selection.mode;
 
-  const sortedProjects = useMemo(() => {
+  const naturallySortedProjects = useMemo(() => {
     const next = projects.filter((project) => enabledProviders.includes(project.provider));
     next.sort((left, right) => {
       const byRecent =
@@ -293,6 +308,46 @@ export function useHistoryController({
     });
     return next;
   }, [enabledProviders, projectSortDirection, projects]);
+
+  const projectOrderControlKey = useMemo(
+    () =>
+      [
+        projectSortDirection,
+        enabledProviders.join(","),
+        projectProviders.join(","),
+        projectQuery,
+      ].join("\u0000"),
+    [enabledProviders, projectProviders, projectQuery, projectSortDirection],
+  );
+
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
+
+  useEffect(() => {
+    const nextIds = naturallySortedProjects.map((project) => project.id);
+    const didProjectControlsChange = projectOrderControlKeyRef.current !== projectOrderControlKey;
+    projectOrderControlKeyRef.current = projectOrderControlKey;
+
+    setProjectOrderIds((current) => {
+      if (didProjectControlsChange || projectListUpdateSource !== "auto" || current.length === 0) {
+        return nextIds;
+      }
+      return mergeStableProjectOrder(current, nextIds);
+    });
+  }, [naturallySortedProjects, projectListUpdateSource, projectOrderControlKey]);
+
+  const sortedProjects = useMemo(() => {
+    if (projectOrderIds.length === 0) {
+      return naturallySortedProjects;
+    }
+    const projectsById = new Map(
+      naturallySortedProjects.map((project) => [project.id, project] as const),
+    );
+    return projectOrderIds
+      .map((projectId) => projectsById.get(projectId) ?? null)
+      .filter((project): project is ProjectSummary => project !== null);
+  }, [naturallySortedProjects, projectOrderIds]);
 
   const sortedSessions = useMemo(() => {
     const next = [...sessions];
@@ -478,6 +533,45 @@ export function useHistoryController({
 
   useReconcileProviderSelection(enabledProviders, setProjectProviders);
 
+  const registerAutoProjectUpdates = useCallback((deltas: Record<string, number>) => {
+    const entries = Object.entries(deltas).filter(([, delta]) => delta > 0);
+    if (entries.length === 0) {
+      return;
+    }
+
+    const now = Date.now();
+    setProjectUpdates((current) => {
+      const next = { ...current };
+      for (const [projectId, delta] of entries) {
+        const previousDelta = next[projectId]?.messageDelta ?? 0;
+        next[projectId] = {
+          messageDelta: previousDelta + delta,
+          updatedAt: now,
+        };
+      }
+      return next;
+    });
+
+    for (const [projectId] of entries) {
+      const existingTimeoutId = projectUpdateTimeoutsRef.current.get(projectId);
+      if (existingTimeoutId !== undefined) {
+        window.clearTimeout(existingTimeoutId);
+      }
+      const timeoutId = window.setTimeout(() => {
+        setProjectUpdates((current) => {
+          if (!(projectId in current)) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[projectId];
+          return next;
+        });
+        projectUpdateTimeoutsRef.current.delete(projectId);
+      }, PROJECT_UPDATE_HIGHLIGHT_MS);
+      projectUpdateTimeoutsRef.current.set(projectId, timeoutId);
+    }
+  }, []);
+
   const { loadProjects, loadSessions, loadBookmarks } = useHistoryDataEffects({
     codetrail,
     logError,
@@ -492,6 +586,9 @@ export function useHistoryController({
     setPendingSearchNavigation,
     setHistorySelection,
     setProjects,
+    projectsRef,
+    setProjectListUpdateSource,
+    registerAutoProjectUpdates,
     setProjectsLoaded,
     projectsLoaded,
     setSessions,
@@ -531,6 +628,10 @@ export function useHistoryController({
       if (sessionScrollSyncTimerRef.current !== null) {
         window.clearTimeout(sessionScrollSyncTimerRef.current);
       }
+      for (const timeoutId of projectUpdateTimeoutsRef.current.values()) {
+        window.clearTimeout(timeoutId);
+      }
+      projectUpdateTimeoutsRef.current.clear();
     };
   }, []);
 
@@ -973,6 +1074,7 @@ export function useHistoryController({
     selectedSessionId,
     paneStateHydrated,
     sortedProjects,
+    projectUpdates,
     sortedSessions,
     selectedProject,
     selectedSession,
@@ -1086,72 +1188,76 @@ export function useHistoryController({
     prettyCategory,
     prettyProvider: formatPrettyProvider,
     formatDate,
-    handleRefreshAllData: useCallback(async () => {
-      const container = messageListRef.current;
-      const id = ++refreshIdCounterRef.current;
+    handleRefreshAllData: useCallback(
+      async (source: "manual" | "auto" = "manual") => {
+        const container = messageListRef.current;
+        const id = ++refreshIdCounterRef.current;
 
-      // Detect whether the user is "pinned" to the newest-messages edge.
-      // ASC → newest at bottom → pinned when scrolled to bottom.
-      // DESC → newest at top → pinned when scrolled to top.
-      const sortDir =
-        historyMode === "project_all"
-          ? projectAllSortDirection
-          : historyMode === "bookmarks"
-            ? bookmarkSortDirection
-            : messageSortDirection;
-      const edgeThreshold = 10;
-      const isAtNewestEdge = (() => {
-        if (!container) return false;
-        if (sortDir === "asc") {
-          return (
-            container.scrollTop + container.clientHeight >= container.scrollHeight - edgeThreshold
+        // Detect whether the user is "pinned" to the newest-messages edge.
+        // ASC → newest at bottom → pinned when scrolled to bottom.
+        // DESC → newest at top → pinned when scrolled to top.
+        const sortDir =
+          historyMode === "project_all"
+            ? projectAllSortDirection
+            : historyMode === "bookmarks"
+              ? bookmarkSortDirection
+              : messageSortDirection;
+        const edgeThreshold = 10;
+        const isAtNewestEdge = (() => {
+          if (!container) return false;
+          if (sortDir === "asc") {
+            return (
+              container.scrollTop + container.clientHeight >= container.scrollHeight - edgeThreshold
+            );
+          }
+          return container.scrollTop <= edgeThreshold;
+        })();
+
+        let scrollPreservation: RefreshContext["scrollPreservation"] = null;
+        let prevMessageIds = "";
+
+        if (isAtNewestEdge) {
+          prevMessageIds = container
+            ? Array.from(
+                container.querySelectorAll<HTMLElement>("[data-history-message-id]"),
+                (el) => el.getAttribute("data-history-message-id"),
+              ).join(",")
+            : "";
+        } else if (container) {
+          const elements = Array.from(
+            container.querySelectorAll<HTMLElement>("[data-history-message-id]"),
           );
-        }
-        return container.scrollTop <= edgeThreshold;
-      })();
-
-      let scrollPreservation: RefreshContext["scrollPreservation"] = null;
-      let prevMessageIds = "";
-
-      if (isAtNewestEdge) {
-        prevMessageIds = container
-          ? Array.from(container.querySelectorAll<HTMLElement>("[data-history-message-id]"), (el) =>
-              el.getAttribute("data-history-message-id"),
-            ).join(",")
-          : "";
-      } else if (container) {
-        const elements = Array.from(
-          container.querySelectorAll<HTMLElement>("[data-history-message-id]"),
-        );
-        for (const el of elements) {
-          if (el.offsetTop + el.offsetHeight > container.scrollTop) {
-            scrollPreservation = {
-              scrollTop: container.scrollTop,
-              referenceMessageId: el.getAttribute("data-history-message-id") ?? "",
-              referenceOffsetTop: el.offsetTop,
-            };
-            break;
+          for (const el of elements) {
+            if (el.offsetTop + el.offsetHeight > container.scrollTop) {
+              scrollPreservation = {
+                scrollTop: container.scrollTop,
+                referenceMessageId: el.getAttribute("data-history-message-id") ?? "",
+                referenceOffsetTop: el.offsetTop,
+              };
+              break;
+            }
           }
         }
-      }
 
-      refreshContextRef.current = {
-        refreshId: id,
-        originPage: sessionPage,
-        scrollPreservation,
-        autoScroll: isAtNewestEdge,
-        prevMessageIds,
-      };
+        refreshContextRef.current = {
+          refreshId: id,
+          originPage: sessionPage,
+          scrollPreservation,
+          autoScroll: isAtNewestEdge,
+          prevMessageIds,
+        };
 
-      await handleRefresh();
-      setRefreshCounter((c) => c + 1);
-    }, [
-      bookmarkSortDirection,
-      handleRefresh,
-      historyMode,
-      messageSortDirection,
-      projectAllSortDirection,
-      sessionPage,
-    ]),
+        await handleRefresh(source);
+        setRefreshCounter((c) => c + 1);
+      },
+      [
+        bookmarkSortDirection,
+        handleRefresh,
+        historyMode,
+        messageSortDirection,
+        projectAllSortDirection,
+        sessionPage,
+      ],
+    ),
   };
 }

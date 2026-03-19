@@ -1388,6 +1388,24 @@ body.platform-macos .titlebar-left {
   box-shadow: var(--shadow-sm);
 }
 
+.project-item {
+  position: relative;
+}
+
+.project-item.recently-updated::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-blue) 78%, white);
+  opacity: 0.85;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent-blue) 26%, transparent);
+  animation: project-update-pulse 2.4s ease-in-out infinite;
+}
+
 .list-item-name {
   display: flex;
   align-items: center;
@@ -1396,6 +1414,35 @@ body.platform-macos .titlebar-left {
   font-size: 13.5px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.project-item-label {
+  min-width: 0;
+  flex: 1;
+}
+
+.project-update-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 40px;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: color-mix(in srgb, var(--accent-blue) 16%, transparent);
+  color: var(--accent-blue);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  visibility: hidden;
+  opacity: 0;
+}
+
+.project-update-badge.visible {
+  visibility: visible;
+  opacity: 1;
 }
 
 .list-item-path {
@@ -1549,6 +1596,16 @@ body.platform-macos .titlebar-left {
   background: var(--accent-green);
   box-shadow: 0 0 5px rgba(5, 150, 105, 0.4);
   flex-shrink: 0;
+}
+
+@keyframes project-update-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.95;
+  }
 }
 
 .panel.collapsed .panel-header {

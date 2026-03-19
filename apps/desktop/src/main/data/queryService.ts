@@ -272,6 +272,7 @@ function listProjectsWithDatabase(
          p.name,
          p.path,
          COUNT(s.id) as session_count,
+         COALESCE(SUM(s.message_count), 0) as message_count,
          MAX(COALESCE(s.ended_at, s.started_at)) as last_activity
        FROM projects p
        LEFT JOIN sessions s ON s.project_id = p.id
@@ -285,6 +286,7 @@ function listProjectsWithDatabase(
     name: string;
     path: string;
     session_count: number;
+    message_count: number;
     last_activity: string | null;
   }>;
 
@@ -295,6 +297,7 @@ function listProjectsWithDatabase(
       name: row.name,
       path: row.path,
       sessionCount: row.session_count,
+      messageCount: row.message_count,
       lastActivity: row.last_activity,
     })),
   };

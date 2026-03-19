@@ -132,7 +132,7 @@ export function useHistoryInteractions({
   sessionDetailTotalCount: number | null | undefined;
   allSessionsCount: number;
   sessionSearchInputRef: RefObject<HTMLInputElement | null>;
-  loadProjects: () => Promise<void>;
+  loadProjects: (source?: "auto" | "resort") => Promise<void>;
   loadSessions: () => Promise<void>;
   setProjectProviders: Dispatch<SetStateAction<Provider[]>>;
   setProjectQueryInput: Dispatch<SetStateAction<string>>;
@@ -527,9 +527,16 @@ export function useHistoryInteractions({
     }, 0);
   }, [sessionSearchInputRef]);
 
-  const handleRefresh = useCallback(async () => {
-    await Promise.all([loadProjects(), loadSessions(), loadBookmarks()]);
-  }, [loadBookmarks, loadProjects, loadSessions]);
+  const handleRefresh = useCallback(
+    async (source: "auto" | "manual" = "manual") => {
+      await Promise.all([
+        loadProjects(source === "auto" ? "auto" : "resort"),
+        loadSessions(),
+        loadBookmarks(),
+      ]);
+    },
+    [loadBookmarks, loadProjects, loadSessions],
+  );
 
   const navigateFromSearchResult = useCallback(
     (navigation: HistorySearchNavigation) => {

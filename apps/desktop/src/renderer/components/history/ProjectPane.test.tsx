@@ -14,6 +14,7 @@ const projects = [
     name: "Project One",
     path: "/Users/test/project-one",
     sessionCount: 2,
+    messageCount: 12,
     lastActivity: "2026-03-01T12:00:00.000Z",
   },
   {
@@ -22,6 +23,7 @@ const projects = [
     name: "Project Two",
     path: "/Users/test/project-two",
     sessionCount: 1,
+    messageCount: 6,
     lastActivity: "2026-03-01T13:00:00.000Z",
   },
 ];
@@ -52,6 +54,7 @@ describe("ProjectPane", () => {
         projectProviders={["claude", "codex"]}
         providers={["claude", "codex", "gemini", "cursor"]}
         projectProviderCounts={{ claude: 1, codex: 1, gemini: 0, cursor: 0, copilot: 0 }}
+        projectUpdates={{ project_2: { messageDelta: 3, updatedAt: Date.now() } }}
         onToggleCollapsed={onToggleCollapsed}
         onProjectQueryChange={onProjectQueryChange}
         onToggleProvider={onToggleProvider}
@@ -66,6 +69,7 @@ describe("ProjectPane", () => {
 
     expect(screen.getByText("Project One")).toBeInTheDocument();
     expect(screen.getByText("Project Two")).toBeInTheDocument();
+    expect(screen.getByText("+3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Collapse Projects pane" })).toHaveAttribute(
       "title",
       "Collapse Projects (Cmd/Ctrl+B)",
@@ -99,6 +103,7 @@ describe("ProjectPane", () => {
         projectProviders={["claude"]}
         providers={["claude", "codex", "gemini", "cursor"]}
         projectProviderCounts={{ claude: 1, codex: 1, gemini: 0, cursor: 0, copilot: 0 }}
+        projectUpdates={{}}
         onToggleCollapsed={vi.fn()}
         onProjectQueryChange={vi.fn()}
         onToggleProvider={vi.fn()}

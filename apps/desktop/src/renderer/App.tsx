@@ -86,6 +86,7 @@ export function App({
   const wasIndexingRef = useRef(false);
   const lastCompletedJobsRef = useRef(-1);
   const watchStatsLoadedRef = useRef(false);
+  const skipNextStatusDrivenReloadRef = useRef(false);
 
   const appearance = useAppearanceController({
     initialPaneState,
@@ -172,9 +173,12 @@ export function App({
     }
   }, [history.sortedProjects, search]);
 
-  const reloadIndexedData = useCallback(async () => {
-    await Promise.all([history.handleRefreshAllData(), search.reloadSearch()]);
-  }, [history.handleRefreshAllData, search.reloadSearch]);
+  const reloadIndexedData = useCallback(
+    async (source: "manual" | "auto") => {
+      await Promise.all([history.handleRefreshAllData(source), search.reloadSearch()]);
+    },
+    [history.handleRefreshAllData, search.reloadSearch],
+  );
 
   const pendingProviderDisableLabel =
     PROVIDER_LIST.find((provider) => provider.id === pendingProviderDisable)?.label ?? "Provider";
@@ -225,7 +229,11 @@ export function App({
           (wasIndexing && !status.running) ||
           (prevCompleted >= 0 && status.completedJobs > prevCompleted)
         ) {
-          await reloadIndexedData();
+          if (skipNextStatusDrivenReloadRef.current) {
+            skipNextStatusDrivenReloadRef.current = false;
+          } else {
+            await reloadIndexedData("auto");
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -301,9 +309,11 @@ export function App({
     async (force: boolean) => {
       setRefreshing(true);
       try {
+        skipNextStatusDrivenReloadRef.current = true;
         await codetrail.invoke("indexer:refresh", { force });
-        await reloadIndexedData();
+        await reloadIndexedData("manual");
       } catch (error) {
+        skipNextStatusDrivenReloadRef.current = false;
         logError("Refresh failed", error);
       } finally {
         setRefreshing(false);

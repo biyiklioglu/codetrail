@@ -15,6 +15,7 @@ export function ProjectPane({
   projectProviders,
   providers,
   projectProviderCounts,
+  projectUpdates,
   onToggleCollapsed,
   onProjectQueryChange,
   onToggleProvider,
@@ -34,6 +35,7 @@ export function ProjectPane({
   projectProviders: Provider[];
   providers: Provider[];
   projectProviderCounts: Record<Provider, number>;
+  projectUpdates: Record<string, { messageDelta: number; updatedAt: number }>;
   onToggleCollapsed: () => void;
   onProjectQueryChange: (value: string) => void;
   onToggleProvider: (provider: Provider) => void;
@@ -139,35 +141,44 @@ export function ProjectPane({
         ))}
       </div>
       <div className="list-scroll project-list" ref={listRef} tabIndex={-1}>
-        {sortedProjects.map((project) => (
-          <button
-            key={project.id}
-            type="button"
-            ref={project.id === selectedProjectId ? selectedProjectRef : null}
-            className={
-              project.id === selectedProjectId
-                ? "list-item project-item active"
-                : "list-item project-item"
-            }
-            onClick={() => onSelectProject(project.id)}
-          >
-            <div className="list-item-name">
-              {project.id === selectedProjectId ? <span className="active-dot" /> : null}
-              {project.name || project.path || "(no project path)"}
-            </div>
-            <div className="list-item-path">{compactPath(project.path)}</div>
-            <div className="list-item-meta">
-              <span className={`meta-tag ${project.provider}`}>
-                {prettyProvider(project.provider)}
-              </span>{" "}
-              <span className="sessions-count">
-                {project.sessionCount} {project.sessionCount === 1 ? "session" : "sessions"}
-              </span>
-              <span className="dot-sep" />
-              <span>{formatDate(project.lastActivity)}</span>
-            </div>
-          </button>
-        ))}
+        {sortedProjects.map((project) => {
+          const update = projectUpdates[project.id];
+          return (
+            <button
+              key={project.id}
+              type="button"
+              ref={project.id === selectedProjectId ? selectedProjectRef : null}
+              className={`list-item project-item${project.id === selectedProjectId ? " active" : ""}${
+                update ? " recently-updated" : ""
+              }`}
+              onClick={() => onSelectProject(project.id)}
+            >
+              <div className="list-item-name">
+                {project.id === selectedProjectId ? <span className="active-dot" /> : null}
+                <span className="project-item-label">
+                  {project.name || project.path || "(no project path)"}
+                </span>
+                <span
+                  className={`project-update-badge${update ? " visible" : ""}`}
+                  aria-label={update ? `${update.messageDelta} new messages` : undefined}
+                >
+                  {update ? `+${update.messageDelta}` : "+0"}
+                </span>
+              </div>
+              <div className="list-item-path">{compactPath(project.path)}</div>
+              <div className="list-item-meta">
+                <span className={`meta-tag ${project.provider}`}>
+                  {prettyProvider(project.provider)}
+                </span>{" "}
+                <span className="sessions-count">
+                  {project.sessionCount} {project.sessionCount === 1 ? "session" : "sessions"}
+                </span>
+                <span className="dot-sep" />
+                <span>{formatDate(project.lastActivity)}</span>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </aside>
   );

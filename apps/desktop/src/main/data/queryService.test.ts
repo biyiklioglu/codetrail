@@ -459,6 +459,7 @@ describe("queryService in-memory", () => {
         name: "Cursor Project",
         path: "/workspace/cursor-project",
         sessionCount: 0,
+        messageCount: 0,
         lastActivity: null,
       },
     ]);

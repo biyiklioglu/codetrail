@@ -41,6 +41,7 @@ export function HistoryLayout({
         projectProviders={history.projectProviders}
         providers={history.enabledProviders}
         projectProviderCounts={history.projectProviderCounts}
+        projectUpdates={history.projectUpdates}
         onToggleCollapsed={() => history.setProjectPaneCollapsed((value) => !value)}
         onProjectQueryChange={history.setProjectQueryInput}
         onToggleProvider={(provider) =>

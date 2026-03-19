@@ -15,6 +15,7 @@ const projectSummarySchema = z.object({
   name: z.string().min(1),
   path: z.string(),
   sessionCount: z.number().int().nonnegative(),
+  messageCount: z.number().int().nonnegative(),
   lastActivity: z.string().nullable(),
 });
 

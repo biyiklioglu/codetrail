@@ -22,6 +22,7 @@ import type {
 } from "../app/types";
 import { shouldIgnoreAsyncEffectError } from "../lib/asyncEffectUtils";
 import type { CodetrailClient } from "../lib/codetrailClient";
+import { collectProjectMessageDeltas } from "../lib/projectUpdates";
 import { decideSessionSelectionAfterLoad } from "../lib/sessionSelection";
 import type { RefreshContext } from "./useHistoryController";
 
@@ -41,6 +42,9 @@ export function useHistoryDataEffects({
   setPendingSearchNavigation,
   setHistorySelection,
   setProjects,
+  projectsRef,
+  setProjectListUpdateSource,
+  registerAutoProjectUpdates,
   setProjectsLoaded,
   projectsLoaded,
   setSessions,
@@ -87,6 +91,9 @@ export function useHistoryDataEffects({
   setPendingSearchNavigation: Dispatch<SetStateAction<HistorySearchNavigation | null>>;
   setHistorySelection: Dispatch<SetStateAction<HistorySelection>>;
   setProjects: Dispatch<SetStateAction<ProjectSummary[]>>;
+  projectsRef: MutableRefObject<ProjectSummary[]>;
+  setProjectListUpdateSource: Dispatch<SetStateAction<"auto" | "resort">>;
+  registerAutoProjectUpdates: (deltas: Record<string, number>) => void;
   setProjectsLoaded: Dispatch<SetStateAction<boolean>>;
   projectsLoaded: boolean;
   setSessions: Dispatch<SetStateAction<SessionSummary[]>>;
@@ -120,36 +127,48 @@ export function useHistoryDataEffects({
   refreshCounter: number;
   refreshContextRef: MutableRefObject<RefreshContext | null>;
 }) {
-  const loadProjects = useCallback(async () => {
-    // Monotonic request tokens prevent stale async responses from overwriting newer selections.
-    const requestToken = projectsLoadTokenRef.current + 1;
-    projectsLoadTokenRef.current = requestToken;
-    setProjectsLoaded(false);
-    const response = await codetrail.invoke("projects:list", {
-      providers: projectProviders,
-      query: projectQuery,
-    });
-    if (requestToken !== projectsLoadTokenRef.current) {
-      return;
-    }
-    setProjects(response.projects);
-    setProjectsLoaded(true);
-    if (!pendingSearchNavigation && response.projects.length > 0 && !rawSelectedProjectId) {
-      setHistorySelection((selectionState) =>
-        setHistorySelectionProjectId(selectionState, response.projects[0]?.id ?? ""),
-      );
-    }
-  }, [
-    codetrail,
-    pendingSearchNavigation,
-    projectProviders,
-    projectQuery,
-    projectsLoadTokenRef,
-    rawSelectedProjectId,
-    setHistorySelection,
-    setProjects,
-    setProjectsLoaded,
-  ]);
+  const loadProjects = useCallback(
+    async (source: "auto" | "resort" = "resort") => {
+      // Monotonic request tokens prevent stale async responses from overwriting newer selections.
+      const requestToken = projectsLoadTokenRef.current + 1;
+      projectsLoadTokenRef.current = requestToken;
+      setProjectsLoaded(false);
+      const response = await codetrail.invoke("projects:list", {
+        providers: projectProviders,
+        query: projectQuery,
+      });
+      if (requestToken !== projectsLoadTokenRef.current) {
+        return;
+      }
+      setProjectListUpdateSource(source);
+      if (source === "auto") {
+        registerAutoProjectUpdates(
+          collectProjectMessageDeltas(projectsRef.current, response.projects),
+        );
+      }
+      setProjects(response.projects);
+      setProjectsLoaded(true);
+      if (!pendingSearchNavigation && response.projects.length > 0 && !rawSelectedProjectId) {
+        setHistorySelection((selectionState) =>
+          setHistorySelectionProjectId(selectionState, response.projects[0]?.id ?? ""),
+        );
+      }
+    },
+    [
+      codetrail,
+      pendingSearchNavigation,
+      projectProviders,
+      projectQuery,
+      projectsRef,
+      projectsLoadTokenRef,
+      rawSelectedProjectId,
+      registerAutoProjectUpdates,
+      setHistorySelection,
+      setProjectListUpdateSource,
+      setProjects,
+      setProjectsLoaded,
+    ],
+  );
 
   const loadSessions = useCallback(async () => {
     const requestToken = sessionsLoadTokenRef.current + 1;
