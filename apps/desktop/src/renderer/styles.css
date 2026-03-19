@@ -762,6 +762,43 @@ body.platform-macos .titlebar-left {
   gap: 8px;
 }
 
+.export-progress-dialog {
+  max-width: 460px;
+}
+
+.export-progress-meter {
+  appearance: none;
+  width: 100%;
+  height: 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.export-progress-meter::-webkit-progress-bar {
+  background: var(--bg-elevated);
+}
+
+.export-progress-meter::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-teal));
+  border-radius: 999px;
+}
+
+.export-progress-meter::-moz-progress-bar {
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-teal));
+  border-radius: 999px;
+}
+
+.export-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 /* Auto-refresh dropdown */
 .tb-dropdown {
   position: relative;
@@ -822,6 +859,11 @@ body.platform-macos .titlebar-left {
 
 .tb-dropdown-menu-auto-refresh {
   min-width: 172px;
+}
+
+.history-export-menu {
+  min-width: 260px;
+  margin: 4px 0 0;
 }
 
 .tb-dropdown-menu-right {
@@ -885,6 +927,30 @@ body.platform-macos .titlebar-left {
 
 .tb-dropdown-check {
   color: var(--accent-blue);
+}
+
+.history-export-trigger {
+  min-width: 76px;
+}
+
+.history-export-summary {
+  padding: 8px 12px 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.history-export-summary-line {
+  margin: 0;
+}
+
+.history-export-action {
+  font-weight: 600;
+}
+
+.history-export-action:disabled {
+  color: var(--text-tertiary);
+  cursor: not-allowed;
 }
 
 /* Auto-scroll toggle */

@@ -18,6 +18,7 @@ export type ToolbarIconName =
   | "chevronLeft"
   | "bookmark"
   | "folderOpen"
+  | "export"
   | "sortAsc"
   | "sortDesc";
 
@@ -44,6 +45,7 @@ const TOOLBAR_ICON_PATHS: Record<ToolbarIconName, string> = {
   chevronLeft: "M15 5l-6 7 6 7",
   bookmark: "M6 4h12v16l-6-4-6 4z",
   folderOpen: "M3 8h7l2 2h9v9H3zM3 8V6h6l2 2",
+  export: "M12 3v11M8 10l4 4 4-4M5 19h14",
   sortAsc: "M7 17V6M7 6l-3 3M7 6l3 3M12 17h8M12 13h6M12 9h4M12 5h2",
   sortDesc: "M7 6v11M7 17l-3-3M7 17l3-3M12 17h2M12 13h4M12 9h6M12 5h8",
 };
@@ -68,6 +70,7 @@ const TOOLBAR_ICON_TITLES: Record<ToolbarIconName, string> = {
   chevronLeft: "Back",
   bookmark: "Bookmark",
   folderOpen: "Open folder",
+  export: "Export",
   sortAsc: "Sort ascending",
   sortDesc: "Sort descending",
 };

@@ -332,6 +332,10 @@ export function createAppClient(overrides: Record<string, ChannelHandler> = {}) 
       },
       results: [],
     }),
+    "history:exportMessages": () => ({
+      canceled: false,
+      path: "/tmp/messages-export.md",
+    }),
     "search:query": (request) => {
       const query = String(request.query ?? "");
       if (query.trim().length === 0) {

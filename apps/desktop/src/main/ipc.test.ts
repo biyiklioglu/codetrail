@@ -99,6 +99,10 @@ describe("registerIpcHandlers", () => {
         "bookmarks:toggle": () => ({
           bookmarked: true,
         }),
+        "history:exportMessages": () => ({
+          canceled: false,
+          path: "/tmp/messages-export.md",
+        }),
         "search:query": (payload) => ({
           query: payload.query,
           totalCount: 0,
@@ -238,6 +242,10 @@ describe("registerIpcHandlers", () => {
           results: [],
         }),
         "bookmarks:toggle": () => ({ bookmarked: true }),
+        "history:exportMessages": () => ({
+          canceled: false,
+          path: "/tmp/messages-export.md",
+        }),
         "search:query": () => ({
           query: "",
           totalCount: 0,

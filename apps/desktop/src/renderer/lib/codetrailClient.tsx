@@ -2,8 +2,11 @@ import { createContext, useContext, useRef } from "react";
 
 import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core/browser";
 
+import type { HistoryExportProgressPayload } from "../../shared/historyExport";
+
 export type CodetrailClient = {
   invoke<C extends IpcChannel>(channel: C, payload: IpcRequestInput<C>): Promise<IpcResponse<C>>;
+  onHistoryExportProgress(listener: (payload: HistoryExportProgressPayload) => void): () => void;
 };
 
 const MISSING_PRELOAD_ERROR =
@@ -13,6 +16,7 @@ const MISSING_CLIENT: CodetrailClient = {
   invoke: async () => {
     throw new Error(MISSING_PRELOAD_ERROR);
   },
+  onHistoryExportProgress: () => () => undefined,
 };
 
 function isCodetrailClient(value: unknown): value is CodetrailClient {
@@ -20,7 +24,9 @@ function isCodetrailClient(value: unknown): value is CodetrailClient {
     typeof value === "object" &&
     value !== null &&
     "invoke" in value &&
-    typeof (value as { invoke?: unknown }).invoke === "function"
+    typeof (value as { invoke?: unknown }).invoke === "function" &&
+    "onHistoryExportProgress" in value &&
+    typeof (value as { onHistoryExportProgress?: unknown }).onHistoryExportProgress === "function"
   );
 }
 

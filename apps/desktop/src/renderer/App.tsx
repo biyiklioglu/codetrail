@@ -24,6 +24,7 @@ import {
 } from "./app/constants";
 import type { MainView, PaneStateSnapshot, WatchStatsResponse } from "./app/types";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { HistoryExportProgressDialog } from "./components/HistoryExportProgressDialog";
 import { SettingsView } from "./components/SettingsView";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { TopBar } from "./components/TopBar";
@@ -668,6 +669,12 @@ export function App({
           setPendingMissingSessionCleanupEnable(false);
         }}
         onCancel={() => setPendingMissingSessionCleanupEnable(false)}
+      />
+      <HistoryExportProgressDialog
+        open={history.historyExportState.open}
+        percent={history.historyExportState.percent}
+        message={history.historyExportState.message}
+        scopeLabel={history.historyExportState.scope === "all_pages" ? "All pages" : "Current page"}
       />
     </main>
   );

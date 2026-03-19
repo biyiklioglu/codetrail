@@ -5,6 +5,7 @@ import type { MessageCategory } from "@codetrail/core/browser";
 import { CATEGORIES } from "../app/constants";
 import type { BulkExpandScope } from "../app/types";
 import { AdvancedSearchToggleButton } from "../components/AdvancedSearchToggleButton";
+import { HistoryExportMenu } from "../components/HistoryExportMenu";
 import { ToolbarIcon } from "../components/ToolbarIcon";
 import { ZoomPercentInput } from "../components/ZoomPercentInput";
 import { MessageCard } from "../components/messages/MessagePresentation";
@@ -35,6 +36,26 @@ function parseBulkExpandScope(value: string): BulkExpandScope {
   return CATEGORIES.find((category) => category === value) ?? "all";
 }
 
+function formatHistoryCategorySelection(history: HistoryController): string {
+  if (history.historyCategories.length === 0) {
+    return "None";
+  }
+  if (history.historyCategories.length === CATEGORIES.length) {
+    return "All";
+  }
+  return history.historyCategories.map((category) => history.prettyCategory(category)).join(", ");
+}
+
+function getHistoryExportViewLabel(history: HistoryController): string {
+  if (history.historyMode === "project_all") {
+    return "All Sessions";
+  }
+  if (history.historyMode === "bookmarks") {
+    return "Bookmarks";
+  }
+  return "Session";
+}
+
 export function HistoryDetailPane({
   history,
   advancedSearchEnabled,
@@ -54,12 +75,33 @@ export function HistoryDetailPane({
   applyZoomAction: (action: "in" | "out" | "reset") => Promise<void>;
   setZoomPercent: (percent: number) => Promise<void>;
 }) {
+  const exportAllPagesCount =
+    history.historyMode === "bookmarks"
+      ? history.bookmarksResponse.filteredCount
+      : history.historyMode === "project_all"
+        ? (history.projectCombinedDetail?.totalCount ?? 0)
+        : (history.sessionDetail?.totalCount ?? 0);
+  const exportCurrentPageCount = history.activeHistoryMessages.length;
+  const exportSortLabel =
+    history.activeMessageSortDirection === "asc" ? "Oldest to newest" : "Newest to oldest";
+
   return (
     <div className="history-view">
       <div className="msg-header">
         <div className="msg-header-top">
           <div className="msg-header-title">{history.selectedTitle}</div>
           <div className="msg-toolbar">
+            <HistoryExportMenu
+              disabled={exportCurrentPageCount === 0}
+              viewLabel={getHistoryExportViewLabel(history)}
+              currentPageCount={exportCurrentPageCount}
+              allPagesCount={exportAllPagesCount}
+              categoryLabel={formatHistoryCategorySelection(history)}
+              sortLabel={exportSortLabel}
+              onExport={async ({ scope }) => {
+                await history.handleExportMessages({ scope });
+              }}
+            />
             <button
               type="button"
               className="toolbar-btn sort-btn msg-sort-btn"

@@ -1,7 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 
-import { app, ipcMain, shell } from "electron";
+import { BrowserWindow, app, ipcMain, shell } from "electron";
 
 import {
   DATABASE_SCHEMA_VERSION,
@@ -20,6 +20,7 @@ import {
   resolveSystemMessageRegexRules,
 } from "@codetrail/core";
 
+import { HISTORY_EXPORT_PROGRESS_CHANNEL } from "../shared/historyExport";
 import type { AppStateStore } from "./appStateStore";
 import { initializeBookmarkStore, resolveBookmarksDbPath } from "./data/bookmarkStore";
 import { type QueryService, createQueryService } from "./data/queryService";
@@ -28,6 +29,7 @@ import {
   type FileWatcherOptions,
   FileWatcherService,
 } from "./fileWatcherService";
+import { exportHistoryMessages } from "./historyExport";
 import { WorkerIndexingRunner } from "./indexingRunner";
 import { registerIpcHandlers } from "./ipc";
 import { WatchStatsStore } from "./watchStatsStore";
@@ -258,6 +260,15 @@ export async function bootstrapMainProcess(
     "sessions:getDetail": (payload) => queryService.getSessionDetail(payload),
     "bookmarks:listProject": (payload) => queryService.listProjectBookmarks(payload),
     "bookmarks:toggle": (payload) => queryService.toggleBookmark(payload),
+    "history:exportMessages": async (payload, event) =>
+      exportHistoryMessages({
+        browserWindow: BrowserWindow.fromWebContents(event.sender),
+        onProgress: (progress) => {
+          event.sender.send(HISTORY_EXPORT_PROGRESS_CHANNEL, progress);
+        },
+        queryService,
+        request: payload,
+      }),
     "search:query": (payload) =>
       queryService.runSearchQuery({
         ...payload,

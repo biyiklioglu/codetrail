@@ -1,4 +1,9 @@
-import type { IpcResponse, MessageCategory, Provider } from "@codetrail/core/browser";
+import type {
+  IpcRequestInput,
+  IpcResponse,
+  MessageCategory,
+  Provider,
+} from "@codetrail/core/browser";
 
 export type ProjectSummary = IpcResponse<"projects:list">["projects"][number];
 export type SessionSummary = IpcResponse<"sessions:list">["sessions"][number];
@@ -49,3 +54,4 @@ export type PendingMessagePageNavigation = {
 };
 
 export type ProviderCounts = Record<Provider, number>;
+export type HistoryExportScope = IpcRequestInput<"history:exportMessages">["scope"];

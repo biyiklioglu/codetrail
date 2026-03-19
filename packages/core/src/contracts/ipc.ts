@@ -132,6 +132,8 @@ const themeModeSchema = z.enum([
 ]);
 const sortDirectionSchema = z.enum(["asc", "desc"]);
 const searchModeSchema = z.enum(["simple", "advanced"]);
+const historyExportModeSchema = z.enum(["session", "project_all", "bookmarks"]);
+const historyExportScopeSchema = z.enum(["current_page", "all_pages"]);
 const preferredAutoRefreshStrategySchema = z.enum([
   "watch-1s",
   "watch-3s",
@@ -412,6 +414,25 @@ export const ipcContractSchemas = {
     }),
     response: z.object({
       bookmarked: z.boolean(),
+    }),
+  },
+  "history:exportMessages": {
+    request: z.object({
+      exportId: z.string().min(1),
+      mode: historyExportModeSchema,
+      projectId: z.string().min(1),
+      sessionId: z.string().optional(),
+      page: z.number().int().nonnegative().default(0),
+      pageSize: z.number().int().positive().max(500).default(100),
+      categories: z.array(messageCategorySchema).optional(),
+      query: z.string().default(""),
+      searchMode: searchModeSchema.optional(),
+      sortDirection: sortDirectionSchema.default("asc"),
+      scope: historyExportScopeSchema,
+    }),
+    response: z.object({
+      canceled: z.boolean(),
+      path: z.string().nullable(),
     }),
   },
   "search:query": {

@@ -22,6 +22,8 @@ const {
   mockRealpath,
   mockOpenPath,
   mockShowItemInFolder,
+  mockShowSaveDialog,
+  mockBrowserWindowFromWebContents,
   mockListProjects,
   mockGetProjectCombinedDetail,
   mockListSessions,
@@ -86,6 +88,8 @@ const {
     mockRealpath: vi.fn(async (pathValue: string) => pathValue),
     mockOpenPath: vi.fn(async () => ""),
     mockShowItemInFolder: vi.fn(),
+    mockShowSaveDialog: vi.fn(async () => ({ canceled: true, filePath: undefined })),
+    mockBrowserWindowFromWebContents: vi.fn(() => null),
     mockListProjects: vi.fn(() => ({
       projects: [
         {
@@ -186,6 +190,12 @@ vi.mock("electron", () => ({
     getVersion: mockGetVersion,
   },
   ipcMain: {},
+  BrowserWindow: {
+    fromWebContents: mockBrowserWindowFromWebContents,
+  },
+  dialog: {
+    showSaveDialog: mockShowSaveDialog,
+  },
   shell: {
     openPath: mockOpenPath,
     showItemInFolder: mockShowItemInFolder,

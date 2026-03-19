@@ -1,4 +1,5 @@
 import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core/browser";
+import type { HistoryExportProgressPayload } from "../shared/historyExport";
 
 declare global {
   interface Window {
@@ -7,6 +8,9 @@ declare global {
         channel: C,
         payload: IpcRequestInput<C>,
       ): Promise<IpcResponse<C>>;
+      onHistoryExportProgress(
+        listener: (payload: HistoryExportProgressPayload) => void,
+      ): () => void;
     };
   }
 }

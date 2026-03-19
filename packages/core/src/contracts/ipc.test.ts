@@ -147,6 +147,25 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
     },
     response: { bookmarked: true },
   },
+  "history:exportMessages": {
+    request: {
+      exportId: "export_1",
+      mode: "session",
+      projectId: "project_1",
+      sessionId: "session_1",
+      page: 0,
+      pageSize: 100,
+      categories: ["assistant"],
+      query: "parser",
+      searchMode: "simple",
+      sortDirection: "asc",
+      scope: "current_page",
+    },
+    response: {
+      canceled: false,
+      path: "/tmp/messages-export.md",
+    },
+  },
   "search:query": {
     request: {
       query: "parser",

@@ -8,11 +8,13 @@ import type {
   SystemMessageRegexRules,
 } from "@codetrail/core/browser";
 
+import type { HistoryExportPhase, HistoryExportProgressPayload } from "../../shared/historyExport";
 import { DEFAULT_PREFERRED_REFRESH_STRATEGY, type NonOffRefreshStrategy } from "../app/autoRefresh";
 import {
   DEFAULT_MESSAGE_CATEGORIES,
   EMPTY_BOOKMARKS_RESPONSE,
   EMPTY_SYSTEM_MESSAGE_REGEX_RULES,
+  PAGE_SIZE,
 } from "../app/constants";
 import {
   createHistorySelection,
@@ -23,6 +25,7 @@ import {
 import type {
   BookmarkListResponse,
   BulkExpandScope,
+  HistoryExportScope,
   HistorySearchNavigation,
   HistorySelection,
   PaneStateSnapshot,
@@ -60,6 +63,15 @@ export type RefreshContext = {
   } | null;
   autoScroll: boolean;
   prevMessageIds: string;
+};
+
+export type HistoryExportState = {
+  open: boolean;
+  exportId: string | null;
+  scope: HistoryExportScope;
+  percent: number;
+  phase: HistoryExportPhase;
+  message: string;
 };
 
 const MESSAGE_PAGE_SCROLL_OVERLAP_PX = 20;
@@ -198,6 +210,14 @@ export function useHistoryController({
   const [pendingSearchNavigation, setPendingSearchNavigation] =
     useState<HistorySearchNavigation | null>(null);
   const [refreshCounter, setRefreshCounter] = useState(0);
+  const [historyExportState, setHistoryExportState] = useState<HistoryExportState>({
+    open: false,
+    exportId: null,
+    scope: "current_page",
+    percent: 0,
+    phase: "preparing",
+    message: "",
+  });
 
   const projectQuery = useDebouncedValue(projectQueryInput, 180);
   const sessionQuery = useDebouncedValue(sessionQueryInput, 400);
@@ -856,6 +876,89 @@ export function useHistoryController({
     container.focus({ preventScroll: true });
   }, []);
 
+  useEffect(() => {
+    return codetrail.onHistoryExportProgress((progress: HistoryExportProgressPayload) => {
+      setHistoryExportState((current) =>
+        current.exportId !== progress.exportId
+          ? current
+          : {
+              ...current,
+              percent: progress.percent,
+              phase: progress.phase,
+              message: progress.message,
+            },
+      );
+    });
+  }, [codetrail]);
+
+  const handleExportMessages = useCallback(
+    async ({ scope }: { scope: HistoryExportScope }) => {
+      if (!selectedProjectId) {
+        return {
+          canceled: true,
+          path: null,
+        };
+      }
+
+      const exportId =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `export_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+      setHistoryExportState({
+        open: true,
+        exportId,
+        scope,
+        percent: 1,
+        phase: "preparing",
+        message: "Preparing export…",
+      });
+
+      try {
+        const response = await codetrail.invoke("history:exportMessages", {
+          exportId,
+          mode: historyMode,
+          projectId: selectedProjectId,
+          ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
+          page: historyMode === "bookmarks" ? 0 : loadedHistoryPage,
+          pageSize: PAGE_SIZE,
+          categories: historyCategories,
+          query: historyMode === "bookmarks" ? effectiveBookmarkQuery : effectiveSessionQuery,
+          searchMode,
+          sortDirection: activeMessageSortDirection,
+          scope,
+        });
+        setHistoryExportState((current) =>
+          current.exportId === exportId
+            ? { ...current, open: false, exportId: null, percent: 100, message: "" }
+            : current,
+        );
+        return response;
+      } catch (error) {
+        setHistoryExportState((current) =>
+          current.exportId === exportId
+            ? { ...current, open: false, exportId: null, message: "" }
+            : current,
+        );
+        logError("History messages export failed", error);
+        throw error;
+      }
+    },
+    [
+      activeMessageSortDirection,
+      codetrail,
+      effectiveBookmarkQuery,
+      effectiveSessionQuery,
+      historyCategories,
+      historyMode,
+      loadedHistoryPage,
+      logError,
+      searchMode,
+      selectedProjectId,
+      selectedSessionId,
+    ],
+  );
+
   return {
     refs: {
       focusedMessageRef,
@@ -923,6 +1026,7 @@ export function useHistoryController({
     setFocusMessageId,
     visibleFocusedMessageId,
     sessionPage,
+    loadedHistoryPage,
     setSessionPage,
     sessionQueryInput,
     setSessionQueryInput,
@@ -962,6 +1066,8 @@ export function useHistoryController({
     selectAdjacentProject,
     pageHistoryMessagesUp: () => pageHistoryMessages("up"),
     pageHistoryMessagesDown: () => pageHistoryMessages("down"),
+    handleExportMessages,
+    historyExportState,
     selectProjectAllMessages,
     selectBookmarksView,
     selectSessionView,

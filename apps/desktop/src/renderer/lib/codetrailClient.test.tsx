@@ -14,6 +14,7 @@ describe("codetrailClient", () => {
   it("prefers provider value over window fallback", async () => {
     const providedClient: CodetrailClient = {
       invoke: vi.fn(async () => ({ ok: true }) as never),
+      onHistoryExportProgress: vi.fn(() => () => undefined),
     };
 
     const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -29,6 +30,7 @@ describe("codetrailClient", () => {
       configurable: true,
       get: () => ({
         invoke: vi.fn(async () => ({ ok: true }) as never),
+        onHistoryExportProgress: vi.fn(() => () => undefined),
       }),
     });
 
