@@ -11,8 +11,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import type { DiscoveryConfig } from "../discovery";
 import { openDatabase } from "../db/bootstrap";
+import type { DiscoveryConfig } from "../discovery";
 import { makeSessionId } from "./ids";
 import { runIncrementalIndexing } from "./indexSessions";
 

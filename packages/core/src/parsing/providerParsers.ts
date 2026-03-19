@@ -617,20 +617,25 @@ function parseCopilotEvent(args: ParseProviderEventArgs): ParseProviderEventResu
   return { messages: output, nextSequence };
 }
 
+const CURSOR_USER_QUERY_OPEN_RE = /<user_query>\s*/g;
+const CURSOR_USER_QUERY_CLOSE_RE = /\s*<\/user_query>/g;
+const CURSOR_WRAPPER_BLOCK_RES = [
+  /<system_reminder>[\s\S]*?<\/system_reminder>/g,
+  /<agent_skills>[\s\S]*?<\/agent_skills>/g,
+  /<available_skills[\s\S]*?<\/available_skills>/g,
+  /<user_info>[\s\S]*?<\/user_info>/g,
+  /<open_and_recently_viewed_files>[\s\S]*?<\/open_and_recently_viewed_files>/g,
+  /<agent_transcripts>[\s\S]*?<\/agent_transcripts>/g,
+] as const;
+
 function stripCursorWrapperTags(text: string): string {
   let result = text;
   // Cursor wraps prompts with extra XML-ish scaffolding that is useful to the agent but noisy in
   // history views. Strip the wrappers while preserving the human-readable text payload.
-  result = result.replace(/<user_query>\s*/g, "").replace(/\s*<\/user_query>/g, "");
-  result = result.replace(/<system_reminder>[\s\S]*?<\/system_reminder>/g, "");
-  result = result.replace(/<agent_skills>[\s\S]*?<\/agent_skills>/g, "");
-  result = result.replace(/<available_skills[\s\S]*?<\/available_skills>/g, "");
-  result = result.replace(/<user_info>[\s\S]*?<\/user_info>/g, "");
-  result = result.replace(
-    /<open_and_recently_viewed_files>[\s\S]*?<\/open_and_recently_viewed_files>/g,
-    "",
-  );
-  result = result.replace(/<agent_transcripts>[\s\S]*?<\/agent_transcripts>/g, "");
+  result = result.replace(CURSOR_USER_QUERY_OPEN_RE, "").replace(CURSOR_USER_QUERY_CLOSE_RE, "");
+  for (const pattern of CURSOR_WRAPPER_BLOCK_RES) {
+    result = result.replace(pattern, "");
+  }
   return result.trim();
 }
 

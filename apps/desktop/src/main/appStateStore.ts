@@ -1,7 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import type { IpcRequest, MessageCategory, Provider } from "@codetrail/core";
+import {
+  type IpcRequest,
+  type MessageCategory,
+  type Provider,
+  createProviderRecord,
+} from "@codetrail/core";
 
 import {
   type MonoFontFamily,
@@ -22,8 +27,6 @@ type PaneStateFull = IpcRequest<"ui:setPaneState">;
 export type PaneState = Partial<PaneStateFull> &
   Pick<PaneStateFull, "projectPaneWidth" | "sessionPaneWidth">;
 type IndexingConfigState = Partial<IpcRequest<"indexer:setConfig">>;
-type PersistedPaneState = PaneState;
-type IndexingState = IndexingConfigState;
 
 export type WindowState = {
   width: number;
@@ -34,8 +37,8 @@ export type WindowState = {
 };
 
 type AppState = {
-  pane?: PersistedPaneState;
-  indexing?: IndexingState;
+  pane?: PaneState;
+  indexing?: IndexingConfigState;
   window?: WindowState;
 };
 
@@ -139,11 +142,11 @@ export class AppStateStore {
     this.schedulePersist();
   }
 
-  getIndexingState(): IndexingState | null {
+  getIndexingState(): IndexingConfigState | null {
     return this.state.indexing ?? null;
   }
 
-  setIndexingState(value: IndexingState): void {
+  setIndexingState(value: IndexingConfigState): void {
     const indexing = sanitizeIndexingState(value);
     if (!indexing) {
       return;
@@ -243,7 +246,7 @@ function persistState(
 function sanitizePaneState(
   value: unknown,
   enabledProviderScope: Provider[] | undefined = undefined,
-): PersistedPaneState | null {
+): PaneState | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
@@ -343,7 +346,7 @@ function sanitizePaneState(
   };
 }
 
-function sanitizeIndexingState(value: unknown): IndexingState | null {
+function sanitizeIndexingState(value: unknown): IndexingConfigState | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
@@ -476,13 +479,7 @@ function sanitizeSystemMessageRegexRules(value: unknown): Record<Provider, strin
   }
 
   const record = value as Record<string, unknown>;
-  const rules: Record<Provider, string[]> = {
-    claude: [],
-    codex: [],
-    gemini: [],
-    cursor: [],
-    copilot: [],
-  };
+  const rules = createProviderRecord<string[]>(() => []);
 
   for (const provider of PROVIDER_VALUES) {
     const rawPatterns = record[provider];

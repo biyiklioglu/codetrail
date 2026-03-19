@@ -11,6 +11,7 @@ import {
   toChangedFilesIndexingConfig,
   toIncrementalIndexingConfig,
 } from "./indexingRequestConfig";
+import { serializeError } from "./serializeError";
 
 type IndexingWorkerResult =
   | {
@@ -36,18 +37,6 @@ type IndexingWorkerMessage =
       type: "notice";
       notice: IndexingNotice;
     };
-
-function serializeError(error: unknown): unknown {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-      ...(error.cause !== undefined ? { cause: serializeError(error.cause) } : {}),
-    };
-  }
-  return error;
-}
 
 function postMessage(message: IndexingWorkerMessage): void {
   if (parentPort) {

@@ -14,6 +14,7 @@ import { type AppStateStore, createAppStateStore } from "./appStateStore";
 import { bootstrapMainProcess, shutdownMainProcess } from "./bootstrap";
 import { appendDebugLog } from "./debugLog";
 import { createBeforeQuitHandler } from "./quitLifecycle";
+import { serializeError } from "./serializeError";
 
 let mainWindowRef: BrowserWindow | null = null;
 let debugLogPathCache: string | null = null;
@@ -57,18 +58,6 @@ function writeDebugLog(message: string, details?: unknown, options?: { force?: b
   } catch (error) {
     console.error("[codetrail] failed writing debug log", error);
   }
-}
-
-function serializeError(error: unknown): unknown {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-      ...(error.cause !== undefined ? { cause: serializeError(error.cause) } : {}),
-    };
-  }
-  return error;
 }
 
 function logAppError(message: string, error: unknown, details?: Record<string, unknown>): void {

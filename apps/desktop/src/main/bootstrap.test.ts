@@ -830,8 +830,6 @@ describe("bootstrapMainProcess", () => {
       Object.defineProperty(process, "platform", { value: originalPlatform });
     }
   });
-
-
   it("reports watcher queue status through IPC", async () => {
     await bootstrapMainProcess({ runStartupIndexing: false });
 

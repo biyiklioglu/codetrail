@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync } from "node:fs";
 
-import { type MessageCategory, PROVIDER_VALUES, type Provider } from "../contracts/canonical";
+import {
+  type MessageCategory,
+  PROVIDER_VALUES,
+  type Provider,
+  canonicalMessageSchema,
+} from "../contracts/canonical";
+import { createProviderRecord } from "../contracts/providerMetadata";
 import {
   type SqliteDatabase,
   clearIndexedData,
@@ -103,8 +109,6 @@ type SessionFileRow = {
 };
 
 type IndexedMessage = ReturnType<typeof parseSession>["messages"][number];
-type SourceMetadata = ProviderSourceMetadata;
-type SourceMetadataAccumulator = ProviderSourceMetadataAccumulator;
 type SerializedSourceMetadataAccumulator = {
   models: string[];
   gitBranch: string | null;
@@ -223,11 +227,7 @@ export function runIncrementalIndexing(
   dependencies: IndexingDependencies = {},
 ): IndexingResult {
   const resolvedDependencies = resolveIndexingDependencies(dependencies);
-  const discoveryConfig: DiscoveryConfig = {
-    ...DEFAULT_DISCOVERY_CONFIG,
-    ...config.discoveryConfig,
-    ...(config.enabledProviders ? { enabledProviders: config.enabledProviders } : {}),
-  };
+  const discoveryConfig = resolveIndexingDiscoveryConfig(config);
   const discoveredFiles = resolvedDependencies.discoverSessionFiles(discoveryConfig);
   const discoveredByFilePath = new Map(discoveredFiles.map((file) => [file.filePath, file]));
 
@@ -331,11 +331,7 @@ export function indexChangedFiles(
   dependencies: IndexingDependencies = {},
 ): IndexingResult {
   const resolvedDependencies = resolveIndexingDependencies(dependencies);
-  const discoveryConfig: DiscoveryConfig = {
-    ...DEFAULT_DISCOVERY_CONFIG,
-    ...config.discoveryConfig,
-    ...(config.enabledProviders ? { enabledProviders: config.enabledProviders } : {}),
-  };
+  const discoveryConfig = resolveIndexingDiscoveryConfig(config);
 
   const discoveredFiles = changedFilePaths
     .map((filePath) => discoverSingleFile(filePath, discoveryConfig))
@@ -649,6 +645,14 @@ function resolveIndexingDependencies(
     now: dependencies.now ?? (() => new Date()),
     onFileIssue: dependencies.onFileIssue ?? defaultOnFileIssue,
     onNotice: dependencies.onNotice ?? defaultOnNotice,
+  };
+}
+
+function resolveIndexingDiscoveryConfig(config: IndexingConfig): DiscoveryConfig {
+  return {
+    ...DEFAULT_DISCOVERY_CONFIG,
+    ...config.discoveryConfig,
+    ...(config.enabledProviders ? { enabledProviders: config.enabledProviders } : {}),
   };
 }
 
@@ -1239,7 +1243,7 @@ function finalizeSessionAggregate(state: SessionAggregateState): {
 
 function createSourceMetadataAccumulator(
   checkpoint?: SerializedSourceMetadataAccumulator,
-): SourceMetadataAccumulator {
+): ProviderSourceMetadataAccumulator {
   return {
     models: new Set<string>(checkpoint?.models ?? []),
     gitBranch: checkpoint?.gitBranch ?? null,
@@ -1247,7 +1251,9 @@ function createSourceMetadataAccumulator(
   };
 }
 
-function finalizeSourceMetadata(accumulator: SourceMetadataAccumulator): SourceMetadata {
+function finalizeSourceMetadata(
+  accumulator: ProviderSourceMetadataAccumulator,
+): ProviderSourceMetadata {
   return {
     models: [...accumulator.models].sort(),
     gitBranch: accumulator.gitBranch,
@@ -1256,7 +1262,7 @@ function finalizeSourceMetadata(accumulator: SourceMetadataAccumulator): SourceM
 }
 
 function serializeSourceMetadataAccumulator(
-  accumulator: SourceMetadataAccumulator,
+  accumulator: ProviderSourceMetadataAccumulator,
 ): SerializedSourceMetadataAccumulator {
   return {
     models: [...accumulator.models].sort(),
@@ -1282,7 +1288,7 @@ function buildStreamCheckpointState(args: {
   sessionDbId: string;
   sequence: number;
   processingState: MessageProcessingState;
-  sourceMetaAccumulator: SourceMetadataAccumulator;
+  sourceMetaAccumulator: ProviderSourceMetadataAccumulator;
   streamResult: StreamJsonlResult;
   hashes: { headHash: string; tailHash: string };
 }): StreamCheckpointState {
@@ -1793,11 +1799,11 @@ function parseCheckpointMessage(value: unknown): IndexedMessage | null {
   if (!id || !sessionId || !provider || !category || content === null || !createdAt) {
     return null;
   }
-  return {
+  const parsed = canonicalMessageSchema.safeParse({
     id,
     sessionId,
-    provider: provider as Provider,
-    category: category as MessageCategory,
+    provider,
+    category,
     content,
     createdAt,
     tokenInput: typeof record.tokenInput === "number" ? record.tokenInput : null,
@@ -1812,7 +1818,8 @@ function parseCheckpointMessage(value: unknown): IndexedMessage | null {
       record.operationDurationConfidence === "high" || record.operationDurationConfidence === "low"
         ? record.operationDurationConfidence
         : null,
-  };
+  });
+  return parsed.success ? parsed.data : null;
 }
 
 function parseAggregateState(value: unknown): SessionAggregateState {
@@ -2060,35 +2067,36 @@ function splitMessageRoot(id: string): string {
   return id.replace(/#\d+$/, "");
 }
 
-function deriveSessionTitle(messages: IndexedMessage[]): string {
-  const preferredCategories: MessageCategory[] = [
-    "user",
-    "assistant",
-    "thinking",
-    "system",
-    "tool_result",
-  ];
+const SESSION_TITLE_CATEGORY_RANK: Record<MessageCategory, number> = {
+  user: 0,
+  assistant: 1,
+  thinking: 2,
+  system: 3,
+  tool_result: 4,
+  tool_use: 5,
+  tool_edit: 5,
+};
 
-  for (const category of preferredCategories) {
-    for (const message of messages) {
-      if (message.category !== category) {
-        continue;
-      }
-      const title = normalizeSessionTitleText(message.content);
-      if (title.length > 0) {
-        return title;
-      }
-    }
-  }
+function deriveSessionTitle(messages: IndexedMessage[]): string {
+  let bestTitle = "";
+  let bestRank = Number.POSITIVE_INFINITY;
 
   for (const message of messages) {
     const title = normalizeSessionTitleText(message.content);
-    if (title.length > 0) {
-      return title;
+    if (title.length === 0) {
+      continue;
+    }
+    const rank = SESSION_TITLE_CATEGORY_RANK[message.category];
+    if (rank < bestRank) {
+      bestTitle = title;
+      bestRank = rank;
+      if (rank === 0) {
+        break;
+      }
     }
   }
 
-  return "";
+  return bestTitle;
 }
 
 function normalizeSessionTitleText(value: string): string {
@@ -2105,13 +2113,7 @@ function compileSystemMessageRules(overrides?: SystemMessageRegexRuleOverrides):
   invalidCount: number;
 } {
   const resolved = resolveSystemMessageRegexRules(overrides);
-  const compiledByProvider: Record<Provider, RegExp[]> = {
-    claude: [],
-    codex: [],
-    gemini: [],
-    cursor: [],
-    copilot: [],
-  };
+  const compiledByProvider = createProviderRecord<RegExp[]>(() => []);
 
   let invalidCount = 0;
   for (const provider of PROVIDER_VALUES) {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 import {
   type ResolvedDiscoveryDependencies,
@@ -96,8 +96,4 @@ function joinPathSegments(
     return `${separator}${joined}`;
   }
   return joined;
-}
-
-export function geminiFallbackProjectName(filePath: string): string {
-  return basename(geminiContainerDir(filePath));
 }

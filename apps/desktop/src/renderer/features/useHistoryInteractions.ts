@@ -25,6 +25,7 @@ import type {
   SessionSummary,
 } from "../app/types";
 import { copyTextToClipboard } from "../lib/clipboard";
+import type { CodetrailClient } from "../lib/codetrailClient";
 import {
   type Direction,
   getAdjacentItemId,
@@ -84,17 +85,7 @@ export function useHistoryInteractions({
   prettyProvider,
   refreshContextRef,
 }: {
-  codetrail: {
-    invoke: (
-      channel: "bookmarks:toggle",
-      payload: {
-        projectId: string;
-        sessionId: string;
-        messageId: string;
-        messageSourceId: string;
-      },
-    ) => Promise<unknown>;
-  };
+  codetrail: CodetrailClient;
   logError: (context: string, error: unknown) => void;
   scopedMessages: HistoryMessage[];
   areScopedMessagesExpanded: boolean;

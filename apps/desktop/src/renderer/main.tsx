@@ -18,11 +18,15 @@ import type { ThemeMode } from "../shared/uiPreferences";
 import "./styles.css";
 import { applyTheme } from "./lib/theme";
 
-const rootElement = document.getElementById("root");
-if (!rootElement) {
-  throw new Error("Missing root element");
+function requireRootElement(): HTMLElement {
+  const element = document.getElementById("root");
+  if (!element) {
+    throw new Error("Missing root element");
+  }
+  return element;
 }
-const mountElement = rootElement;
+
+const rootElement = requireRootElement();
 
 if (navigator.userAgent.includes("Mac")) {
   document.body.classList.add("platform-macos");
@@ -101,7 +105,7 @@ async function bootRenderer(): Promise<void> {
       initialPaneStatePromise,
     ]);
     applyInitialTheme(initialPaneState?.theme ?? "light");
-    createRoot(mountElement).render(
+    createRoot(rootElement).render(
       <StrictMode>
         <AppErrorBoundary>
           <App initialPaneState={initialPaneState} />

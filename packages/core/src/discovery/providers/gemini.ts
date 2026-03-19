@@ -4,6 +4,7 @@ import { readString } from "../../parsing/helpers";
 import {
   type ResolvedDiscoveryDependencies,
   getDiscoveryPath,
+  isUnderRoot,
   parseJsonFile,
   projectNameFromPath,
   providerSessionIdentity,
@@ -109,7 +110,7 @@ export function discoverSingleGeminiFile(
     getDiscoveryPath(config, "gemini", "geminiRoot"),
     getDiscoveryPath(config, "gemini", "geminiHistoryRoot"),
   ].filter((root): root is string => typeof root === "string" && root.length > 0);
-  if (!geminiRoots.some((root) => filePath.startsWith(`${root}/`))) {
+  if (!geminiRoots.some((root) => isUnderRoot(filePath, root))) {
     return null;
   }
 

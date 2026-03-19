@@ -192,13 +192,13 @@ export function readLeadingNonEmptyLines(
     let bytesReadTotal = 0;
     let remainder = "";
     const chunkSize = 4096;
+    const buffer = Buffer.allocUnsafe(chunkSize);
 
     while (lines.length < maxLines && bytesReadTotal < maxBytes) {
       const bytesToRead = Math.min(chunkSize, maxBytes - bytesReadTotal);
       if (bytesToRead <= 0) {
         break;
       }
-      const buffer = Buffer.allocUnsafe(bytesToRead);
       const bytesRead = dependencies.fs.readSync(fd, buffer, 0, bytesToRead, null);
       if (bytesRead <= 0) {
         break;

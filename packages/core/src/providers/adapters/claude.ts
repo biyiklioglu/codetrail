@@ -4,7 +4,7 @@ import { asArray, asRecord, readString } from "../../parsing/helpers";
 import { PROVIDER_EVENT_PARSERS, PROVIDER_PAYLOAD_PARSERS } from "../../parsing/providerParsers";
 
 import type { ProviderAdapter } from "../types";
-import { defaultTimestampNormalization, readJsonlStreamSource } from "./shared";
+import { defaultTimestampNormalization, readJsonlStreamSource, sortModels } from "./shared";
 
 function extractClaudeSourceMetadata(payload: unknown[]) {
   const models = new Set<string>();
@@ -24,7 +24,7 @@ function extractClaudeSourceMetadata(payload: unknown[]) {
   }
 
   return {
-    models: [...models].sort(),
+    models: sortModels(models),
     gitBranch,
     cwd,
   };

@@ -154,9 +154,6 @@ export function useHistoryDataEffects({
     const requestToken = sessionsLoadTokenRef.current + 1;
     sessionsLoadTokenRef.current = requestToken;
     if (!selectedProjectId) {
-      if (requestToken !== sessionsLoadTokenRef.current) {
-        return;
-      }
       setSessions([]);
       setSessionsLoadedProjectId("");
       setHistorySelection((value) =>
