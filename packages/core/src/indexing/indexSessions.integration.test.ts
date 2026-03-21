@@ -781,7 +781,122 @@ describe("runIncrementalIndexing", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("resumes append-only indexing and skips oversized JSONL lines", () => {
+  it("does not checkpoint past an unterminated trailing oversized codex JSONL line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-codex-partial-oversized-line-"));
+    const dbPath = join(dir, "index.db");
+    const codexFile = join(dir, ".codex", "sessions", "2026", "03", "19", "partial-oversized.jsonl");
+    mkdirSync(dirname(codexFile), { recursive: true });
+    writeFileSync(
+      codexFile,
+      `${[
+        JSON.stringify({
+          timestamp: "2026-03-19T10:00:00Z",
+          type: "session_meta",
+          payload: {
+            id: "codex-session-partial-oversized",
+            cwd: "/workspace/codex",
+            git: { branch: "main" },
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-03-19T10:00:01Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            id: "before-append",
+            role: "user",
+            content: [{ type: "input_text", text: "Before append" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const discoveryConfig: Partial<DiscoveryConfig> = {
+      codexRoot: join(dir, ".codex", "sessions"),
+      enabledProviders: ["codex"],
+    };
+
+    const first = runIncrementalIndexing({ dbPath, discoveryConfig });
+    expect(first.indexedFiles).toBe(1);
+
+    appendFileSync(
+      codexFile,
+      JSON.stringify({
+        timestamp: "2026-03-19T10:00:02Z",
+        type: "response_item",
+        payload: {
+          type: "function_call_output",
+          output: "x".repeat(33 * 1024 * 1024),
+        },
+      }).slice(0, -32),
+    );
+    const partialNow = new Date();
+    utimesSync(codexFile, partialNow, partialNow);
+
+    const second = runIncrementalIndexing({ dbPath, discoveryConfig });
+    expect(second.indexedFiles).toBe(1);
+
+    const dbAfterPartial = openDatabase(dbPath);
+    const partialCheckpoint = dbAfterPartial
+      .prepare("SELECT last_offset_bytes, file_size FROM index_checkpoints WHERE file_path = ?")
+      .get(codexFile) as { last_offset_bytes: number; file_size: number };
+    const partialSession = dbAfterPartial
+      .prepare("SELECT id FROM sessions WHERE file_path = ?")
+      .get(codexFile) as { id: string };
+    const partialMessages = dbAfterPartial
+      .prepare("SELECT content FROM messages WHERE session_id = ? ORDER BY created_at, id")
+      .all(partialSession.id) as Array<{
+      content: string;
+    }>;
+    dbAfterPartial.close();
+
+    expect(partialCheckpoint.last_offset_bytes).toBeLessThan(partialCheckpoint.file_size);
+    expect(partialMessages.map((message) => message.content)).toEqual(["Before append"]);
+
+    appendFileSync(
+      codexFile,
+      `${'x'.repeat(32)}"}\n${JSON.stringify({
+        timestamp: "2026-03-19T10:00:03Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          id: "after-append",
+          role: "assistant",
+          content: [{ type: "output_text", text: "After append" }],
+        },
+      })}\n`,
+    );
+    const completedNow = new Date();
+    utimesSync(codexFile, completedNow, completedNow);
+
+    const third = runIncrementalIndexing({ dbPath, discoveryConfig });
+    expect(third.indexedFiles).toBe(1);
+
+    const dbAfterCompletion = openDatabase(dbPath);
+    const completedCheckpoint = dbAfterCompletion
+      .prepare("SELECT last_offset_bytes, file_size FROM index_checkpoints WHERE file_path = ?")
+      .get(codexFile) as { last_offset_bytes: number; file_size: number };
+    const completedSession = dbAfterCompletion
+      .prepare("SELECT id FROM sessions WHERE file_path = ?")
+      .get(codexFile) as { id: string };
+    const completedMessages = dbAfterCompletion
+      .prepare("SELECT content FROM messages WHERE session_id = ? ORDER BY created_at, id")
+      .all(completedSession.id) as Array<{
+      content: string;
+    }>;
+    dbAfterCompletion.close();
+
+    expect(completedCheckpoint.last_offset_bytes).toBe(completedCheckpoint.file_size);
+    expect(completedMessages.map((message) => message.content)).toEqual([
+      "Before append",
+      expect.stringContaining("Oversized JSONL line omitted."),
+      "After append",
+    ]);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("resumes append-only indexing and rescues oversized JSONL lines within the hard ceiling", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-index-resume-"));
     const dbPath = join(dir, "index.db");
     const codexFile = join(dir, ".codex", "sessions", "2026", "03", "08", "resume.jsonl");
@@ -898,11 +1013,310 @@ describe("runIncrementalIndexing", () => {
     expect(messages.map((message) => message.content)).toEqual(
       expect.arrayContaining(["Before append", "After append"]),
     );
-    expect(messages.some((message) => message.category === "tool_result")).toBe(false);
+    expect(
+      messages.some(
+        (message) =>
+          message.category === "tool_result" && message.content.includes("[truncated from"),
+      ),
+    ).toBe(true);
     expect(checkpoint.last_offset_bytes).toBe(checkpoint.file_size);
     expect(notices).toEqual(
-      expect.arrayContaining([expect.objectContaining({ code: "parser.invalid_jsonl_line" })]),
+      expect.arrayContaining([
+        expect.objectContaining({ code: "parser.oversized_jsonl_line_rescued" }),
+      ]),
     );
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("rescues oversized Claude JSONL lines by replacing inline image payloads", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-claude-oversized-"));
+    const dbPath = join(dir, "index.db");
+    const claudeFile = join(dir, ".claude", "projects", "oversized", "session.jsonl");
+    mkdirSync(dirname(claudeFile), { recursive: true });
+
+    const inlineImageBase64 = "a".repeat(9 * 1024 * 1024);
+    writeFileSync(
+      claudeFile,
+      `${JSON.stringify({
+        sessionId: "claude-session-oversized-inline-image",
+        type: "user",
+        cwd: "/workspace/claude",
+        gitBranch: "main",
+        timestamp: "2026-03-22T10:00:00Z",
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "Before image" },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: inlineImageBase64,
+              },
+            },
+            { type: "text", text: "After image text survives" },
+          ],
+        },
+      })}\n`,
+    );
+
+    const notices: string[] = [];
+    const result = runIncrementalIndexing(
+      {
+        dbPath,
+        discoveryConfig: {
+          ...createDiscoveryConfig(dir),
+          enabledProviders: ["claude"],
+        },
+      },
+      {
+        onNotice: (notice) => {
+          notices.push(notice.code);
+        },
+      },
+    );
+
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    const messages = db.prepare("SELECT content FROM messages ORDER BY created_at, id").all() as Array<{
+      content: string;
+    }>;
+    db.close();
+
+    expect(messages.map((message) => message.content)).toEqual(
+      expect.arrayContaining([
+        "Before image",
+        "After image text survives",
+        expect.stringContaining("[image omitted mime=image/png"),
+      ]),
+    );
+    expect(notices).toContain("parser.oversized_jsonl_line_rescued");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("rescues oversized Codex compacted lines into searchable snapshot messages", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-codex-compacted-"));
+    const dbPath = join(dir, "index.db");
+    const codexFile = join(dir, ".codex", "sessions", "2026", "03", "22", "compacted.jsonl");
+    mkdirSync(dirname(codexFile), { recursive: true });
+
+    const inlineImageBase64 = "a".repeat(9 * 1024 * 1024);
+    writeFileSync(
+      codexFile,
+      `${[
+        JSON.stringify({
+          timestamp: "2026-03-22T10:00:00Z",
+          type: "session_meta",
+          payload: {
+            id: "codex-session-compacted",
+            cwd: "/workspace/codex",
+            git: { branch: "main" },
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-03-22T10:00:01Z",
+          type: "compacted",
+          payload: {
+            replacement_history: [
+              {
+                type: "message",
+                role: "user",
+                content: [
+                  { type: "input_text", text: "Before compacted image" },
+                  { type: "input_image", image_url: `data:image/png;base64,${inlineImageBase64}` },
+                  { type: "input_text", text: "After compacted image" },
+                ],
+              },
+              {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "Looks good" }],
+              },
+            ],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const notices: string[] = [];
+    const result = runIncrementalIndexing(
+      {
+        dbPath,
+        discoveryConfig: {
+          ...createDiscoveryConfig(dir),
+          enabledProviders: ["codex"],
+        },
+      },
+      {
+        onNotice: (notice) => {
+          notices.push(notice.code);
+        },
+      },
+    );
+
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    const messages = db.prepare("SELECT category, content, created_at FROM messages ORDER BY created_at, id").all() as Array<{
+      category: string;
+      content: string;
+      created_at: string;
+    }>;
+    db.close();
+
+    expect(messages).toEqual([
+      expect.objectContaining({
+        category: "system",
+        content: expect.stringContaining("[Codex compacted history snapshot]"),
+      }),
+    ]);
+    expect(messages[0]?.content).toContain("Before compacted image");
+    expect(messages[0]?.content).toContain("After compacted image");
+    expect(messages[0]?.content).toContain("[image omitted mime=image/png");
+    expect(messages[0]?.content).toContain("Assistant:\nLooks good");
+    expect(notices).toContain("parser.oversized_jsonl_line_rescued");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("inserts tombstone messages for JSONL lines above the hard ceiling", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-jsonl-hard-omit-"));
+    const dbPath = join(dir, "index.db");
+    const codexFile = join(dir, ".codex", "sessions", "2026", "03", "22", "hard-omit.jsonl");
+    mkdirSync(dirname(codexFile), { recursive: true });
+    writeFileSync(
+      codexFile,
+      `${[
+        JSON.stringify({
+          timestamp: "2026-03-22T11:00:00Z",
+          type: "session_meta",
+          payload: {
+            id: "codex-session-hard-omit",
+            cwd: "/workspace/codex",
+            git: { branch: "main" },
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-03-22T11:00:01Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Before hard omit" }],
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-03-22T11:00:02Z",
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            output: "x".repeat(33 * 1024 * 1024),
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-03-22T11:00:03Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "After hard omit" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const notices: string[] = [];
+    const result = runIncrementalIndexing(
+      {
+        dbPath,
+        discoveryConfig: {
+          ...createDiscoveryConfig(dir),
+          enabledProviders: ["codex"],
+        },
+      },
+      {
+        onNotice: (notice) => {
+          notices.push(notice.code);
+        },
+      },
+    );
+
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    const messages = db.prepare("SELECT category, content FROM messages ORDER BY created_at, id").all() as Array<{
+      category: string;
+      content: string;
+    }>;
+    db.close();
+
+    expect(messages.map((message) => message.content)).toEqual([
+      "Before hard omit",
+      expect.stringContaining("Oversized JSONL line omitted."),
+      "After hard omit",
+    ]);
+    expect(messages[1]?.category).toBe("system");
+    expect(notices).toContain("parser.oversized_jsonl_line_omitted");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("inserts tombstone sessions for oversized materialized JSON files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-materialized-hard-omit-"));
+    const dbPath = join(dir, "index.db");
+    const geminiFile = join(dir, ".gemini", "tmp", "project", "chats", "session-large.json");
+    mkdirSync(dirname(geminiFile), { recursive: true });
+    writeFileSync(geminiFile, "x".repeat(33 * 1024 * 1024));
+
+    const notices: string[] = [];
+    const result = runIncrementalIndexing(
+      { dbPath },
+      {
+        discoverSessionFiles: () => [
+          {
+            provider: "gemini" as const,
+            projectPath: "/workspace/gemini",
+            projectName: "gemini",
+            sessionIdentity: "gemini:materialized-hard-omit:test",
+            sourceSessionId: "gemini-materialized-hard-omit",
+            filePath: geminiFile,
+            fileSize: Buffer.byteLength(readFileSync(geminiFile)),
+            fileMtimeMs: Date.now(),
+            metadata: {
+              includeInHistory: true,
+              isSubagent: false,
+              unresolvedProject: false,
+              gitBranch: null,
+              cwd: "/workspace/gemini",
+            },
+          },
+        ],
+        onNotice: (notice) => {
+          notices.push(notice.code);
+        },
+      },
+    );
+
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    const messages = db.prepare("SELECT category, content FROM messages ORDER BY created_at, id").all() as Array<{
+      category: string;
+      content: string;
+    }>;
+    db.close();
+
+    expect(messages).toEqual([
+      expect.objectContaining({
+        category: "system",
+        content: expect.stringContaining("Oversized transcript file omitted."),
+      }),
+    ]);
+    expect(notices).toContain("parser.oversized_source_file_omitted");
 
     rmSync(dir, { recursive: true, force: true });
   });

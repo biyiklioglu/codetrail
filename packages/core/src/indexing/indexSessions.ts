@@ -30,6 +30,7 @@ import {
   type ReadFileText,
   getProviderAdapter,
 } from "../providers";
+import { summarizeOversizedSanitization } from "../providers/oversized/shared";
 
 import { makeMessageId, makeProjectId, makeSessionId, makeToolCallId } from "./ids";
 import {
@@ -204,6 +205,16 @@ type StreamJsonlResult = {
   nextLineNumber: number;
   nextEventIndex: number;
 };
+type JsonlRescueNotice = {
+  severity: "info" | "warning";
+  message: string;
+  details?: Record<string, unknown>;
+};
+type OmittedJsonlLine = {
+  lineNumber: number;
+  lineBytes: number;
+  limitBytes: number;
+};
 
 export type IndexingFileIssue = {
   provider: Provider;
@@ -306,6 +317,8 @@ const MAX_DERIVED_DURATION_MS = 15 * 60 * 1000;
 const JSONL_READ_BUFFER_BYTES = 64 * 1024;
 const JSONL_FINGERPRINT_WINDOW_BYTES = 64 * 1024;
 const MAX_JSONL_LINE_BYTES = 8 * 1024 * 1024;
+const MAX_JSONL_RESCUE_LINE_BYTES = 32 * 1024 * 1024;
+const MAX_MATERIALIZED_SOURCE_BYTES = 32 * 1024 * 1024;
 const MAX_INDEXED_MESSAGE_CONTENT_BYTES = 256 * 1024;
 const MAX_INDEXED_FTS_CONTENT_BYTES = 32 * 1024;
 const MAX_TOOL_CALL_JSON_BYTES = 64 * 1024;
@@ -937,6 +950,10 @@ function indexMaterializedSessionFile(args: {
   onNotice: (notice: IndexingNotice) => void;
 }): ParserDiagnostic[] {
   const adapter = getProviderAdapter(args.discovered.provider);
+  if (args.discovered.fileSize > MAX_MATERIALIZED_SOURCE_BYTES) {
+    return persistOversizedMaterializedSessionFile(args);
+  }
+
   let source: ProviderReadSourceResult;
   try {
     const loaded = adapter.readSource(args.discovered.filePath, args.readFileText);
@@ -990,67 +1007,21 @@ function indexMaterializedSessionFile(args: {
     })),
   );
 
-  try {
-    const persist = args.db.transaction(() => {
-      deleteSessionDataForFilePath(args.db, args.discovered.filePath);
-      deleteSessionData(args.db, args.sessionDbId);
-      args.db
-        .prepare("DELETE FROM index_checkpoints WHERE file_path = ?")
-        .run(args.discovered.filePath);
-      args.statements.upsertProject.run(
-        projectId,
-        args.discovered.provider,
-        args.discovered.projectName,
-        args.discovered.projectPath,
-        args.nowIso,
-        args.nowIso,
-      );
-      args.statements.upsertSession.run(
-        args.sessionDbId,
-        projectId,
-        args.discovered.provider,
-        args.discovered.filePath,
-        sessionTitle || modelNames,
-        modelNames,
-        aggregate.startedAt ?? new Date(args.discovered.fileMtimeMs).toISOString(),
-        aggregate.endedAt ?? new Date(args.discovered.fileMtimeMs).toISOString(),
-        aggregate.durationMs,
-        sourceMeta.gitBranch ?? args.discovered.metadata.gitBranch,
-        sourceMeta.cwd ?? args.discovered.metadata.cwd,
-        aggregate.messageCount,
-        aggregate.tokenInputTotal,
-        aggregate.tokenOutputTotal,
-      );
-
-      for (const message of messagesWithTimestamps) {
-        insertIndexedMessage(args.statements, args.sessionDbId, message, {
-          provider: args.discovered.provider,
-          sessionId: args.discovered.sourceSessionId,
-          filePath: args.discovered.filePath,
-          onNotice: args.onNotice,
-        });
-      }
-
-      args.statements.upsertIndexedFile.run(
-        args.discovered.filePath,
-        args.discovered.provider,
-        args.discovered.projectPath,
-        args.discovered.sessionIdentity,
-        args.discovered.fileSize,
-        args.discovered.fileMtimeMs,
-        args.nowIso,
-      );
-    });
-    persist();
-  } catch (error) {
-    throw new IndexingFileProcessingError({
-      provider: args.discovered.provider,
-      sessionId: args.discovered.sourceSessionId,
-      filePath: args.discovered.filePath,
-      stage: "persist",
-      error,
-    });
-  }
+  persistMaterializedMessages({
+    db: args.db,
+    discovered: args.discovered,
+    sessionDbId: args.sessionDbId,
+    nowIso: args.nowIso,
+    statements: args.statements,
+    onNotice: args.onNotice,
+    projectId,
+    sessionTitle: sessionTitle || modelNames,
+    modelNames,
+    gitBranch: sourceMeta.gitBranch ?? args.discovered.metadata.gitBranch,
+    cwd: sourceMeta.cwd ?? args.discovered.metadata.cwd,
+    aggregate,
+    messages: messagesWithTimestamps,
+  });
 
   return parsed.diagnostics;
 }
@@ -1170,6 +1141,162 @@ function indexStreamedJsonlSessionFile(args: {
   return parserDiagnostics;
 }
 
+function persistOversizedMaterializedSessionFile(args: {
+  db: SqliteDatabase;
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  sessionDbId: string;
+  nowIso: string;
+  statements: IndexingStatements;
+  onNotice: (notice: IndexingNotice) => void;
+}): ParserDiagnostic[] {
+  const message = `Transcript file exceeded the ${formatByteLimit(
+    MAX_MATERIALIZED_SOURCE_BYTES,
+  )} hard ceiling and was omitted.`;
+  const tombstoneContent = [
+    "Oversized transcript file omitted.",
+    `bytes=${args.discovered.fileSize}`,
+    `hard_limit_bytes=${MAX_MATERIALIZED_SOURCE_BYTES}`,
+  ].join(" ");
+  const diagnostics: ParserDiagnostic[] = [
+    {
+      severity: "warning",
+      code: "parser.oversized_source_file_omitted",
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      eventIndex: null,
+      message,
+    },
+  ];
+  args.onNotice({
+    provider: args.discovered.provider,
+    sessionId: args.discovered.sourceSessionId,
+    filePath: args.discovered.filePath,
+    stage: "read",
+    severity: "warning",
+    code: "parser.oversized_source_file_omitted",
+    message,
+    details: {
+      fileBytes: args.discovered.fileSize,
+      hardLimitBytes: MAX_MATERIALIZED_SOURCE_BYTES,
+    },
+  });
+
+  persistMaterializedMessages({
+    db: args.db,
+    discovered: args.discovered,
+    sessionDbId: args.sessionDbId,
+    nowIso: args.nowIso,
+    statements: args.statements,
+    onNotice: args.onNotice,
+    projectId: makeProjectId(args.discovered.provider, args.discovered.projectPath),
+    sessionTitle: "Oversized transcript omitted",
+    modelNames: "",
+    gitBranch: args.discovered.metadata.gitBranch,
+    cwd: args.discovered.metadata.cwd,
+    aggregate: buildSessionAggregate([
+      {
+        ...buildSyntheticSystemMessage(
+          args.discovered.provider,
+          args.discovered.sourceSessionId,
+          "oversized-source-file",
+          tombstoneContent,
+          new Date(args.discovered.fileMtimeMs).toISOString(),
+        ),
+        id: makeMessageId(args.sessionDbId, "oversized-source-file"),
+      },
+    ]),
+    messages: [
+      buildSyntheticSystemMessage(
+        args.discovered.provider,
+        args.discovered.sourceSessionId,
+        "oversized-source-file",
+        tombstoneContent,
+        new Date(args.discovered.fileMtimeMs).toISOString(),
+      ),
+    ],
+  });
+
+  return diagnostics;
+}
+
+function persistMaterializedMessages(args: {
+  db: SqliteDatabase;
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  sessionDbId: string;
+  nowIso: string;
+  statements: IndexingStatements;
+  onNotice: (notice: IndexingNotice) => void;
+  projectId: string;
+  sessionTitle: string;
+  modelNames: string;
+  gitBranch: string | null;
+  cwd: string | null;
+  aggregate: ReturnType<typeof buildSessionAggregate>;
+  messages: IndexedMessage[];
+}): void {
+  try {
+    const persist = args.db.transaction(() => {
+      deleteSessionDataForFilePath(args.db, args.discovered.filePath);
+      deleteSessionData(args.db, args.sessionDbId);
+      args.db
+        .prepare("DELETE FROM index_checkpoints WHERE file_path = ?")
+        .run(args.discovered.filePath);
+      args.statements.upsertProject.run(
+        args.projectId,
+        args.discovered.provider,
+        args.discovered.projectName,
+        args.discovered.projectPath,
+        args.nowIso,
+        args.nowIso,
+      );
+      args.statements.upsertSession.run(
+        args.sessionDbId,
+        args.projectId,
+        args.discovered.provider,
+        args.discovered.filePath,
+        args.sessionTitle,
+        args.modelNames,
+        args.aggregate.startedAt ?? new Date(args.discovered.fileMtimeMs).toISOString(),
+        args.aggregate.endedAt ?? new Date(args.discovered.fileMtimeMs).toISOString(),
+        args.aggregate.durationMs,
+        args.gitBranch,
+        args.cwd,
+        args.aggregate.messageCount,
+        args.aggregate.tokenInputTotal,
+        args.aggregate.tokenOutputTotal,
+      );
+
+      for (const message of args.messages) {
+        insertIndexedMessage(args.statements, args.sessionDbId, message, {
+          provider: args.discovered.provider,
+          sessionId: args.discovered.sourceSessionId,
+          filePath: args.discovered.filePath,
+          onNotice: args.onNotice,
+        });
+      }
+
+      args.statements.upsertIndexedFile.run(
+        args.discovered.filePath,
+        args.discovered.provider,
+        args.discovered.projectPath,
+        args.discovered.sessionIdentity,
+        args.discovered.fileSize,
+        args.discovered.fileMtimeMs,
+        args.nowIso,
+      );
+    });
+    persist();
+  } catch (error) {
+    throw new IndexingFileProcessingError({
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      filePath: args.discovered.filePath,
+      stage: "persist",
+      error,
+    });
+  }
+}
+
 function prepareStreamedSessionPersistence(
   args: Pick<
     Parameters<typeof indexStreamedJsonlSessionFile>[0],
@@ -1230,11 +1357,25 @@ function streamAndPersistJsonlEvents(args: {
   let emittedEvents = 0;
   try {
     const streamResult = streamJsonlEvents(args.discovered.filePath, {
+      adapter: args.adapter,
       startOffsetBytes: args.resumeCheckpoint?.lastOffsetBytes ?? 0,
       startLineNumber: args.resumeCheckpoint?.lastLineNumber ?? 0,
       startEventIndex: args.resumeCheckpoint?.lastEventIndex ?? 0,
-      onEvent: (event, eventIndex) => {
+      onEvent: (event, eventIndex, rescueNotice) => {
         emittedEvents += 1;
+        if (rescueNotice) {
+          recordRescuedOversizedJsonlLine(args.parserDiagnostics, args.discovered, rescueNotice);
+          args.onNotice({
+            provider: args.discovered.provider,
+            sessionId: args.discovered.sourceSessionId,
+            filePath: args.discovered.filePath,
+            stage: "parse",
+            severity: rescueNotice.severity,
+            code: "parser.oversized_jsonl_line_rescued",
+            message: rescueNotice.message,
+            ...(rescueNotice.details ? { details: rescueNotice.details } : {}),
+          });
+        }
         args.adapter.updateSourceMetadataFromEvent(event, args.sourceMetaAccumulator);
         sequence = parseAndPersistStreamEvent({
           discovered: args.discovered,
@@ -1247,6 +1388,29 @@ function streamAndPersistJsonlEvents(args: {
           statements: args.statements,
           onNotice: args.onNotice,
         });
+      },
+      onOmittedLine: (omitted, eventIndex) => {
+        emittedEvents += 1;
+        persistStreamMessage({
+          discovered: args.discovered,
+          processingState: args.processingState,
+          sessionDbId: args.sessionDbId,
+          statements: args.statements,
+          onNotice: args.onNotice,
+          message: buildOversizedJsonlOmissionMessage(
+            args.discovered,
+            args.processingState,
+            omitted,
+            sequence,
+          ),
+        });
+        sequence += 1;
+        recordOversizedJsonlLineOmitted(
+          args.parserDiagnostics,
+          args.discovered,
+          omitted,
+          args.onNotice,
+        );
       },
       onInvalidLine: (lineNumber, error) => {
         recordInvalidJsonlLine(
@@ -1308,26 +1472,44 @@ function parseAndPersistStreamEvent(args: {
     if (!message) {
       continue;
     }
-    const normalizedMessage = normalizeIndexedMessage(args.processingState, message);
-    try {
-      insertIndexedMessage(args.statements, args.sessionDbId, normalizedMessage, {
-        provider: args.discovered.provider,
-        sessionId: args.discovered.sourceSessionId,
-        filePath: args.discovered.filePath,
-        onNotice: args.onNotice,
-      });
-    } catch (error) {
-      throw new IndexingFileProcessingError({
-        provider: args.discovered.provider,
-        sessionId: args.discovered.sourceSessionId,
-        filePath: args.discovered.filePath,
-        stage: "persist",
-        error,
-      });
-    }
+    persistStreamMessage({
+      discovered: args.discovered,
+      processingState: args.processingState,
+      sessionDbId: args.sessionDbId,
+      statements: args.statements,
+      onNotice: args.onNotice,
+      message,
+    });
   }
 
   return parsedEvent.nextSequence;
+}
+
+function persistStreamMessage(args: {
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  processingState: MessageProcessingState;
+  sessionDbId: string;
+  statements: IndexingStatements;
+  onNotice: (notice: IndexingNotice) => void;
+  message: IndexedMessage;
+}): void {
+  const normalizedMessage = normalizeIndexedMessage(args.processingState, args.message);
+  try {
+    insertIndexedMessage(args.statements, args.sessionDbId, normalizedMessage, {
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      filePath: args.discovered.filePath,
+      onNotice: args.onNotice,
+    });
+  } catch (error) {
+    throw new IndexingFileProcessingError({
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      filePath: args.discovered.filePath,
+      stage: "persist",
+      error,
+    });
+  }
 }
 
 function recordInvalidJsonlLine(
@@ -1356,6 +1538,82 @@ function recordInvalidJsonlLine(
     message: noticeMessage,
     details: { lineNumber },
   });
+}
+
+function recordOversizedJsonlLineOmitted(
+  parserDiagnostics: ParserDiagnostic[],
+  discovered: ReturnType<typeof discoverSessionFiles>[number],
+  omitted: OmittedJsonlLine,
+  onNotice: (notice: IndexingNotice) => void,
+): void {
+  const message =
+    `JSONL line ${omitted.lineNumber} exceeded the ${formatByteLimit(omitted.limitBytes)} ` +
+    `rescue ceiling and was omitted.`;
+  parserDiagnostics.push({
+    severity: "warning",
+    code: "parser.oversized_jsonl_line_omitted",
+    provider: discovered.provider,
+    sessionId: discovered.sourceSessionId,
+    eventIndex: omitted.lineNumber - 1,
+    message,
+  });
+  onNotice({
+    provider: discovered.provider,
+    sessionId: discovered.sourceSessionId,
+    filePath: discovered.filePath,
+    stage: "parse",
+    severity: "warning",
+    code: "parser.oversized_jsonl_line_omitted",
+    message,
+    details: {
+      lineNumber: omitted.lineNumber,
+      lineBytes: omitted.lineBytes,
+      rescueLimitBytes: omitted.limitBytes,
+    },
+  });
+}
+
+function recordRescuedOversizedJsonlLine(
+  parserDiagnostics: ParserDiagnostic[],
+  discovered: ReturnType<typeof discoverSessionFiles>[number],
+  rescueNotice: JsonlRescueNotice,
+): void {
+  const lineNumber =
+    typeof rescueNotice.details?.lineNumber === "number" ? rescueNotice.details.lineNumber : null;
+  parserDiagnostics.push({
+    severity: "warning",
+    code: "parser.oversized_jsonl_line_rescued",
+    provider: discovered.provider,
+    sessionId: discovered.sourceSessionId,
+    eventIndex: lineNumber === null ? null : lineNumber - 1,
+    message: rescueNotice.message,
+  });
+}
+
+function buildOversizedJsonlOmissionMessage(
+  discovered: ReturnType<typeof discoverSessionFiles>[number],
+  processingState: MessageProcessingState,
+  omitted: OmittedJsonlLine,
+  sequence: number,
+): IndexedMessage {
+  // Leave createdAt unresolved when there is no reliable prior event timestamp. The shared
+  // normalizer will fall back to the file mtime in that case.
+  const createdAt =
+    Number.isFinite(processingState.previousTimestampMs) && processingState.previousTimestampMs > 0
+      ? new Date(processingState.previousTimestampMs + 1000).toISOString()
+      : "";
+  return buildSyntheticSystemMessage(
+    discovered.provider,
+    discovered.sourceSessionId,
+    `oversized-jsonl-line-${omitted.lineNumber}-${sequence}`,
+    [
+      "Oversized JSONL line omitted.",
+      `line=${omitted.lineNumber}`,
+      `bytes=${omitted.lineBytes}`,
+      `rescue_limit_bytes=${omitted.limitBytes}`,
+    ].join(" "),
+    createdAt,
+  );
 }
 
 function persistStreamCheckpoint(args: {
@@ -1773,10 +2031,12 @@ function findUtf8TailStart(value: string, byteLimit: number): number {
 function streamJsonlEvents(
   filePath: string,
   callbacks: {
+    adapter: ReturnType<typeof getProviderAdapter>;
     startOffsetBytes?: number;
     startLineNumber?: number;
     startEventIndex?: number;
-    onEvent: (event: unknown, eventIndex: number) => void;
+    onEvent: (event: unknown, eventIndex: number, rescueNotice: JsonlRescueNotice | null) => void;
+    onOmittedLine: (omitted: OmittedJsonlLine, eventIndex: number) => void;
     onInvalidLine: (lineNumber: number, error: unknown) => void;
   },
 ): StreamJsonlResult {
@@ -1784,7 +2044,7 @@ function streamJsonlEvents(
   let fd: number | null = null;
   let lineChunks: Buffer[] = [];
   let pendingLineBytes = 0;
-  let discardingOversizedLine = false;
+  let discardingHardOmittedLine = false;
   let consumedOffset = callbacks.startOffsetBytes ?? 0;
   let readOffset = callbacks.startOffsetBytes ?? 0;
   let lineNumber = callbacks.startLineNumber ?? 0;
@@ -1793,19 +2053,24 @@ function streamJsonlEvents(
   try {
     fd = openSync(filePath, "r");
     const flushLine = (): void => {
-      if (discardingOversizedLine) {
-        callbacks.onInvalidLine(
-          lineNumber + 1,
-          new Error(`JSONL line exceeded ${MAX_JSONL_LINE_BYTES} bytes and was skipped.`),
+      if (discardingHardOmittedLine) {
+        callbacks.onOmittedLine(
+          {
+            lineNumber: lineNumber + 1,
+            lineBytes: pendingLineBytes,
+            limitBytes: MAX_JSONL_RESCUE_LINE_BYTES,
+          },
+          eventIndex,
         );
+        eventIndex += 1;
       } else if (lineChunks.length > 0) {
         const line = Buffer.concat(lineChunks).toString("utf8");
-        eventIndex = handleJsonlLine(line, lineNumber, eventIndex, callbacks);
+        eventIndex = handleJsonlLine(line, pendingLineBytes, lineNumber, eventIndex, callbacks);
       }
 
       lineChunks = [];
       pendingLineBytes = 0;
-      discardingOversizedLine = false;
+      discardingHardOmittedLine = false;
       lineNumber += 1;
     };
 
@@ -1820,10 +2085,10 @@ function streamJsonlEvents(
         const newlineIndex = buffer.indexOf(0x0a, cursor);
         const segmentEnd = newlineIndex >= 0 ? newlineIndex : bytesRead;
         const segment = buffer.subarray(cursor, segmentEnd);
-        if (!discardingOversizedLine) {
+        if (!discardingHardOmittedLine) {
           const nextLineBytes = pendingLineBytes + segment.length;
-          if (nextLineBytes > MAX_JSONL_LINE_BYTES) {
-            discardingOversizedLine = true;
+          if (nextLineBytes > MAX_JSONL_RESCUE_LINE_BYTES) {
+            discardingHardOmittedLine = true;
             lineChunks = [];
           } else if (segment.length > 0) {
             lineChunks.push(Buffer.from(segment));
@@ -1841,10 +2106,12 @@ function streamJsonlEvents(
         cursor = bytesRead;
       }
     }
-    if (pendingLineBytes > 0 || lineChunks.length > 0 || discardingOversizedLine) {
+    if (pendingLineBytes > 0 || lineChunks.length > 0 || discardingHardOmittedLine) {
       const finalizedTrailingLine = tryConsumeTrailingJsonlLine({
+        adapter: callbacks.adapter,
         lineChunks,
-        discardingOversizedLine,
+        discardingHardOmittedLine,
+        pendingLineBytes,
         lineNumber,
         eventIndex,
         callbacks,
@@ -1869,16 +2136,19 @@ function streamJsonlEvents(
 }
 
 function tryConsumeTrailingJsonlLine(args: {
+  adapter: ReturnType<typeof getProviderAdapter>;
   lineChunks: Buffer[];
-  discardingOversizedLine: boolean;
+  discardingHardOmittedLine: boolean;
+  pendingLineBytes: number;
   lineNumber: number;
   eventIndex: number;
   callbacks: {
-    onEvent: (event: unknown, eventIndex: number) => void;
+    onEvent: (event: unknown, eventIndex: number, rescueNotice: JsonlRescueNotice | null) => void;
+    onOmittedLine: (omitted: OmittedJsonlLine, eventIndex: number) => void;
     onInvalidLine: (lineNumber: number, error: unknown) => void;
   };
 }): { nextEventIndex: number } | null {
-  if (args.discardingOversizedLine) {
+  if (args.discardingHardOmittedLine) {
     // Leave the checkpoint at the start of the line until a newline arrives so we do not resume in
     // the middle of an oversized JSON object and permanently desynchronize the stream.
     return null;
@@ -1901,16 +2171,29 @@ function tryConsumeTrailingJsonlLine(args: {
     // checkpoint before the partial line so the next append can complete it.
     return null;
   }
-  args.callbacks.onEvent(event, args.eventIndex);
-  return { nextEventIndex: args.eventIndex + 1 };
+
+  return {
+    nextEventIndex: handleJsonlEvent(
+      event,
+      args.pendingLineBytes,
+      args.lineNumber,
+      args.eventIndex,
+      {
+        adapter: args.adapter,
+        onEvent: args.callbacks.onEvent,
+      },
+    ),
+  };
 }
 
 function handleJsonlLine(
   line: string,
+  lineBytes: number,
   lineNumber: number,
   eventIndex: number,
   callbacks: {
-    onEvent: (event: unknown, eventIndex: number) => void;
+    adapter: ReturnType<typeof getProviderAdapter>;
+    onEvent: (event: unknown, eventIndex: number, rescueNotice: JsonlRescueNotice | null) => void;
     onInvalidLine: (lineNumber: number, error: unknown) => void;
   },
 ): number {
@@ -1918,6 +2201,7 @@ function handleJsonlLine(
   if (trimmed.length === 0) {
     return eventIndex;
   }
+
   let event: unknown;
   try {
     event = JSON.parse(trimmed) as unknown;
@@ -1925,7 +2209,45 @@ function handleJsonlLine(
     callbacks.onInvalidLine(lineNumber + 1, error);
     return eventIndex;
   }
-  callbacks.onEvent(event, eventIndex);
+
+  return handleJsonlEvent(event, lineBytes, lineNumber, eventIndex, callbacks);
+}
+
+function handleJsonlEvent(
+  event: unknown,
+  lineBytes: number,
+  lineNumber: number,
+  eventIndex: number,
+  callbacks: {
+    adapter: ReturnType<typeof getProviderAdapter>;
+    onEvent: (event: unknown, eventIndex: number, rescueNotice: JsonlRescueNotice | null) => void;
+  },
+): number {
+  let rescueNotice: JsonlRescueNotice | null = null;
+  if (lineBytes > MAX_JSONL_LINE_BYTES) {
+    const sanitized = callbacks.adapter.sanitizeOversizedJsonlEvent?.(event, {
+      lineBytes,
+      primaryByteLimit: MAX_JSONL_LINE_BYTES,
+      rescueByteLimit: MAX_JSONL_RESCUE_LINE_BYTES,
+    });
+    event = sanitized?.event ?? event;
+    const sanitizationDetails = summarizeOversizedSanitization(sanitized?.sanitization ?? null);
+    rescueNotice = {
+      severity: sanitized?.sanitization ? "warning" : "info",
+      message: sanitized?.sanitization
+        ? `Rescued oversized JSONL line ${lineNumber + 1} and omitted inline media payloads.`
+        : `Rescued oversized JSONL line ${lineNumber + 1} within the hard ceiling.`,
+      details: {
+        lineNumber: lineNumber + 1,
+        lineBytes,
+        primaryLimitBytes: MAX_JSONL_LINE_BYTES,
+        rescueLimitBytes: MAX_JSONL_RESCUE_LINE_BYTES,
+        ...(sanitizationDetails ?? {}),
+      },
+    };
+  }
+
+  callbacks.onEvent(event, eventIndex, rescueNotice);
   return eventIndex + 1;
 }
 
@@ -2067,6 +2389,35 @@ function defaultOnNotice(notice: IndexingNotice): void {
   method(
     `[codetrail] indexing ${notice.severity} ${notice.code} ${notice.filePath}: ${notice.message}${details}`,
   );
+}
+
+function buildSyntheticSystemMessage(
+  provider: Provider,
+  sessionId: string,
+  id: string,
+  content: string,
+  createdAt = "",
+): IndexedMessage {
+  return {
+    id,
+    sessionId,
+    provider,
+    category: "system",
+    content,
+    createdAt,
+    tokenInput: null,
+    tokenOutput: null,
+    operationDurationMs: null,
+    operationDurationSource: null,
+    operationDurationConfidence: null,
+  };
+}
+
+function formatByteLimit(bytes: number): string {
+  if (bytes % (1024 * 1024) === 0) {
+    return `${bytes / (1024 * 1024)} MiB`;
+  }
+  return `${bytes} bytes`;
 }
 
 function shouldResumeFromCheckpoint(args: {

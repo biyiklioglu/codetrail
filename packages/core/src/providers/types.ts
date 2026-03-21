@@ -20,6 +20,24 @@ export type ProviderReadSourceResult = {
   payload: ProviderSource;
 };
 
+export type ProviderOversizedJsonlEventContext = {
+  lineBytes: number;
+  primaryByteLimit: number;
+  rescueByteLimit: number;
+};
+
+export type ProviderOversizedJsonlSanitization = {
+  replacedFieldCount: number;
+  omittedBytes: number;
+  mediaKinds: string[];
+  transformedShape: boolean;
+};
+
+export type ProviderOversizedJsonlEventResult = {
+  event: unknown;
+  sanitization: ProviderOversizedJsonlSanitization | null;
+};
+
 export type ProviderSourceMetadata = {
   models: string[];
   gitBranch: string | null;
@@ -49,6 +67,10 @@ export type ProviderAdapter = ProviderMetadata & {
     dependencies: ResolvedDiscoveryDependencies,
   ) => DiscoveredSessionFile | null;
   readSource: (filePath: string, readFileText: ReadFileText) => ProviderReadSourceResult | null;
+  sanitizeOversizedJsonlEvent?: (
+    event: unknown,
+    context: ProviderOversizedJsonlEventContext,
+  ) => ProviderOversizedJsonlEventResult;
   parsePayload: (args: ParseProviderPayloadArgs) => ParsedProviderMessage[];
   parseEvent: (args: ParseProviderEventArgs) => ParseProviderEventResult;
   extractSourceMetadata: (payload: ProviderSource) => ProviderSourceMetadata;

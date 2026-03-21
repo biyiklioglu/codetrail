@@ -2,6 +2,7 @@ import { PROVIDER_METADATA } from "../../contracts/providerMetadata";
 import { discoverCodexFiles, discoverSingleCodexFile } from "../../discovery/providers/codex";
 import { asArray, asRecord, readString } from "../../parsing/helpers";
 import { PROVIDER_EVENT_PARSERS, PROVIDER_PAYLOAD_PARSERS } from "../../parsing/providerParsers";
+import { sanitizeCodexOversizedJsonlEvent } from "../oversized/codex";
 
 import type { ProviderAdapter } from "../types";
 import {
@@ -17,6 +18,7 @@ export const codexAdapter: ProviderAdapter = {
   discoverAll: discoverCodexFiles,
   discoverOne: discoverSingleCodexFile,
   readSource: readJsonlStreamSource,
+  sanitizeOversizedJsonlEvent: sanitizeCodexOversizedJsonlEvent,
   parsePayload: PROVIDER_PAYLOAD_PARSERS.codex,
   parseEvent: PROVIDER_EVENT_PARSERS.codex,
   extractSourceMetadata: (payload) => {

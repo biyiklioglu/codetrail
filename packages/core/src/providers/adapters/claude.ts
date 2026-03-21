@@ -2,6 +2,7 @@ import { PROVIDER_METADATA } from "../../contracts/providerMetadata";
 import { discoverClaudeFiles, discoverSingleClaudeFile } from "../../discovery/providers/claude";
 import { asArray, asRecord, readString } from "../../parsing/helpers";
 import { PROVIDER_EVENT_PARSERS, PROVIDER_PAYLOAD_PARSERS } from "../../parsing/providerParsers";
+import { sanitizeClaudeOversizedJsonlEvent } from "../oversized/claude";
 
 import type { ProviderAdapter } from "../types";
 import { defaultTimestampNormalization, readJsonlStreamSource, sortModels } from "./shared";
@@ -36,6 +37,7 @@ export const claudeAdapter: ProviderAdapter = {
   discoverAll: discoverClaudeFiles,
   discoverOne: discoverSingleClaudeFile,
   readSource: readJsonlStreamSource,
+  sanitizeOversizedJsonlEvent: sanitizeClaudeOversizedJsonlEvent,
   parsePayload: PROVIDER_PAYLOAD_PARSERS.claude,
   parseEvent: PROVIDER_EVENT_PARSERS.claude,
   extractSourceMetadata: (payload) => extractClaudeSourceMetadata(payload as unknown[]),

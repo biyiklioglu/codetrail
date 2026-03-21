@@ -72,7 +72,7 @@ export function defaultTimestampNormalization<T extends { createdAt: string }>(
   if (Number.isFinite(createdAtMs) && createdAtMs > 0) {
     return {
       message,
-      previousTimestampMs: context.previousTimestampMs,
+      previousTimestampMs: createdAtMs,
     };
   }
 

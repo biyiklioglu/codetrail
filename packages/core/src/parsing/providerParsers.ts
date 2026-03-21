@@ -4,6 +4,10 @@ import type {
   OperationDurationSource,
   Provider,
 } from "../contracts/canonical";
+import {
+  extractCodetrailCompactedSnapshotText,
+  isCodetrailCompactedSnapshotEvent,
+} from "../providers/oversized/codex";
 import { isLikelyEditOperation } from "../tooling/editOperations";
 
 import type { ParserDiagnostic } from "./contracts";
@@ -197,6 +201,27 @@ function parseCodexEvent(args: ParseProviderEventArgs): ParseProviderEventResult
         event,
         diagnostics,
         sequence,
+      }),
+    };
+  }
+
+  if (isCodetrailCompactedSnapshotEvent(eventRecord)) {
+    const content = extractCodetrailCompactedSnapshotText(eventRecord);
+    if (content.length === 0) {
+      return { messages: output, nextSequence: sequence };
+    }
+
+    return {
+      messages: output,
+      nextSequence: pushSplitMessages({
+        output,
+        sessionId,
+        sequence,
+        baseId: null,
+        createdAt: extractEventTimestamp(eventRecord),
+        tokenUsage: { input: null, output: null },
+        segments: [{ category: "system", content }],
+        fallbackRaw: event,
       }),
     };
   }
