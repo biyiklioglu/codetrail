@@ -7,28 +7,31 @@ import { estimateDecodedBase64Bytes } from "./shared";
 describe("oversized transcript sanitizers", () => {
   it("replaces Claude inline image blocks with text placeholders", () => {
     const base64 = Buffer.from("hello-image").toString("base64");
-    const result = sanitizeClaudeOversizedJsonlEvent({
-      type: "user",
-      message: {
-        role: "user",
-        content: [
-          { type: "text", text: "before" },
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: "image/png",
-              data: base64,
+    const result = sanitizeClaudeOversizedJsonlEvent(
+      {
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "before" },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: base64,
+              },
             },
-          },
-          { type: "text", text: "after" },
-        ],
+            { type: "text", text: "after" },
+          ],
+        },
       },
-    }, {
-      lineBytes: 9,
-      primaryByteLimit: 8,
-      rescueByteLimit: 32,
-    });
+      {
+        lineBytes: 9,
+        primaryByteLimit: 8,
+        rescueByteLimit: 32,
+      },
+    );
 
     expect(result.sanitization?.replacedFieldCount).toBe(1);
     expect(result.sanitization?.omittedBytes).toBe(Buffer.byteLength("hello-image"));
@@ -70,32 +73,35 @@ describe("oversized transcript sanitizers", () => {
 
   it("turns rescued Codex compacted history into a searchable synthetic snapshot", () => {
     const base64 = Buffer.from("codex-image").toString("base64");
-    const result = sanitizeCodexOversizedJsonlEvent({
-      timestamp: "2026-03-21T10:00:00Z",
-      type: "compacted",
-      payload: {
-        replacement_history: [
-          {
-            type: "message",
-            role: "user",
-            content: [
-              { type: "input_text", text: "before" },
-              { type: "input_image", image_url: `data:image/png;base64,${base64}` },
-              { type: "input_text", text: "after" },
-            ],
-          },
-          {
-            type: "message",
-            role: "assistant",
-            content: [{ type: "output_text", text: "done" }],
-          },
-        ],
+    const result = sanitizeCodexOversizedJsonlEvent(
+      {
+        timestamp: "2026-03-21T10:00:00Z",
+        type: "compacted",
+        payload: {
+          replacement_history: [
+            {
+              type: "message",
+              role: "user",
+              content: [
+                { type: "input_text", text: "before" },
+                { type: "input_image", image_url: `data:image/png;base64,${base64}` },
+                { type: "input_text", text: "after" },
+              ],
+            },
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "done" }],
+            },
+          ],
+        },
       },
-    }, {
-      lineBytes: 9,
-      primaryByteLimit: 8,
-      rescueByteLimit: 32,
-    });
+      {
+        lineBytes: 9,
+        primaryByteLimit: 8,
+        rescueByteLimit: 32,
+      },
+    );
 
     expect(result.sanitization?.replacedFieldCount).toBe(1);
     expect(result.sanitization?.transformedShape).toBe(true);

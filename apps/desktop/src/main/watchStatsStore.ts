@@ -1,12 +1,6 @@
 import type { IpcResponse } from "@codetrail/core";
 
-export type WatchDiagnosticsSource =
-  | "startup_incremental"
-  | "manual_incremental"
-  | "manual_force_reindex"
-  | "watch_targeted"
-  | "watch_fallback_incremental"
-  | "watch_initial_scan";
+import type { IndexingJobSource as WatchDiagnosticsSource } from "./indexingJobSource";
 
 type DiagnosticsBucket = IpcResponse<"watcher:getStats">["jobs"]["manualIncremental"];
 type DiagnosticsSnapshot = IpcResponse<"watcher:getStats">;

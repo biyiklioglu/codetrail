@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   getAdjacentItemId,
-  getAdjacentVisibleProjectId,
   getAdjacentVisibleProjectTarget,
   getEdgeItemId,
   getFirstVisibleMessageId,
@@ -78,36 +77,6 @@ describe("historyNavigation", () => {
     });
 
     expect(getFirstVisibleMessageId(container)).toBe("m1");
-  });
-
-  it("navigates projects using the rendered visible DOM order", () => {
-    const container = document.createElement("div");
-    const first = document.createElement("button");
-    first.dataset.projectNavKind = "project";
-    first.dataset.projectNavId = "project_2";
-    const second = document.createElement("button");
-    second.dataset.projectNavKind = "project";
-    second.dataset.projectNavId = "project_1";
-    const third = document.createElement("button");
-    third.dataset.projectNavKind = "project";
-    third.dataset.projectNavId = "project_3";
-    container.append(first, second, third);
-
-    expect(getAdjacentVisibleProjectId(container, "project_2", "next")).toBe("project_1");
-    expect(getAdjacentVisibleProjectId(container, "project_3", "previous")).toBe("project_1");
-  });
-
-  it("returns the first visible project when nothing is selected", () => {
-    const container = document.createElement("div");
-    const first = document.createElement("button");
-    first.dataset.projectNavKind = "project";
-    first.dataset.projectNavId = "project_5";
-    const second = document.createElement("button");
-    second.dataset.projectNavKind = "project";
-    second.dataset.projectNavId = "project_8";
-    container.append(first, second);
-
-    expect(getAdjacentVisibleProjectId(container, "", "next")).toBe("project_5");
   });
 
   it("treats a collapsed folder row as the next selectable visible target", () => {

@@ -55,7 +55,7 @@ export type ProviderTimestampNormalizationResult<T extends { createdAt: string }
   previousTimestampMs: number;
 };
 
-export type ProviderAdapter = ProviderMetadata & {
+type CommonProviderAdapter = ProviderMetadata & {
   supportsIncrementalCheckpoints: boolean;
   discoverAll: (
     config: ResolvedDiscoveryConfig,
@@ -66,7 +66,6 @@ export type ProviderAdapter = ProviderMetadata & {
     config: ResolvedDiscoveryConfig,
     dependencies: ResolvedDiscoveryDependencies,
   ) => DiscoveredSessionFile | null;
-  readSource: (filePath: string, readFileText: ReadFileText) => ProviderReadSourceResult | null;
   sanitizeOversizedJsonlEvent?: (
     event: unknown,
     context: ProviderOversizedJsonlEventContext,
@@ -74,7 +73,7 @@ export type ProviderAdapter = ProviderMetadata & {
   parsePayload: (args: ParseProviderPayloadArgs) => ParsedProviderMessage[];
   parseEvent: (args: ParseProviderEventArgs) => ParseProviderEventResult;
   extractSourceMetadata: (payload: ProviderSource) => ProviderSourceMetadata;
-  updateSourceMetadataFromEvent: (
+  updateSourceMetadataFromEvent?: (
     event: unknown,
     accumulator: ProviderSourceMetadataAccumulator,
   ) => void;
@@ -83,3 +82,14 @@ export type ProviderAdapter = ProviderMetadata & {
     context: { fileMtimeMs: number; previousTimestampMs: number },
   ) => ProviderTimestampNormalizationResult<T>;
 };
+
+export type JsonlStreamProviderAdapter = CommonProviderAdapter & {
+  sourceFormat: "jsonl_stream";
+};
+
+export type MaterializedJsonProviderAdapter = CommonProviderAdapter & {
+  sourceFormat: "materialized_json";
+  readSource: (filePath: string, readFileText: ReadFileText) => ProviderReadSourceResult | null;
+};
+
+export type ProviderAdapter = JsonlStreamProviderAdapter | MaterializedJsonProviderAdapter;

@@ -5,6 +5,7 @@ import { type BrowserWindow, app, dialog } from "electron";
 
 import type { IpcRequest, IpcResponse, MessageCategory } from "@codetrail/core/browser";
 
+import type { HistoryExportPhase, HistoryExportProgressPayload } from "../shared/historyExport";
 import {
   asNonEmptyString,
   asObject,
@@ -13,8 +14,7 @@ import {
   parseToolEditPayload,
   parseToolInvocationPayload,
   tryParseJsonRecord,
-} from "../renderer/components/messages/toolParsing";
-import type { HistoryExportPhase, HistoryExportProgressPayload } from "../shared/historyExport";
+} from "../shared/toolParsing";
 import type { QueryService } from "./data/queryService";
 
 const EXPORT_FETCH_PAGE_SIZE = 500;
@@ -107,62 +107,11 @@ export function collectHistoryExportPayload(
 ): HistoryExportPayload {
   const query = request.query.trim();
   const messages = collectExportMessages(queryService, request);
-  return {
-    exportedAt: new Date().toISOString(),
-    viewLabel: formatViewLabel(request.mode),
-    scopeLabel: request.scope === "all_pages" ? "All pages" : "Current page",
-    sortLabel: formatSortLabel(request.sortDirection),
-    categoryLabel: formatCategoryLabel(request.categories),
-    query,
-    messageCount: messages.length,
-    messages,
-  };
+  return buildHistoryExportPayload(request, query, messages);
 }
 
 export function buildHistoryExportMarkdown(payload: HistoryExportPayload): string {
-  const lines = [
-    "# Messages Export",
-    "",
-    `- Exported at: ${formatMarkdownInlineValue(payload.exportedAt)}`,
-    `- View: ${formatMarkdownInlineValue(payload.viewLabel)}`,
-    `- Scope: ${formatMarkdownInlineValue(payload.scopeLabel)}`,
-    `- Sort: ${formatMarkdownInlineValue(payload.sortLabel)}`,
-    `- Categories: ${formatMarkdownInlineValue(payload.categoryLabel)}`,
-    `- Messages: ${payload.messageCount}`,
-  ];
-
-  if (payload.query.length > 0) {
-    lines.push(`- Query: ${formatMarkdownInlineValue(payload.query)}`);
-  }
-
-  lines.push("");
-
-  if (payload.messages.length === 0) {
-    lines.push("_No messages matched the selected export scope._", "");
-    return lines.join("\n");
-  }
-
-  for (const [index, message] of payload.messages.entries()) {
-    if (index > 0) {
-      lines.push("---", "");
-    }
-
-    lines.push(`## ${index + 1}. ${message.label}`);
-    lines.push("");
-    lines.push(`- Time: ${formatMarkdownInlineValue(message.createdAt)}`);
-    if (message.operationDurationMs !== null) {
-      lines.push(
-        `- Duration: ${formatMarkdownInlineValue(formatDuration(message.operationDurationMs))}`,
-      );
-    }
-    if (message.isOrphaned) {
-      lines.push("- Orphaned bookmark: Yes");
-    }
-    lines.push("");
-    lines.push(...buildMarkdownSections(message.sections));
-  }
-
-  return lines.join("\n");
+  return buildHistoryExportMarkdownLines(payload).join("\n");
 }
 
 async function collectHistoryExportPayloadWithProgress(
@@ -172,16 +121,7 @@ async function collectHistoryExportPayloadWithProgress(
 ): Promise<HistoryExportPayload> {
   const query = request.query.trim();
   const messages = await collectExportMessagesWithProgress(queryService, request, onProgress);
-  return {
-    exportedAt: new Date().toISOString(),
-    viewLabel: formatViewLabel(request.mode),
-    scopeLabel: request.scope === "all_pages" ? "All pages" : "Current page",
-    sortLabel: formatSortLabel(request.sortDirection),
-    categoryLabel: formatCategoryLabel(request.categories),
-    query,
-    messageCount: messages.length,
-    messages,
-  };
+  return buildHistoryExportPayload(request, query, messages);
 }
 
 async function buildHistoryExportMarkdownWithProgress(
@@ -190,62 +130,12 @@ async function buildHistoryExportMarkdownWithProgress(
   onProgress?: HistoryExportProgressCallback,
 ): Promise<string> {
   await emitHistoryExportProgress(exportId, onProgress, "formatting", 86, "Formatting Markdown…");
-
-  const lines = [
-    "# Messages Export",
-    "",
-    `- Exported at: ${formatMarkdownInlineValue(payload.exportedAt)}`,
-    `- View: ${formatMarkdownInlineValue(payload.viewLabel)}`,
-    `- Scope: ${formatMarkdownInlineValue(payload.scopeLabel)}`,
-    `- Sort: ${formatMarkdownInlineValue(payload.sortLabel)}`,
-    `- Categories: ${formatMarkdownInlineValue(payload.categoryLabel)}`,
-    `- Messages: ${payload.messageCount}`,
-  ];
-
-  if (payload.query.length > 0) {
-    lines.push(`- Query: ${formatMarkdownInlineValue(payload.query)}`);
-  }
-
-  lines.push("");
-
-  if (payload.messages.length === 0) {
-    lines.push("_No messages matched the selected export scope._", "");
-    return lines.join("\n");
-  }
-
-  const totalMessages = payload.messages.length;
-  for (const [index, message] of payload.messages.entries()) {
-    if (index > 0) {
-      lines.push("---", "");
-    }
-
-    lines.push(`## ${index + 1}. ${message.label}`);
-    lines.push("");
-    lines.push(`- Time: ${formatMarkdownInlineValue(message.createdAt)}`);
-    if (message.operationDurationMs !== null) {
-      lines.push(
-        `- Duration: ${formatMarkdownInlineValue(formatDuration(message.operationDurationMs))}`,
-      );
-    }
-    if (message.isOrphaned) {
-      lines.push("- Orphaned bookmark: Yes");
-    }
-    lines.push("");
-    lines.push(...buildMarkdownSections(message.sections));
-
-    if ((index + 1) % 200 === 0 || index === totalMessages - 1) {
-      const percent = 86 + Math.round(((index + 1) / totalMessages) * 11);
-      await emitHistoryExportProgress(
-        exportId,
-        onProgress,
-        "formatting",
-        percent,
-        `Formatting Markdown… ${index + 1} / ${totalMessages} messages`,
-      );
-    }
-  }
-
-  return lines.join("\n");
+  return (
+    await buildHistoryExportMarkdownLinesWithProgress(payload, {
+      exportId,
+      onProgress,
+    })
+  ).join("\n");
 }
 
 function collectExportMessages(
@@ -254,9 +144,63 @@ function collectExportMessages(
 ): ExportMessage[] {
   switch (request.mode) {
     case "session":
-      return collectSessionExportMessages(queryService, request);
+      return collectPagedExportMessages({
+        request,
+        mapMessages: mapSessionMessages,
+        loadCurrentPage: () =>
+          expectSessionDetail(
+            queryService.getSessionDetail({
+              sessionId: expectSessionId(request),
+              page: request.page,
+              pageSize: request.pageSize,
+              categories: request.categories,
+              query: request.query,
+              searchMode: request.searchMode,
+              sortDirection: request.sortDirection,
+            }),
+          ),
+        loadPage: (page, pageSize) =>
+          expectSessionDetail(
+            queryService.getSessionDetail({
+              sessionId: expectSessionId(request),
+              page,
+              pageSize,
+              categories: request.categories,
+              query: request.query,
+              searchMode: request.searchMode,
+              sortDirection: request.sortDirection,
+            }),
+          ),
+      });
     case "project_all":
-      return collectProjectExportMessages(queryService, request);
+      return collectPagedExportMessages({
+        request,
+        mapMessages: mapProjectMessages,
+        loadCurrentPage: () =>
+          expectProjectDetail(
+            queryService.getProjectCombinedDetail({
+              projectId: request.projectId,
+              page: request.page,
+              pageSize: request.pageSize,
+              categories: request.categories,
+              query: request.query,
+              searchMode: request.searchMode,
+              sortDirection: request.sortDirection,
+            }),
+          ),
+        loadPage: (page, pageSize) =>
+          expectProjectDetail(
+            queryService.getProjectCombinedDetail({
+              projectId: request.projectId,
+              page,
+              pageSize,
+              categories: request.categories,
+              query: request.query,
+              searchMode: request.searchMode,
+              sortDirection: request.sortDirection,
+            }),
+          ),
+      });
     case "bookmarks":
       return collectBookmarkExportMessages(queryService, request);
   }
@@ -277,196 +221,68 @@ async function collectExportMessagesWithProgress(
 
   switch (request.mode) {
     case "session":
-      return collectSessionExportMessagesWithProgress(queryService, request, onProgress);
+      return collectPagedExportMessagesWithProgress({
+        request,
+        onProgress,
+        mapMessages: mapSessionMessages,
+        loadCurrentPage: () =>
+          expectSessionDetail(
+            queryService.getSessionDetail({
+              sessionId: expectSessionId(request),
+              page: request.page,
+              pageSize: request.pageSize,
+              categories: request.categories,
+              query: request.query,
+              searchMode: request.searchMode,
+              sortDirection: request.sortDirection,
+            }),
+          ),
+        loadPage: (page, pageSize) =>
+          expectSessionDetail(
+            queryService.getSessionDetail({
+              sessionId: expectSessionId(request),
+              page,
+              pageSize,
+              categories: request.categories,
+              query: request.query,
+              searchMode: request.searchMode,
+              sortDirection: request.sortDirection,
+            }),
+          ),
+      });
     case "project_all":
-      return collectProjectExportMessagesWithProgress(queryService, request, onProgress);
+      return collectPagedExportMessagesWithProgress({
+        request,
+        onProgress,
+        mapMessages: mapProjectMessages,
+        loadCurrentPage: () =>
+          expectProjectDetail(
+            queryService.getProjectCombinedDetail({
+              projectId: request.projectId,
+              page: request.page,
+              pageSize: request.pageSize,
+              categories: request.categories,
+              query: request.query,
+              searchMode: request.searchMode,
+              sortDirection: request.sortDirection,
+            }),
+          ),
+        loadPage: (page, pageSize) =>
+          expectProjectDetail(
+            queryService.getProjectCombinedDetail({
+              projectId: request.projectId,
+              page,
+              pageSize,
+              categories: request.categories,
+              query: request.query,
+              searchMode: request.searchMode,
+              sortDirection: request.sortDirection,
+            }),
+          ),
+      });
     case "bookmarks":
       return collectBookmarkExportMessagesWithProgress(queryService, request, onProgress);
   }
-}
-
-function collectSessionExportMessages(
-  queryService: QueryService,
-  request: HistoryExportRequest,
-): ExportMessage[] {
-  if (!request.sessionId) {
-    throw new Error("A session export requires a sessionId.");
-  }
-  const sessionId = request.sessionId;
-
-  if (request.scope === "current_page") {
-    return mapSessionMessages(
-      expectSessionDetail(
-        queryService.getSessionDetail({
-          sessionId,
-          page: request.page,
-          pageSize: request.pageSize,
-          categories: request.categories,
-          query: request.query,
-          searchMode: request.searchMode,
-          sortDirection: request.sortDirection,
-        }),
-      ).messages,
-    );
-  }
-
-  return mapSessionMessages(
-    loadAllPages(
-      (page, pageSize) =>
-        expectSessionDetail(
-          queryService.getSessionDetail({
-            sessionId,
-            page,
-            pageSize,
-            categories: request.categories,
-            query: request.query,
-            searchMode: request.searchMode,
-            sortDirection: request.sortDirection,
-          }),
-        ),
-      request.pageSize,
-    ),
-  );
-}
-
-async function collectSessionExportMessagesWithProgress(
-  queryService: QueryService,
-  request: HistoryExportRequest,
-  onProgress?: HistoryExportProgressCallback,
-): Promise<ExportMessage[]> {
-  if (!request.sessionId) {
-    throw new Error("A session export requires a sessionId.");
-  }
-  const sessionId = request.sessionId;
-
-  if (request.scope === "current_page") {
-    const response = expectSessionDetail(
-      queryService.getSessionDetail({
-        sessionId,
-        page: request.page,
-        pageSize: request.pageSize,
-        categories: request.categories,
-        query: request.query,
-        searchMode: request.searchMode,
-        sortDirection: request.sortDirection,
-      }),
-    );
-    await emitHistoryExportProgress(
-      request.exportId,
-      onProgress,
-      "collecting",
-      84,
-      `Collected ${response.messages.length} messages`,
-    );
-    return mapSessionMessages(response.messages);
-  }
-
-  return mapSessionMessages(
-    await loadAllPagesWithProgress(
-      (page, pageSize) =>
-        expectSessionDetail(
-          queryService.getSessionDetail({
-            sessionId,
-            page,
-            pageSize,
-            categories: request.categories,
-            query: request.query,
-            searchMode: request.searchMode,
-            sortDirection: request.sortDirection,
-          }),
-        ),
-      request.pageSize,
-      request.exportId,
-      onProgress,
-    ),
-  );
-}
-
-function collectProjectExportMessages(
-  queryService: QueryService,
-  request: HistoryExportRequest,
-): ExportMessage[] {
-  if (request.scope === "current_page") {
-    return mapProjectMessages(
-      expectProjectDetail(
-        queryService.getProjectCombinedDetail({
-          projectId: request.projectId,
-          page: request.page,
-          pageSize: request.pageSize,
-          categories: request.categories,
-          query: request.query,
-          searchMode: request.searchMode,
-          sortDirection: request.sortDirection,
-        }),
-      ).messages,
-    );
-  }
-
-  return mapProjectMessages(
-    loadAllPages(
-      (page, pageSize) =>
-        expectProjectDetail(
-          queryService.getProjectCombinedDetail({
-            projectId: request.projectId,
-            page,
-            pageSize,
-            categories: request.categories,
-            query: request.query,
-            searchMode: request.searchMode,
-            sortDirection: request.sortDirection,
-          }),
-        ),
-      request.pageSize,
-    ),
-  );
-}
-
-async function collectProjectExportMessagesWithProgress(
-  queryService: QueryService,
-  request: HistoryExportRequest,
-  onProgress?: HistoryExportProgressCallback,
-): Promise<ExportMessage[]> {
-  if (request.scope === "current_page") {
-    const response = expectProjectDetail(
-      queryService.getProjectCombinedDetail({
-        projectId: request.projectId,
-        page: request.page,
-        pageSize: request.pageSize,
-        categories: request.categories,
-        query: request.query,
-        searchMode: request.searchMode,
-        sortDirection: request.sortDirection,
-      }),
-    );
-    await emitHistoryExportProgress(
-      request.exportId,
-      onProgress,
-      "collecting",
-      84,
-      `Collected ${response.messages.length} messages`,
-    );
-    return mapProjectMessages(response.messages);
-  }
-
-  return mapProjectMessages(
-    await loadAllPagesWithProgress(
-      (page, pageSize) =>
-        expectProjectDetail(
-          queryService.getProjectCombinedDetail({
-            projectId: request.projectId,
-            page,
-            pageSize,
-            categories: request.categories,
-            query: request.query,
-            searchMode: request.searchMode,
-            sortDirection: request.sortDirection,
-          }),
-        ),
-      request.pageSize,
-      request.exportId,
-      onProgress,
-    ),
-  );
 }
 
 function collectBookmarkExportMessages(
@@ -525,7 +341,7 @@ function loadAllPages<T extends { totalCount: number; messages: unknown[] }>(
   const pageSize = Math.max(initialPageSize, EXPORT_FETCH_PAGE_SIZE);
   const firstPage = loadPage(0, pageSize);
   const allMessages = [...firstPage.messages];
-  const totalPages = Math.ceil(firstPage.totalCount / pageSize);
+  const totalPages = Math.max(1, Math.ceil(firstPage.totalCount / pageSize));
 
   for (let page = 1; page < totalPages; page += 1) {
     const nextPage = loadPage(page, pageSize);
@@ -533,6 +349,179 @@ function loadAllPages<T extends { totalCount: number; messages: unknown[] }>(
   }
 
   return allMessages;
+}
+
+function buildHistoryExportPayload(
+  request: HistoryExportRequest,
+  query: string,
+  messages: ExportMessage[],
+): HistoryExportPayload {
+  return {
+    exportedAt: new Date().toISOString(),
+    viewLabel: formatViewLabel(request.mode),
+    scopeLabel: request.scope === "all_pages" ? "All pages" : "Current page",
+    sortLabel: formatSortLabel(request.sortDirection),
+    categoryLabel: formatCategoryLabel(request.categories),
+    query,
+    messageCount: messages.length,
+    messages,
+  };
+}
+
+function buildHistoryExportMarkdownLines(payload: HistoryExportPayload): string[] {
+  const lines = [
+    "# Messages Export",
+    "",
+    `- Exported at: ${formatMarkdownInlineValue(payload.exportedAt)}`,
+    `- View: ${formatMarkdownInlineValue(payload.viewLabel)}`,
+    `- Scope: ${formatMarkdownInlineValue(payload.scopeLabel)}`,
+    `- Sort: ${formatMarkdownInlineValue(payload.sortLabel)}`,
+    `- Categories: ${formatMarkdownInlineValue(payload.categoryLabel)}`,
+    `- Messages: ${payload.messageCount}`,
+  ];
+
+  if (payload.query.length > 0) {
+    lines.push(`- Query: ${formatMarkdownInlineValue(payload.query)}`);
+  }
+
+  lines.push("");
+
+  if (payload.messages.length === 0) {
+    lines.push("_No messages matched the selected export scope._", "");
+    return lines;
+  }
+
+  for (const [index, message] of payload.messages.entries()) {
+    appendHistoryExportMarkdownMessage(lines, index, message);
+  }
+
+  return lines;
+}
+
+async function buildHistoryExportMarkdownLinesWithProgress(
+  payload: HistoryExportPayload,
+  args: {
+    exportId: string;
+    onProgress: HistoryExportProgressCallback | undefined;
+  },
+): Promise<string[]> {
+  const lines = buildHistoryExportMarkdownHeaderLines(payload);
+  if (payload.messages.length === 0) {
+    lines.push("_No messages matched the selected export scope._", "");
+    return lines;
+  }
+
+  const totalMessages = payload.messages.length;
+  for (const [index, message] of payload.messages.entries()) {
+    appendHistoryExportMarkdownMessage(lines, index, message);
+    if ((index + 1) % 200 === 0 || index === totalMessages - 1) {
+      const percent = 86 + Math.round(((index + 1) / totalMessages) * 11);
+      await emitHistoryExportProgress(
+        args.exportId,
+        args.onProgress,
+        "formatting",
+        percent,
+        `Formatting Markdown… ${index + 1} / ${totalMessages} messages`,
+      );
+    }
+  }
+
+  return lines;
+}
+
+function buildHistoryExportMarkdownHeaderLines(payload: HistoryExportPayload): string[] {
+  const lines = [
+    "# Messages Export",
+    "",
+    `- Exported at: ${formatMarkdownInlineValue(payload.exportedAt)}`,
+    `- View: ${formatMarkdownInlineValue(payload.viewLabel)}`,
+    `- Scope: ${formatMarkdownInlineValue(payload.scopeLabel)}`,
+    `- Sort: ${formatMarkdownInlineValue(payload.sortLabel)}`,
+    `- Categories: ${formatMarkdownInlineValue(payload.categoryLabel)}`,
+    `- Messages: ${payload.messageCount}`,
+  ];
+
+  if (payload.query.length > 0) {
+    lines.push(`- Query: ${formatMarkdownInlineValue(payload.query)}`);
+  }
+
+  lines.push("");
+  return lines;
+}
+
+function appendHistoryExportMarkdownMessage(
+  lines: string[],
+  index: number,
+  message: ExportMessage,
+): void {
+  if (index > 0) {
+    lines.push("---", "");
+  }
+
+  lines.push(`## ${index + 1}. ${message.label}`);
+  lines.push("");
+  lines.push(`- Time: ${formatMarkdownInlineValue(message.createdAt)}`);
+  if (message.operationDurationMs !== null) {
+    lines.push(
+      `- Duration: ${formatMarkdownInlineValue(formatDuration(message.operationDurationMs))}`,
+    );
+  }
+  if (message.isOrphaned) {
+    lines.push("- Orphaned bookmark: Yes");
+  }
+  lines.push("");
+  lines.push(...buildMarkdownSections(message.sections));
+}
+
+function expectSessionId(request: HistoryExportRequest): string {
+  if (!request.sessionId) {
+    throw new Error("A session export requires a sessionId.");
+  }
+  return request.sessionId;
+}
+
+function collectPagedExportMessages<T extends { totalCount: number; messages: unknown[] }>(args: {
+  request: HistoryExportRequest;
+  mapMessages: (messages: T["messages"]) => ExportMessage[];
+  loadCurrentPage: () => T;
+  loadPage: (page: number, pageSize: number) => T;
+}): ExportMessage[] {
+  if (args.request.scope === "current_page") {
+    return args.mapMessages(args.loadCurrentPage().messages);
+  }
+
+  return args.mapMessages(loadAllPages(args.loadPage, args.request.pageSize));
+}
+
+async function collectPagedExportMessagesWithProgress<
+  T extends { totalCount: number; messages: unknown[] },
+>(args: {
+  request: HistoryExportRequest;
+  onProgress: HistoryExportProgressCallback | undefined;
+  mapMessages: (messages: T["messages"]) => ExportMessage[];
+  loadCurrentPage: () => T;
+  loadPage: (page: number, pageSize: number) => T;
+}): Promise<ExportMessage[]> {
+  if (args.request.scope === "current_page") {
+    const response = args.loadCurrentPage();
+    await emitHistoryExportProgress(
+      args.request.exportId,
+      args.onProgress,
+      "collecting",
+      84,
+      `Collected ${response.messages.length} messages`,
+    );
+    return args.mapMessages(response.messages);
+  }
+
+  return args.mapMessages(
+    await loadAllPagesWithProgress(
+      args.loadPage,
+      args.request.pageSize,
+      args.request.exportId,
+      args.onProgress,
+    ),
+  );
 }
 
 async function loadAllPagesWithProgress<T extends { totalCount: number; messages: unknown[] }>(

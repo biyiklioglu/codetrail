@@ -66,7 +66,7 @@ export function ConfirmDialog({
         }
       }}
       onKeyDown={(e) => {
-        if (e.key === "Escape" && e.target === dialogRef.current) {
+        if (e.key === "Escape" && e.currentTarget === dialogRef.current) {
           e.preventDefault();
           dialogRef.current?.close();
         }

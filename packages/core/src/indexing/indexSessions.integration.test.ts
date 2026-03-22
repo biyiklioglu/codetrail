@@ -784,7 +784,15 @@ describe("runIncrementalIndexing", () => {
   it("does not checkpoint past an unterminated trailing oversized codex JSONL line", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-index-codex-partial-oversized-line-"));
     const dbPath = join(dir, "index.db");
-    const codexFile = join(dir, ".codex", "sessions", "2026", "03", "19", "partial-oversized.jsonl");
+    const codexFile = join(
+      dir,
+      ".codex",
+      "sessions",
+      "2026",
+      "03",
+      "19",
+      "partial-oversized.jsonl",
+    );
     mkdirSync(dirname(codexFile), { recursive: true });
     writeFileSync(
       codexFile,
@@ -855,7 +863,7 @@ describe("runIncrementalIndexing", () => {
 
     appendFileSync(
       codexFile,
-      `${'x'.repeat(32)}"}\n${JSON.stringify({
+      `${"x".repeat(32)}"}\n${JSON.stringify({
         timestamp: "2026-03-19T10:00:03Z",
         type: "response_item",
         payload: {
@@ -1081,7 +1089,9 @@ describe("runIncrementalIndexing", () => {
     expect(result.indexedFiles).toBe(1);
 
     const db = openDatabase(dbPath);
-    const messages = db.prepare("SELECT content FROM messages ORDER BY created_at, id").all() as Array<{
+    const messages = db
+      .prepare("SELECT content FROM messages ORDER BY created_at, id")
+      .all() as Array<{
       content: string;
     }>;
     db.close();
@@ -1161,7 +1171,9 @@ describe("runIncrementalIndexing", () => {
     expect(result.indexedFiles).toBe(1);
 
     const db = openDatabase(dbPath);
-    const messages = db.prepare("SELECT category, content, created_at FROM messages ORDER BY created_at, id").all() as Array<{
+    const messages = db
+      .prepare("SELECT category, content, created_at FROM messages ORDER BY created_at, id")
+      .all() as Array<{
       category: string;
       content: string;
       created_at: string;
@@ -1248,7 +1260,9 @@ describe("runIncrementalIndexing", () => {
     expect(result.indexedFiles).toBe(1);
 
     const db = openDatabase(dbPath);
-    const messages = db.prepare("SELECT category, content FROM messages ORDER BY created_at, id").all() as Array<{
+    const messages = db
+      .prepare("SELECT category, content FROM messages ORDER BY created_at, id")
+      .all() as Array<{
       category: string;
       content: string;
     }>;
@@ -1304,7 +1318,9 @@ describe("runIncrementalIndexing", () => {
     expect(result.indexedFiles).toBe(1);
 
     const db = openDatabase(dbPath);
-    const messages = db.prepare("SELECT category, content FROM messages ORDER BY created_at, id").all() as Array<{
+    const messages = db
+      .prepare("SELECT category, content FROM messages ORDER BY created_at, id")
+      .all() as Array<{
       category: string;
       content: string;
     }>;

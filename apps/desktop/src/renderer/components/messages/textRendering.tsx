@@ -116,6 +116,8 @@ const LANGUAGE_KEYWORDS: Record<string, Set<string>> = {
 };
 const HIGHLIGHT_REGEX_CACHE_LIMIT = 64;
 const highlightRegexCache = new Map<string, RegExp | null>();
+const MARKDOWN_COMPONENTS_CACHE_LIMIT = 32;
+const markdownComponentsCache = new Map<string, Components>();
 
 export function renderRichText(
   value: string,
@@ -130,7 +132,7 @@ export function renderRichText(
       key={`${keyPrefix}:md`}
       remarkPlugins={[remarkGfm]}
       skipHtml
-      components={buildMarkdownComponents(pathRoots, query, highlightPatterns)}
+      components={getMarkdownComponents(pathRoots, query, highlightPatterns)}
     >
       {normalized}
     </ReactMarkdown>,
@@ -345,6 +347,28 @@ function buildMarkdownComponents(
       );
     },
   };
+}
+
+function getMarkdownComponents(
+  pathRoots: string[],
+  query: string,
+  highlightPatterns: string[],
+): Components {
+  const cacheKey = `${pathRoots.join("\u0000")}\u0001${query}\u0001${highlightPatterns.join("\u0000")}`;
+  const cached = markdownComponentsCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const components = buildMarkdownComponents(pathRoots, query, highlightPatterns);
+  markdownComponentsCache.set(cacheKey, components);
+  if (markdownComponentsCache.size > MARKDOWN_COMPONENTS_CACHE_LIMIT) {
+    const oldestKey = markdownComponentsCache.keys().next().value;
+    if (typeof oldestKey === "string") {
+      markdownComponentsCache.delete(oldestKey);
+    }
+  }
+  return components;
 }
 
 function normalizeMarkdownInput(value: string): string {

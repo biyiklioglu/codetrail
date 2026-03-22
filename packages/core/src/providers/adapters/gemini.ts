@@ -13,6 +13,7 @@ import {
 
 export const geminiAdapter: ProviderAdapter = {
   ...PROVIDER_METADATA.gemini,
+  sourceFormat: "materialized_json",
   supportsIncrementalCheckpoints: false,
   discoverAll: discoverGeminiFiles,
   discoverOne: discoverSingleGeminiFile,
@@ -38,6 +39,5 @@ export const geminiAdapter: ProviderAdapter = {
       models: sortModels(models),
     };
   },
-  updateSourceMetadataFromEvent: () => {},
   normalizeMessageTimestamp: defaultTimestampNormalization,
 };

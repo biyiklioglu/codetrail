@@ -5,13 +5,13 @@ import type {
 } from "../types";
 
 import {
+  appendOversizedSanitization,
   asProviderJsonArray,
   asProviderJsonObject,
   buildInlineMediaPlaceholder,
   collectSanitizedValue,
-  estimateDecodedBase64Bytes,
   emptyOversizedSanitization,
-  mergeOversizedSanitizations,
+  estimateDecodedBase64Bytes,
   parseDataUrl,
 } from "./shared";
 
@@ -101,7 +101,7 @@ function sanitizeCodexCompactedEvent(root: ProviderJsonObject): ProviderOversize
     if (transformed.changed) {
       changed = true;
     }
-    sanitization = mergeOversizedSanitizations(sanitization, transformed.sanitization)!;
+    sanitization = appendOversizedSanitization(sanitization, transformed.sanitization);
     const text = extractCodexTextParts(transformed.content).join("\n").trim();
     if (text.length > 0) {
       historyEntries.push({ role, text });
@@ -128,9 +128,7 @@ function sanitizeCodexCompactedEvent(root: ProviderJsonObject): ProviderOversize
   };
 }
 
-function sanitizeCodexContentArray(
-  value: unknown,
-): {
+function sanitizeCodexContentArray(value: unknown): {
   changed: boolean;
   content: ProviderJsonArray;
   sanitization: ReturnType<typeof emptyOversizedSanitization>;
@@ -151,7 +149,7 @@ function sanitizeCodexContentArray(
     if (transformed.changed) {
       changed = true;
     }
-    sanitization = mergeOversizedSanitizations(sanitization, transformed.sanitization)!;
+    sanitization = appendOversizedSanitization(sanitization, transformed.sanitization);
     return transformed.value;
   });
 
@@ -162,9 +160,7 @@ function sanitizeCodexContentArray(
   };
 }
 
-function sanitizeCodexContentBlock(
-  value: ProviderJsonValue,
-): {
+function sanitizeCodexContentBlock(value: ProviderJsonValue): {
   changed: boolean;
   value: ProviderJsonValue;
   sanitization: ReturnType<typeof emptyOversizedSanitization>;
@@ -203,7 +199,7 @@ function sanitizeCodexContentBlock(
   return {
     changed: true,
     value: transformed.value,
-    sanitization: transformed.sanitization!,
+    sanitization: transformed.sanitization,
   };
 }
 
@@ -220,9 +216,7 @@ function buildCompactedSnapshotText(entries: CodexHistoryEntry[]): string {
     return "[Codex compacted history snapshot omitted inline media payloads.]";
   }
 
-  const body = entries
-    .map((entry) => `${capitalize(entry.role)}:\n${entry.text}`)
-    .join("\n\n");
+  const body = entries.map((entry) => `${capitalize(entry.role)}:\n${entry.text}`).join("\n\n");
   return `[Codex compacted history snapshot]\n\n${body}`;
 }
 

@@ -53,7 +53,8 @@ function toDiscoveredGeminiFile(
 
   const projectPath = resolvedProjectPath ?? "";
   const unresolvedProject = !resolvedProjectPath;
-  const fallbackProjectName = basename(containerDir);
+  const fallbackProjectName =
+    basename(containerDir) || basename(filePath, extname(filePath)) || "Unknown";
 
   return {
     provider: "gemini",

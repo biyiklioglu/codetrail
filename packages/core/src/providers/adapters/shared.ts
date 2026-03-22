@@ -6,34 +6,6 @@ import type {
   ReadFileText,
 } from "../types";
 
-export function readJsonlStreamSource(
-  filePath: string,
-  readFileText: ReadFileText,
-): ProviderReadSourceResult | null {
-  try {
-    const lines = readFileText(filePath)
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-
-    const parsedLines = lines
-      .map((line) => {
-        try {
-          return JSON.parse(line) as unknown;
-        } catch {
-          return null;
-        }
-      })
-      .filter((entry) => entry !== null) as unknown[];
-
-    return {
-      payload: parsedLines as ProviderReadSourceResult["payload"],
-    };
-  } catch {
-    return null;
-  }
-}
-
 export function readMaterializedJsonSource(
   filePath: string,
   readFileText: ReadFileText,

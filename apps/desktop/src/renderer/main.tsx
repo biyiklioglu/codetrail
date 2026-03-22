@@ -16,7 +16,7 @@ import "@fontsource/plus-jakarta-sans/700.css";
 
 import type { ThemeMode } from "../shared/uiPreferences";
 import "./styles.css";
-import { getCodetrailClient } from "./lib/codetrailClient";
+import { getCodetrailClient, isMissingCodetrailClient } from "./lib/codetrailClient";
 import { applyTheme } from "./lib/theme";
 
 function requireRootElement(): HTMLElement {
@@ -84,23 +84,27 @@ window.addEventListener("unhandledrejection", (event) => {
 async function bootRenderer(): Promise<void> {
   try {
     const codetrail = getCodetrailClient();
+    if (isMissingCodetrailClient(codetrail)) {
+      showBootFailure(
+        "Preload Bridge Unavailable",
+        "The renderer could not access window.codetrail. Check preload loading and context isolation setup.",
+      );
+      return;
+    }
     const initialPaneStatePromise: Promise<
       (IpcResponse<"ui:getPaneState"> & IpcResponse<"indexer:getConfig">) | null
-    > =
-      typeof codetrail.invoke === "function"
-        ? Promise.all([
-            codetrail.invoke("ui:getPaneState", {}),
-            codetrail.invoke("indexer:getConfig", {}),
-          ])
-            .then(([paneState, indexerConfig]) => ({
-              ...paneState,
-              ...indexerConfig,
-            }))
-            .catch((error: unknown) => {
-              console.error("[codetrail] failed loading initial ui state", error);
-              return null;
-            })
-        : Promise.resolve(null);
+    > = Promise.all([
+      codetrail.invoke("ui:getPaneState", {}),
+      codetrail.invoke("indexer:getConfig", {}),
+    ])
+      .then(([paneState, indexerConfig]) => ({
+        ...paneState,
+        ...indexerConfig,
+      }))
+      .catch((error: unknown) => {
+        console.error("[codetrail] failed loading initial ui state", error);
+        return null;
+      });
     const [{ App }, { AppErrorBoundary }, initialPaneState] = await Promise.all([
       import("./App"),
       import("./AppErrorBoundary"),

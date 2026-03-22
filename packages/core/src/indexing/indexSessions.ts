@@ -322,6 +322,18 @@ const MAX_MATERIALIZED_SOURCE_BYTES = 32 * 1024 * 1024;
 const MAX_INDEXED_MESSAGE_CONTENT_BYTES = 256 * 1024;
 const MAX_INDEXED_FTS_CONTENT_BYTES = 32 * 1024;
 const MAX_TOOL_CALL_JSON_BYTES = 64 * 1024;
+// Reused within one process to avoid per-call allocation churn when fingerprinting file slices.
+// Each worker process gets its own module instance, so there is no cross-process sharing.
+const HASH_FILE_SLICE_BUFFER = Buffer.allocUnsafe(JSONL_FINGERPRINT_WINDOW_BYTES);
+const SESSION_TITLE_CATEGORY_PREFERENCE: MessageCategory[] = [
+  "user",
+  "assistant",
+  "thinking",
+  "system",
+  "tool_result",
+  "tool_use",
+  "tool_edit",
+];
 const DEFAULT_SESSION_AGGREGATE_STATE = {
   messageCount: 0,
   tokenInputTotal: 0,
@@ -950,6 +962,9 @@ function indexMaterializedSessionFile(args: {
   onNotice: (notice: IndexingNotice) => void;
 }): ParserDiagnostic[] {
   const adapter = getProviderAdapter(args.discovered.provider);
+  if (adapter.sourceFormat !== "materialized_json") {
+    throw new Error(`Expected materialized adapter for provider ${args.discovered.provider}.`);
+  }
   if (args.discovered.fileSize > MAX_MATERIALIZED_SOURCE_BYTES) {
     return persistOversizedMaterializedSessionFile(args);
   }
@@ -1376,7 +1391,7 @@ function streamAndPersistJsonlEvents(args: {
             ...(rescueNotice.details ? { details: rescueNotice.details } : {}),
           });
         }
-        args.adapter.updateSourceMetadataFromEvent(event, args.sourceMetaAccumulator);
+        args.adapter.updateSourceMetadataFromEvent?.(event, args.sourceMetaAccumulator);
         sequence = parseAndPersistStreamEvent({
           discovered: args.discovered,
           event,
@@ -1389,7 +1404,7 @@ function streamAndPersistJsonlEvents(args: {
           onNotice: args.onNotice,
         });
       },
-      onOmittedLine: (omitted, eventIndex) => {
+      onOmittedLine: (omitted) => {
         emittedEvents += 1;
         persistStreamMessage({
           discovered: args.discovered,
@@ -1546,9 +1561,7 @@ function recordOversizedJsonlLineOmitted(
   omitted: OmittedJsonlLine,
   onNotice: (notice: IndexingNotice) => void,
 ): void {
-  const message =
-    `JSONL line ${omitted.lineNumber} exceeded the ${formatByteLimit(omitted.limitBytes)} ` +
-    `rescue ceiling and was omitted.`;
+  const message = `JSONL line ${omitted.lineNumber} exceeded the ${formatByteLimit(omitted.limitBytes)} rescue ceiling and was omitted.`;
   parserDiagnostics.push({
     severity: "warning",
     code: "parser.oversized_jsonl_line_omitted",
@@ -1819,17 +1832,8 @@ function updateSessionAggregateState(state: SessionAggregateState, message: Inde
 }
 
 function sessionTitleCategoryRank(category: MessageCategory): number {
-  const preferredCategories: MessageCategory[] = [
-    "user",
-    "assistant",
-    "thinking",
-    "system",
-    "tool_result",
-    "tool_use",
-    "tool_edit",
-  ];
-  const rank = preferredCategories.indexOf(category);
-  return rank >= 0 ? rank : preferredCategories.length;
+  const rank = SESSION_TITLE_CATEGORY_PREFERENCE.indexOf(category);
+  return rank >= 0 ? rank : SESSION_TITLE_CATEGORY_PREFERENCE.length;
 }
 
 function finalizeSessionAggregate(state: SessionAggregateState): {
@@ -2001,31 +2005,64 @@ function sliceUtf8ByBytes(value: string, byteLimit: number, mode: "head" | "tail
 }
 
 function findUtf8PrefixEnd(value: string, byteLimit: number): number {
-  let low = 0;
-  let high = value.length;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (Buffer.byteLength(value.slice(0, mid), "utf8") <= byteLimit) {
-      low = mid;
-    } else {
-      high = mid - 1;
+  let index = 0;
+  let consumedBytes = 0;
+  while (index < value.length) {
+    const codePoint = value.codePointAt(index);
+    if (codePoint === undefined) {
+      break;
     }
+    const nextBytes = consumedBytes + utf8ByteLength(codePoint);
+    if (nextBytes > byteLimit) {
+      break;
+    }
+    consumedBytes = nextBytes;
+    index += codePoint > 0xffff ? 2 : 1;
   }
-  return low;
+  return index;
 }
 
 function findUtf8TailStart(value: string, byteLimit: number): number {
-  let low = 0;
-  let high = value.length;
-  while (low < high) {
-    const mid = Math.floor((low + high) / 2);
-    if (Buffer.byteLength(value.slice(mid), "utf8") <= byteLimit) {
-      high = mid;
-    } else {
-      low = mid + 1;
+  let index = value.length;
+  let consumedBytes = 0;
+  while (index > 0) {
+    const nextIndex = previousCodePointStart(value, index);
+    const codePoint = value.codePointAt(nextIndex);
+    if (codePoint === undefined) {
+      break;
+    }
+    const nextBytes = consumedBytes + utf8ByteLength(codePoint);
+    if (nextBytes > byteLimit) {
+      break;
+    }
+    consumedBytes = nextBytes;
+    index = nextIndex;
+  }
+  return index;
+}
+
+function utf8ByteLength(codePoint: number): number {
+  if (codePoint <= 0x7f) {
+    return 1;
+  }
+  if (codePoint <= 0x7ff) {
+    return 2;
+  }
+  if (codePoint <= 0xffff) {
+    return 3;
+  }
+  return 4;
+}
+
+function previousCodePointStart(value: string, endExclusive: number): number {
+  const lastCodeUnit = value.charCodeAt(endExclusive - 1);
+  if (endExclusive >= 2 && lastCodeUnit >= 0xdc00 && lastCodeUnit <= 0xdfff) {
+    const previousCodeUnit = value.charCodeAt(endExclusive - 2);
+    if (previousCodeUnit >= 0xd800 && previousCodeUnit <= 0xdbff) {
+      return endExclusive - 2;
     }
   }
-  return low;
+  return endExclusive - 1;
 }
 
 function streamJsonlEvents(
@@ -2036,44 +2073,24 @@ function streamJsonlEvents(
     startLineNumber?: number;
     startEventIndex?: number;
     onEvent: (event: unknown, eventIndex: number, rescueNotice: JsonlRescueNotice | null) => void;
-    onOmittedLine: (omitted: OmittedJsonlLine, eventIndex: number) => void;
+    onOmittedLine: (omitted: OmittedJsonlLine) => void;
     onInvalidLine: (lineNumber: number, error: unknown) => void;
   },
 ): StreamJsonlResult {
   const buffer = Buffer.allocUnsafe(JSONL_READ_BUFFER_BYTES);
   let fd: number | null = null;
-  let lineChunks: Buffer[] = [];
-  let pendingLineBytes = 0;
-  let discardingHardOmittedLine = false;
+  const streamState = {
+    lineChunks: [] as Buffer[],
+    pendingLineBytes: 0,
+    discardingHardOmittedLine: false,
+    lineNumber: callbacks.startLineNumber ?? 0,
+    eventIndex: callbacks.startEventIndex ?? 0,
+  };
   let consumedOffset = callbacks.startOffsetBytes ?? 0;
   let readOffset = callbacks.startOffsetBytes ?? 0;
-  let lineNumber = callbacks.startLineNumber ?? 0;
-  let eventIndex = callbacks.startEventIndex ?? 0;
 
   try {
     fd = openSync(filePath, "r");
-    const flushLine = (): void => {
-      if (discardingHardOmittedLine) {
-        callbacks.onOmittedLine(
-          {
-            lineNumber: lineNumber + 1,
-            lineBytes: pendingLineBytes,
-            limitBytes: MAX_JSONL_RESCUE_LINE_BYTES,
-          },
-          eventIndex,
-        );
-        eventIndex += 1;
-      } else if (lineChunks.length > 0) {
-        const line = Buffer.concat(lineChunks).toString("utf8");
-        eventIndex = handleJsonlLine(line, pendingLineBytes, lineNumber, eventIndex, callbacks);
-      }
-
-      lineChunks = [];
-      pendingLineBytes = 0;
-      discardingHardOmittedLine = false;
-      lineNumber += 1;
-    };
-
     while (true) {
       const bytesRead = readSync(fd, buffer, 0, buffer.length, readOffset);
       if (bytesRead <= 0) {
@@ -2085,20 +2102,20 @@ function streamJsonlEvents(
         const newlineIndex = buffer.indexOf(0x0a, cursor);
         const segmentEnd = newlineIndex >= 0 ? newlineIndex : bytesRead;
         const segment = buffer.subarray(cursor, segmentEnd);
-        if (!discardingHardOmittedLine) {
-          const nextLineBytes = pendingLineBytes + segment.length;
+        if (!streamState.discardingHardOmittedLine) {
+          const nextLineBytes = streamState.pendingLineBytes + segment.length;
           if (nextLineBytes > MAX_JSONL_RESCUE_LINE_BYTES) {
-            discardingHardOmittedLine = true;
-            lineChunks = [];
+            streamState.discardingHardOmittedLine = true;
+            streamState.lineChunks = [];
           } else if (segment.length > 0) {
-            lineChunks.push(Buffer.from(segment));
+            streamState.lineChunks.push(Buffer.from(segment));
           }
         }
-        pendingLineBytes += segment.length;
+        streamState.pendingLineBytes += segment.length;
 
         if (newlineIndex >= 0) {
-          consumedOffset += pendingLineBytes + 1;
-          flushLine();
+          consumedOffset += streamState.pendingLineBytes + 1;
+          flushStreamJsonlLine(streamState, callbacks);
           cursor = newlineIndex + 1;
           continue;
         }
@@ -2106,20 +2123,24 @@ function streamJsonlEvents(
         cursor = bytesRead;
       }
     }
-    if (pendingLineBytes > 0 || lineChunks.length > 0 || discardingHardOmittedLine) {
+    if (
+      streamState.pendingLineBytes > 0 ||
+      streamState.lineChunks.length > 0 ||
+      streamState.discardingHardOmittedLine
+    ) {
       const finalizedTrailingLine = tryConsumeTrailingJsonlLine({
         adapter: callbacks.adapter,
-        lineChunks,
-        discardingHardOmittedLine,
-        pendingLineBytes,
-        lineNumber,
-        eventIndex,
+        lineChunks: streamState.lineChunks,
+        discardingHardOmittedLine: streamState.discardingHardOmittedLine,
+        pendingLineBytes: streamState.pendingLineBytes,
+        lineNumber: streamState.lineNumber,
+        eventIndex: streamState.eventIndex,
         callbacks,
       });
       if (finalizedTrailingLine) {
         consumedOffset = readOffset;
-        lineNumber += 1;
-        eventIndex = finalizedTrailingLine.nextEventIndex;
+        streamState.lineNumber += 1;
+        streamState.eventIndex = finalizedTrailingLine.nextEventIndex;
       }
     }
   } finally {
@@ -2130,9 +2151,48 @@ function streamJsonlEvents(
 
   return {
     nextOffsetBytes: consumedOffset,
-    nextLineNumber: lineNumber,
-    nextEventIndex: eventIndex,
+    nextLineNumber: streamState.lineNumber,
+    nextEventIndex: streamState.eventIndex,
   };
+}
+
+function flushStreamJsonlLine(
+  state: {
+    lineChunks: Buffer[];
+    pendingLineBytes: number;
+    discardingHardOmittedLine: boolean;
+    lineNumber: number;
+    eventIndex: number;
+  },
+  callbacks: {
+    adapter: ReturnType<typeof getProviderAdapter>;
+    onEvent: (event: unknown, eventIndex: number, rescueNotice: JsonlRescueNotice | null) => void;
+    onOmittedLine: (omitted: OmittedJsonlLine) => void;
+    onInvalidLine: (lineNumber: number, error: unknown) => void;
+  },
+): void {
+  if (state.discardingHardOmittedLine) {
+    callbacks.onOmittedLine({
+      lineNumber: state.lineNumber + 1,
+      lineBytes: state.pendingLineBytes,
+      limitBytes: MAX_JSONL_RESCUE_LINE_BYTES,
+    });
+    state.eventIndex += 1;
+  } else if (state.lineChunks.length > 0) {
+    const line = Buffer.concat(state.lineChunks).toString("utf8");
+    state.eventIndex = handleJsonlLine(
+      line,
+      state.pendingLineBytes,
+      state.lineNumber,
+      state.eventIndex,
+      callbacks,
+    );
+  }
+
+  state.lineChunks = [];
+  state.pendingLineBytes = 0;
+  state.discardingHardOmittedLine = false;
+  state.lineNumber += 1;
 }
 
 function tryConsumeTrailingJsonlLine(args: {
@@ -2144,7 +2204,7 @@ function tryConsumeTrailingJsonlLine(args: {
   eventIndex: number;
   callbacks: {
     onEvent: (event: unknown, eventIndex: number, rescueNotice: JsonlRescueNotice | null) => void;
-    onOmittedLine: (omitted: OmittedJsonlLine, eventIndex: number) => void;
+    onOmittedLine: (omitted: OmittedJsonlLine) => void;
     onInvalidLine: (lineNumber: number, error: unknown) => void;
   };
 }): { nextEventIndex: number } | null {
@@ -2224,13 +2284,14 @@ function handleJsonlEvent(
   },
 ): number {
   let rescueNotice: JsonlRescueNotice | null = null;
+  let nextEvent = event;
   if (lineBytes > MAX_JSONL_LINE_BYTES) {
     const sanitized = callbacks.adapter.sanitizeOversizedJsonlEvent?.(event, {
       lineBytes,
       primaryByteLimit: MAX_JSONL_LINE_BYTES,
       rescueByteLimit: MAX_JSONL_RESCUE_LINE_BYTES,
     });
-    event = sanitized?.event ?? event;
+    nextEvent = sanitized?.event ?? event;
     const sanitizationDetails = summarizeOversizedSanitization(sanitized?.sanitization ?? null);
     rescueNotice = {
       severity: sanitized?.sanitization ? "warning" : "info",
@@ -2247,7 +2308,7 @@ function handleJsonlEvent(
     };
   }
 
-  callbacks.onEvent(event, eventIndex, rescueNotice);
+  callbacks.onEvent(nextEvent, eventIndex, rescueNotice);
   return eventIndex + 1;
 }
 
@@ -2263,30 +2324,9 @@ function insertIndexedMessage(
   },
 ): void {
   const messageId = makeMessageId(sessionDbId, message.id);
-  const persistedContent = truncateTextForIndexing(
-    message.content,
-    MAX_INDEXED_MESSAGE_CONTENT_BYTES,
-  );
-  const persistedContentWasTruncated = persistedContent !== message.content;
+  const persistedContent = message.content;
   const ftsContent = truncateTextForIndexing(persistedContent, MAX_INDEXED_FTS_CONTENT_BYTES);
   const ftsContentWasTruncated = ftsContent !== persistedContent;
-  if (context && persistedContentWasTruncated) {
-    context.onNotice({
-      provider: context.provider,
-      sessionId: context.sessionId,
-      filePath: context.filePath,
-      stage: "persist",
-      severity: "warning",
-      code: "index.message_content_truncated",
-      message: `Truncated indexed message content for ${message.id}.`,
-      details: {
-        messageId: message.id,
-        category: message.category,
-        originalBytes: Buffer.byteLength(message.content, "utf8"),
-        storedBytes: Buffer.byteLength(persistedContent, "utf8"),
-      },
-    });
-  }
   if (context && ftsContentWasTruncated) {
     context.onNotice({
       provider: context.provider,
@@ -2745,7 +2785,10 @@ function hashFileSlice(filePath: string, start: number, length: number): string 
     return hash.digest("hex");
   }
 
-  const buffer = Buffer.allocUnsafe(Math.min(length, JSONL_FINGERPRINT_WINDOW_BYTES));
+  const buffer = HASH_FILE_SLICE_BUFFER.subarray(
+    0,
+    Math.min(length, JSONL_FINGERPRINT_WINDOW_BYTES),
+  );
   let fd: number | null = null;
   let remaining = length;
   let position = start;
@@ -2887,16 +2930,6 @@ function splitMessageRoot(id: string): string {
   return id.replace(/#\d+$/, "");
 }
 
-const SESSION_TITLE_CATEGORY_RANK: Record<MessageCategory, number> = {
-  user: 0,
-  assistant: 1,
-  thinking: 2,
-  system: 3,
-  tool_result: 4,
-  tool_use: 5,
-  tool_edit: 5,
-};
-
 function deriveSessionTitle(messages: IndexedMessage[]): string {
   let bestTitle = "";
   let bestRank = Number.POSITIVE_INFINITY;
@@ -2906,7 +2939,7 @@ function deriveSessionTitle(messages: IndexedMessage[]): string {
     if (title.length === 0) {
       continue;
     }
-    const rank = SESSION_TITLE_CATEGORY_RANK[message.category];
+    const rank = sessionTitleCategoryRank(message.category);
     if (rank < bestRank) {
       bestTitle = title;
       bestRank = rank;

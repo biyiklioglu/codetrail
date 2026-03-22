@@ -13,6 +13,7 @@ import {
 
 export const copilotAdapter: ProviderAdapter = {
   ...PROVIDER_METADATA.copilot,
+  sourceFormat: "materialized_json",
   supportsIncrementalCheckpoints: false,
   discoverAll: discoverCopilotFiles,
   discoverOne: discoverSingleCopilotFile,
@@ -38,6 +39,5 @@ export const copilotAdapter: ProviderAdapter = {
       models: sortModels(models),
     };
   },
-  updateSourceMetadataFromEvent: () => {},
   normalizeMessageTimestamp: defaultTimestampNormalization,
 };

@@ -148,22 +148,14 @@ export function useHistoryDataEffects({
       }
       setProjects(response.projects);
       setProjectsLoaded(true);
-      if (!pendingSearchNavigation && response.projects.length > 0 && !rawSelectedProjectId) {
-        setHistorySelection((selectionState) =>
-          setHistorySelectionProjectId(selectionState, response.projects[0]?.id ?? ""),
-        );
-      }
     },
     [
       codetrail,
-      pendingSearchNavigation,
       projectProviders,
       projectQuery,
       projectsRef,
       projectsLoadTokenRef,
-      rawSelectedProjectId,
       registerAutoProjectUpdates,
-      setHistorySelection,
       setProjectListUpdateSource,
       setProjects,
       setProjectsLoaded,

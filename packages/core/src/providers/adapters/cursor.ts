@@ -4,19 +4,14 @@ import { asArray, asRecord, readString } from "../../parsing/helpers";
 import { PROVIDER_EVENT_PARSERS, PROVIDER_PAYLOAD_PARSERS } from "../../parsing/providerParsers";
 
 import type { ProviderAdapter } from "../types";
-import {
-  emptySourceMetadata,
-  monotonicTimestampNormalization,
-  readJsonlStreamSource,
-  sortModels,
-} from "./shared";
+import { emptySourceMetadata, monotonicTimestampNormalization, sortModels } from "./shared";
 
 export const cursorAdapter: ProviderAdapter = {
   ...PROVIDER_METADATA.cursor,
+  sourceFormat: "jsonl_stream",
   supportsIncrementalCheckpoints: true,
   discoverAll: discoverCursorFiles,
   discoverOne: discoverSingleCursorFile,
-  readSource: readJsonlStreamSource,
   parsePayload: PROVIDER_PAYLOAD_PARSERS.cursor,
   parseEvent: PROVIDER_EVENT_PARSERS.cursor,
   extractSourceMetadata: (payload) => {

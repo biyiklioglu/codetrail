@@ -1116,7 +1116,6 @@ export function useHistoryController({
     sessionListRef,
     selectedSessionId,
     sessionPaneNavigationItems,
-    sortedProjects,
     projectListRef,
     canNavigatePages,
     totalPages,
@@ -1133,7 +1132,6 @@ export function useHistoryController({
     loadSessions,
     setProjectProviders,
     setProjectQueryInput,
-    prettyProvider: formatPrettyProvider,
     refreshContextRef,
     refreshTreeProjectSessions,
   });

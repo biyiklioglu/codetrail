@@ -11,9 +11,9 @@ type InlineDataDescriptor = {
   encodedData: string;
 };
 
-export type OversizedPayloadTransformResult = {
+export type CollectedSanitizedValue = {
   value: ProviderJsonValue;
-  sanitization: ProviderOversizedJsonlSanitization | null;
+  sanitization: ProviderOversizedJsonlSanitization;
 };
 
 export function emptyOversizedSanitization(): ProviderOversizedJsonlSanitization {
@@ -53,7 +53,11 @@ export function buildInlineMediaPlaceholder(args: {
   if (args.mimeType) {
     parts.push(`mime=${args.mimeType}`);
   }
-  if (typeof args.approxBytes === "number" && Number.isFinite(args.approxBytes) && args.approxBytes > 0) {
+  if (
+    typeof args.approxBytes === "number" &&
+    Number.isFinite(args.approxBytes) &&
+    args.approxBytes > 0
+  ) {
     parts.push(`original_bytes=${args.approxBytes}`);
   }
   return `[${parts.join(" ")}]`;
@@ -78,7 +82,7 @@ export function collectSanitizedValue(
   value: ProviderJsonValue,
   descriptor: InlineDataDescriptor,
   options?: { transformedShape?: boolean },
-): OversizedPayloadTransformResult {
+): CollectedSanitizedValue {
   const approxBytes = estimateDecodedBase64Bytes(descriptor.encodedData);
   return {
     value,
@@ -88,6 +92,21 @@ export function collectSanitizedValue(
       mediaKinds: [descriptor.mediaKind],
       transformedShape: options?.transformedShape ?? false,
     },
+  };
+}
+
+export function appendOversizedSanitization(
+  base: ProviderOversizedJsonlSanitization,
+  next: ProviderOversizedJsonlSanitization | null,
+): ProviderOversizedJsonlSanitization {
+  if (!next) {
+    return base;
+  }
+  return {
+    replacedFieldCount: base.replacedFieldCount + next.replacedFieldCount,
+    omittedBytes: base.omittedBytes + next.omittedBytes,
+    mediaKinds: dedupeStrings([...base.mediaKinds, ...next.mediaKinds]),
+    transformedShape: base.transformedShape || next.transformedShape,
   };
 }
 
@@ -135,8 +154,7 @@ export function estimateDecodedBase64Bytes(encoded: string): number | null {
     return null;
   }
 
-  const padding =
-    normalized.endsWith("==") ? 2 : normalized.endsWith("=") ? 1 : 0;
+  const padding = normalized.endsWith("==") ? 2 : normalized.endsWith("=") ? 1 : 0;
   return Math.max(0, Math.floor((normalized.length / 4) * 3) - padding);
 }
 

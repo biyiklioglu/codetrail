@@ -82,11 +82,9 @@ export function geminiContainerDir(filePath: string): string {
     return joinPathSegments(parts.slice(0, chatsIndex), separator, hasLeadingSeparator);
   }
 
-  return joinPathSegments(
-    parts.slice(0, Math.max(0, parts.length - 3)),
-    separator,
-    hasLeadingSeparator,
-  );
+  const fallbackEndExclusive =
+    parts.length <= 3 ? Math.max(0, parts.length - 1) : Math.max(0, parts.length - 3);
+  return joinPathSegments(parts.slice(0, fallbackEndExclusive), separator, hasLeadingSeparator);
 }
 
 function joinPathSegments(

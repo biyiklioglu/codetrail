@@ -5,7 +5,7 @@ import { PROVIDER_EVENT_PARSERS, PROVIDER_PAYLOAD_PARSERS } from "../../parsing/
 import { sanitizeClaudeOversizedJsonlEvent } from "../oversized/claude";
 
 import type { ProviderAdapter } from "../types";
-import { defaultTimestampNormalization, readJsonlStreamSource, sortModels } from "./shared";
+import { defaultTimestampNormalization, sortModels } from "./shared";
 
 function extractClaudeSourceMetadata(payload: unknown[]) {
   const models = new Set<string>();
@@ -33,10 +33,10 @@ function extractClaudeSourceMetadata(payload: unknown[]) {
 
 export const claudeAdapter: ProviderAdapter = {
   ...PROVIDER_METADATA.claude,
+  sourceFormat: "jsonl_stream",
   supportsIncrementalCheckpoints: true,
   discoverAll: discoverClaudeFiles,
   discoverOne: discoverSingleClaudeFile,
-  readSource: readJsonlStreamSource,
   sanitizeOversizedJsonlEvent: sanitizeClaudeOversizedJsonlEvent,
   parsePayload: PROVIDER_PAYLOAD_PARSERS.claude,
   parseEvent: PROVIDER_EVENT_PARSERS.claude,

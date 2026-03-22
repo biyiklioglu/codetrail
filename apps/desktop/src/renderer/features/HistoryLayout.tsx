@@ -11,6 +11,94 @@ import type { useHistoryController } from "./useHistoryController";
 
 type HistoryController = ReturnType<typeof useHistoryController>;
 
+function copyProjectDetailsById(
+  history: HistoryController,
+  logError: (context: string, error: unknown) => void,
+  projectId?: string,
+): void {
+  if (!projectId) {
+    void history.handleCopyProjectDetails();
+    return;
+  }
+  const project = history.sortedProjects.find((candidate) => candidate.id === projectId);
+  if (!project) {
+    return;
+  }
+  void copyTextToClipboard(formatProjectDetails(project)).then((copied) => {
+    if (!copied) {
+      logError("Failed copying project details", "Clipboard API unavailable");
+    }
+  });
+}
+
+function copySessionDetailsById(
+  history: HistoryController,
+  logError: (context: string, error: unknown) => void,
+  sessionId?: string,
+): void {
+  if (!sessionId) {
+    void history.handleCopySessionDetails();
+    return;
+  }
+  const session = findSessionSummaryById(
+    sessionId,
+    history.sortedSessions,
+    history.treeProjectSessionsByProjectId,
+  );
+  if (!session) {
+    return;
+  }
+  const project =
+    history.sortedProjects.find((candidate) => candidate.id === session.projectId) ?? null;
+  void copyTextToClipboard(
+    formatSessionDetails(session, {
+      projectLabel: project?.name || project?.path || "(unknown project)",
+    }),
+  ).then((copied) => {
+    if (!copied) {
+      logError("Failed copying session details", "Clipboard API unavailable");
+    }
+  });
+}
+
+function openProjectLocationById(
+  history: HistoryController,
+  logError: (context: string, error: unknown) => void,
+  projectId?: string,
+): void {
+  const targetProjectId = projectId || history.selectedProjectId;
+  const project = history.sortedProjects.find((candidate) => candidate.id === targetProjectId);
+  if (!project?.path?.trim()) {
+    return;
+  }
+  void openInFileManager(history.sortedProjects, targetProjectId).then((result) => {
+    if (!result.ok) {
+      logError("Failed opening project location", result.error ?? "Unknown error");
+    }
+  });
+}
+
+function openSessionLocationById(
+  history: HistoryController,
+  logError: (context: string, error: unknown) => void,
+  sessionId?: string,
+): void {
+  const targetSessionId = sessionId || history.selectedSessionId;
+  const session = findSessionSummaryById(
+    targetSessionId,
+    history.sortedSessions,
+    history.treeProjectSessionsByProjectId,
+  );
+  if (!session?.filePath?.trim()) {
+    return;
+  }
+  void openPath(session.filePath).then((result) => {
+    if (!result.ok) {
+      logError("Failed opening session location", result.error ?? "Unknown error");
+    }
+  });
+}
+
 export function HistoryLayout({
   history,
   advancedSearchEnabled,
@@ -86,84 +174,18 @@ export function HistoryLayout({
             history.setSingleClickFoldersExpand((value) => !value),
           onToggleSingleClickProjectsExpand: () =>
             history.setSingleClickProjectsExpand((value) => !value),
-          onCopyProjectDetails: (projectId) => {
-            if (!projectId) {
-              void history.handleCopyProjectDetails();
-              return;
-            }
-            const project = history.sortedProjects.find((candidate) => candidate.id === projectId);
-            if (!project) {
-              return;
-            }
-            void copyTextToClipboard(formatProjectDetails(project)).then((copied) => {
-              if (!copied) {
-                logError("Failed copying project details", "Clipboard API unavailable");
-              }
-            });
-          },
-          onCopySession: (sessionId) => {
-            if (!sessionId) {
-              void history.handleCopySessionDetails();
-              return;
-            }
-            const session = findSessionSummaryById(
-              sessionId,
-              history.sortedSessions,
-              history.treeProjectSessionsByProjectId,
-            );
-            if (!session) {
-              return;
-            }
-            const project =
-              history.sortedProjects.find((candidate) => candidate.id === session.projectId) ??
-              null;
-            void copyTextToClipboard(
-              formatSessionDetails(session, {
-                projectLabel: project?.name || project?.path || "(unknown project)",
-              }),
-            ).then((copied) => {
-              if (!copied) {
-                logError("Failed copying session details", "Clipboard API unavailable");
-              }
-            });
-          },
+          onCopyProjectDetails: (projectId) => copyProjectDetailsById(history, logError, projectId),
+          onCopySession: (sessionId) => copySessionDetailsById(history, logError, sessionId),
           onSelectProject: history.selectProjectAllMessages,
           onSelectProjectSession: (projectId, sessionId) =>
             history.selectSessionView(sessionId, projectId),
           onSelectProjectBookmarks: history.openProjectBookmarksView,
           onEnsureTreeProjectSessionsLoaded: history.ensureTreeProjectSessionsLoaded,
           onDeleteProject,
-          onOpenProjectLocation: (projectId) => {
-            const targetProjectId = projectId || history.selectedProjectId;
-            const project = history.sortedProjects.find(
-              (candidate) => candidate.id === targetProjectId,
-            );
-            if (!project?.path?.trim()) {
-              return;
-            }
-            void openInFileManager(history.sortedProjects, targetProjectId).then((result) => {
-              if (!result.ok) {
-                logError("Failed opening project location", result.error ?? "Unknown error");
-              }
-            });
-          },
-          onOpenSessionLocation: (sessionId) => {
-            const session = sessionId
-              ? findSessionSummaryById(
-                  sessionId,
-                  history.sortedSessions,
-                  history.treeProjectSessionsByProjectId,
-                )
-              : null;
-            if (!session?.filePath?.trim()) {
-              return;
-            }
-            void openPath(session.filePath).then((result) => {
-              if (!result.ok) {
-                logError("Failed opening session location", result.error ?? "Unknown error");
-              }
-            });
-          },
+          onOpenProjectLocation: (projectId) =>
+            openProjectLocationById(history, logError, projectId),
+          onOpenSessionLocation: (sessionId) =>
+            openSessionLocationById(history, logError, sessionId),
           onDeleteSession,
         }}
         capabilities={{
@@ -194,48 +216,9 @@ export function HistoryLayout({
         onToggleSortDirection={() =>
           history.setSessionSortDirection((value) => (value === "asc" ? "desc" : "asc"))
         }
-        onCopySession={(sessionId) => {
-          if (!sessionId) {
-            void history.handleCopySessionDetails();
-            return;
-          }
-          const session = findSessionSummaryById(
-            sessionId,
-            history.sortedSessions,
-            history.treeProjectSessionsByProjectId,
-          );
-          if (!session) {
-            return;
-          }
-          const project =
-            history.sortedProjects.find((candidate) => candidate.id === session.projectId) ?? null;
-          void copyTextToClipboard(
-            formatSessionDetails(session, {
-              projectLabel: project?.name || project?.path || "(unknown project)",
-            }),
-          ).then((copied) => {
-            if (!copied) {
-              logError("Failed copying session details", "Clipboard API unavailable");
-            }
-          });
-        }}
+        onCopySession={(sessionId) => copySessionDetailsById(history, logError, sessionId)}
         onDeleteSession={onDeleteSession}
-        onOpenSessionLocation={(sessionId) => {
-          const targetSessionId = sessionId || history.selectedSessionId;
-          const session = findSessionSummaryById(
-            targetSessionId,
-            history.sortedSessions,
-            history.treeProjectSessionsByProjectId,
-          );
-          if (!session?.filePath?.trim()) {
-            return;
-          }
-          void openPath(session.filePath).then((result) => {
-            if (!result.ok) {
-              logError("Failed opening session location", result.error ?? "Unknown error");
-            }
-          });
-        }}
+        onOpenSessionLocation={(sessionId) => openSessionLocationById(history, logError, sessionId)}
         onSelectAllSessions={() => {
           history.selectProjectAllMessages(history.selectedProjectId);
         }}

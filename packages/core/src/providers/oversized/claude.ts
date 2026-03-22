@@ -4,15 +4,15 @@ import type {
 } from "../types";
 
 import {
+  appendOversizedSanitization,
   asProviderJsonArray,
   asProviderJsonObject,
   buildInlineMediaPlaceholder,
   collectSanitizedValue,
-  estimateDecodedBase64Bytes,
   emptyOversizedSanitization,
+  estimateDecodedBase64Bytes,
   fromBase64Field,
   inferMediaKindFromMimeType,
-  mergeOversizedSanitizations,
 } from "./shared";
 
 export function sanitizeClaudeOversizedJsonlEvent(
@@ -77,7 +77,7 @@ export function sanitizeClaudeOversizedJsonlEvent(
       descriptor,
       { transformedShape: true },
     );
-    sanitization = mergeOversizedSanitizations(sanitization, transformed.sanitization)!;
+    sanitization = appendOversizedSanitization(sanitization, transformed.sanitization);
     return transformed.value;
   });
 

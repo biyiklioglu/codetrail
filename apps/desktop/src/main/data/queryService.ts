@@ -348,6 +348,8 @@ function listProjectsWithDatabase(
     message_count: number;
     last_activity: string | null;
   }>;
+  const bookmarkCounts =
+    bookmarkStore.countProjectBookmarksByProjectIds?.(rows.map((row) => row.id)) ?? {};
 
   return {
     projects: rows.map((row) => ({
@@ -357,7 +359,7 @@ function listProjectsWithDatabase(
       path: row.path,
       sessionCount: row.session_count,
       messageCount: row.message_count,
-      bookmarkCount: bookmarkStore.countProjectBookmarks(row.id),
+      bookmarkCount: bookmarkCounts[row.id] ?? bookmarkStore.countProjectBookmarks(row.id),
       lastActivity: row.last_activity,
     })),
   };
@@ -396,12 +398,22 @@ function listSessionsWithDatabase(
        ORDER BY COALESCE(s.ended_at, s.started_at) DESC, s.id DESC`,
     )
     .all(...params) as SessionSummaryRow[];
+  const sessionBookmarkCounts =
+    request.projectId && bookmarkStore.countSessionBookmarksBySessionIds
+      ? bookmarkStore.countSessionBookmarksBySessionIds(
+          request.projectId,
+          rows.map((row) => row.id),
+        )
+      : {};
 
   return {
     sessions: rows.map((row) =>
       mapSessionSummaryRow(
         row,
-        request.projectId ? bookmarkStore.countSessionBookmarks(request.projectId, row.id) : 0,
+        request.projectId
+          ? (sessionBookmarkCounts[row.id] ??
+              bookmarkStore.countSessionBookmarks(request.projectId, row.id))
+          : 0,
       ),
     ),
   };

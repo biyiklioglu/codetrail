@@ -194,6 +194,8 @@ function buildFilters(
   const conditions: string[] = [];
   const params: Array<string | number> = [];
 
+  appendInFilter(conditions, params, "s.provider", PROVIDER_VALUES);
+
   if (includeCategories && input.categories !== undefined) {
     appendInFilter(conditions, params, "m.category", normalizeMessageCategories(input.categories));
   }
@@ -238,7 +240,7 @@ function normalizeProvider(value: string): Provider {
   if (PROVIDER_VALUES.includes(value as Provider)) {
     return value as Provider;
   }
-  return "claude";
+  throw new Error(`Unexpected provider value in search row: ${value}`);
 }
 
 function appendInFilter<T extends string | number>(

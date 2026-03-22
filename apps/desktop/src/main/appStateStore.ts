@@ -490,17 +490,21 @@ function sanitizeSystemMessageRegexRules(value: unknown): Record<Provider, strin
 
   const record = value as Record<string, unknown>;
   const rules = createProviderRecord<string[]>(() => []);
+  let sawAnyProviderRules = false;
 
   for (const provider of PROVIDER_VALUES) {
     const rawPatterns = record[provider];
+    if (rawPatterns === undefined) {
+      continue;
+    }
     if (!Array.isArray(rawPatterns) || rawPatterns.length > SYSTEM_MESSAGE_RULES_MAX) {
-      return null;
+      continue;
     }
 
     const patterns: string[] = [];
     for (const rawPattern of rawPatterns) {
       if (typeof rawPattern !== "string") {
-        return null;
+        continue;
       }
       const pattern = rawPattern.trim();
       if (pattern.length === 0 || pattern.length > SYSTEM_MESSAGE_RULE_LENGTH_MAX) {
@@ -512,7 +516,8 @@ function sanitizeSystemMessageRegexRules(value: unknown): Record<Provider, strin
     }
 
     rules[provider] = patterns;
+    sawAnyProviderRules = true;
   }
 
-  return rules;
+  return sawAnyProviderRules ? rules : null;
 }

@@ -84,7 +84,6 @@ export function useHistoryInteractions({
   sessionListRef,
   selectedSessionId,
   sessionPaneNavigationItems,
-  sortedProjects,
   projectListRef,
   canNavigatePages,
   totalPages,
@@ -101,7 +100,6 @@ export function useHistoryInteractions({
   loadSessions,
   setProjectProviders,
   setProjectQueryInput,
-  prettyProvider,
   refreshContextRef,
   refreshTreeProjectSessions,
 }: {
@@ -142,7 +140,6 @@ export function useHistoryInteractions({
   sessionListRef: RefObject<HTMLDivElement | null>;
   selectedSessionId: string;
   sessionPaneNavigationItems: SessionPaneNavigationItem[];
-  sortedProjects: ProjectSummary[];
   projectListRef: RefObject<HTMLDivElement | null>;
   canNavigatePages: boolean;
   totalPages: number;
@@ -159,7 +156,6 @@ export function useHistoryInteractions({
   loadSessions: () => Promise<void>;
   setProjectProviders: Dispatch<SetStateAction<Provider[]>>;
   setProjectQueryInput: Dispatch<SetStateAction<string>>;
-  prettyProvider: (provider: ProjectSummary["provider"]) => string;
   refreshContextRef: MutableRefObject<RefreshContext | null>;
   refreshTreeProjectSessions: () => Promise<void>;
 }) {
@@ -671,6 +667,7 @@ export function useHistoryInteractions({
       const canAdvancePage =
         direction === "next" ? canGoToNextHistoryPage : canGoToPreviousHistoryPage;
       if (!canAdvancePage) {
+        setPendingMessageAreaFocus(true);
         return;
       }
 

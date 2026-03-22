@@ -47,7 +47,10 @@ export function SearchView({
   const projectMenuRef = useRef<HTMLDivElement | null>(null);
   const queryPlaceholder = getSearchQueryPlaceholder(advancedSearchEnabled);
   const queryTitle = getSearchQueryTooltip(advancedSearchEnabled);
-  const sortedProjects = [...projects].sort(compareProjectsByNameThenProvider);
+  const sortedProjects = useMemo(
+    () => [...projects].sort(compareProjectsByNameThenProvider),
+    [projects],
+  );
   const selectedProject = useMemo(
     () => sortedProjects.find((project) => project.id === search.searchProjectId) ?? null,
     [search.searchProjectId, sortedProjects],

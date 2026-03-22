@@ -61,7 +61,12 @@ export type BookmarkStore = {
     searchMode?: SearchMode,
   ) => StoredBookmark[];
   countProjectBookmarks: (projectId: string) => number;
+  countProjectBookmarksByProjectIds?: (projectIds: string[]) => Record<string, number>;
   countSessionBookmarks: (projectId: string, sessionId: string) => number;
+  countSessionBookmarksBySessionIds?: (
+    projectId: string,
+    sessionIds: string[],
+  ) => Record<string, number>;
   getBookmark: (projectId: string, messageId: string) => StoredBookmark | null;
   upsertBookmark: (snapshot: Omit<BookmarkSnapshot, "snapshotVersion" | "snapshotJson">) => void;
   removeBookmark: (projectId: string, messageId: string) => boolean;
@@ -232,9 +237,15 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
       const row = countStmt.get(projectId) as { cnt: number } | undefined;
       return Number(row?.cnt ?? 0);
     },
+    countProjectBookmarksByProjectIds: (projectIds) => {
+      return countBookmarksByProjectIds(db, projectIds);
+    },
     countSessionBookmarks: (projectId, sessionId) => {
       const row = countSessionStmt.get(projectId, sessionId) as { cnt: number } | undefined;
       return Number(row?.cnt ?? 0);
+    },
+    countSessionBookmarksBySessionIds: (projectId, sessionIds) => {
+      return countBookmarksBySessionIds(db, projectId, sessionIds);
     },
     getBookmark: (projectId, messageId) => {
       const row = getStmt.get(projectId, messageId) as StoredBookmark | undefined;
@@ -402,14 +413,6 @@ function reconcileBookmarks(
          AND message_id = ?`,
     );
 
-    const projectExistsStmt = indexedDb.prepare("SELECT 1 as present FROM projects WHERE id = ?");
-    const sessionExistsStmt = indexedDb.prepare(
-      "SELECT 1 as present FROM sessions WHERE id = ? AND project_id = ?",
-    );
-    const messageExistsStmt = indexedDb.prepare(
-      "SELECT 1 as present FROM messages WHERE id = ? AND session_id = ?",
-    );
-
     const rows = listStmt.all() as Array<{
       project_id: string;
       session_id: string;
@@ -423,11 +426,13 @@ function reconcileBookmarks(
       markedOrphaned: 0,
       restored: 0,
     };
+    const existingProjectIds = loadExistingIds(indexedDb, "projects", "id");
+    const existingSessionIds = loadExistingSessionProjectPairs(indexedDb);
+    const existingMessageIds = loadExistingMessageSessionPairs(indexedDb);
 
     const run = bookmarksDb.transaction(() => {
       for (const row of rows) {
-        const projectExists = !!projectExistsStmt.get(row.project_id);
-        if (!projectExists) {
+        if (!existingProjectIds.has(row.project_id)) {
           const info = deleteStmt.run(row.project_id, row.message_id);
           if (info.changes > 0) {
             result.deletedMissingProjects += 1;
@@ -435,8 +440,8 @@ function reconcileBookmarks(
           continue;
         }
 
-        const sessionExists = !!sessionExistsStmt.get(row.session_id, row.project_id);
-        const messageExists = !!messageExistsStmt.get(row.message_id, row.session_id);
+        const sessionExists = existingSessionIds.has(`${row.project_id}\u0000${row.session_id}`);
+        const messageExists = existingMessageIds.has(`${row.session_id}\u0000${row.message_id}`);
         const shouldBeOrphaned = !sessionExists || !messageExists;
 
         if (shouldBeOrphaned) {
@@ -478,3 +483,76 @@ export type BookmarkMessageSnapshot = {
   operationDurationSource: OperationDurationSource | null;
   operationDurationConfidence: OperationDurationConfidence | null;
 };
+
+function countBookmarksByProjectIds(
+  db: DatabaseHandle,
+  projectIds: string[],
+): Record<string, number> {
+  if (projectIds.length === 0) {
+    return {};
+  }
+
+  const placeholders = projectIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT project_id, COUNT(*) as cnt
+       FROM bookmarks
+       WHERE project_id IN (${placeholders})
+       GROUP BY project_id`,
+    )
+    .all(...projectIds) as Array<{ project_id: string; cnt: number }>;
+
+  const counts = Object.fromEntries(projectIds.map((projectId) => [projectId, 0]));
+  for (const row of rows) {
+    counts[row.project_id] = Number(row.cnt ?? 0);
+  }
+  return counts;
+}
+
+function countBookmarksBySessionIds(
+  db: DatabaseHandle,
+  projectId: string,
+  sessionIds: string[],
+): Record<string, number> {
+  if (sessionIds.length === 0) {
+    return {};
+  }
+
+  const placeholders = sessionIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT session_id, COUNT(*) as cnt
+       FROM bookmarks
+       WHERE project_id = ?
+         AND session_id IN (${placeholders})
+       GROUP BY session_id`,
+    )
+    .all(projectId, ...sessionIds) as Array<{ session_id: string; cnt: number }>;
+
+  const counts = Object.fromEntries(sessionIds.map((sessionId) => [sessionId, 0]));
+  for (const row of rows) {
+    counts[row.session_id] = Number(row.cnt ?? 0);
+  }
+  return counts;
+}
+
+function loadExistingIds(db: DatabaseHandle, table: "projects", idColumn: "id"): Set<string> {
+  const rows = db.prepare(`SELECT ${idColumn} as id FROM ${table}`).all() as Array<{ id: string }>;
+  return new Set(rows.map((row) => row.id));
+}
+
+function loadExistingSessionProjectPairs(db: DatabaseHandle): Set<string> {
+  const rows = db.prepare("SELECT id, project_id FROM sessions").all() as Array<{
+    id: string;
+    project_id: string;
+  }>;
+  return new Set(rows.map((row) => `${row.project_id}\u0000${row.id}`));
+}
+
+function loadExistingMessageSessionPairs(db: DatabaseHandle): Set<string> {
+  const rows = db.prepare("SELECT id, session_id FROM messages").all() as Array<{
+    id: string;
+    session_id: string;
+  }>;
+  return new Set(rows.map((row) => `${row.session_id}\u0000${row.id}`));
+}

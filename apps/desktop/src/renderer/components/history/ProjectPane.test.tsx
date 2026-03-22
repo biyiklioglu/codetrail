@@ -230,8 +230,6 @@ describe("ProjectPane", () => {
   });
 
   it("resets seen folders when switching away from tree view and back", async () => {
-    const user = userEvent.setup();
-
     const { rerender } = renderProjectPane({
       data: {
         viewMode: "tree",

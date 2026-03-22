@@ -53,21 +53,43 @@ export type BootstrapResult = {
   tableCount: number;
 };
 
-// The main process owns long-lived resources: databases, IPC handlers, indexing workers, and the
-// path allowlist used by shell integrations.
-const runtimeState: {
+type MainProcessRuntimeState = {
   queryService: QueryService | null;
   fileWatcher: FileWatcherService | null;
   watcherDebounceMs: 1000 | 3000 | 5000 | null;
-} = {
-  queryService: null,
-  fileWatcher: null,
-  watcherDebounceMs: null,
 };
+
+// The main process owns long-lived resources: databases, IPC handlers, indexing workers, and the
+// path allowlist used by shell integrations.
+let runtimeState: MainProcessRuntimeState | null = null;
+
+function createRuntimeState(): MainProcessRuntimeState {
+  return {
+    queryService: null,
+    fileWatcher: null,
+    watcherDebounceMs: null,
+  };
+}
+
+async function disposeRuntimeState(state: MainProcessRuntimeState | null): Promise<void> {
+  if (!state) {
+    return;
+  }
+  if (state.fileWatcher) {
+    await state.fileWatcher.stop();
+    state.fileWatcher = null;
+  }
+  state.watcherDebounceMs = null;
+  state.queryService?.close();
+  state.queryService = null;
+}
 
 export async function bootstrapMainProcess(
   options: BootstrapOptions = {},
 ): Promise<BootstrapResult> {
+  await disposeRuntimeState(runtimeState);
+  const runtime = createRuntimeState();
+  runtimeState = runtime;
   const dbPath = options.dbPath ?? join(app.getPath("userData"), "codetrail.sqlite");
   const bookmarksDbPath = resolveBookmarksDbPath(dbPath);
   const settingsFilePath =
@@ -105,11 +127,8 @@ export async function bootstrapMainProcess(
     ...(options.onIndexingFileIssue ? { onFileIssue: options.onIndexingFileIssue } : {}),
     ...(options.onIndexingNotice ? { onNotice: options.onIndexingNotice } : {}),
   });
-  if (runtimeState.queryService) {
-    runtimeState.queryService.close();
-  }
   const queryService = createQueryService(dbPath, { bookmarksDbPath });
-  runtimeState.queryService = queryService;
+  runtime.queryService = queryService;
   let allowedRootsCache: { roots: string[]; expiresAt: number } | null = null;
   const readAllowedRoots = (): string[] => {
     const now = Date.now();
@@ -138,9 +157,9 @@ export async function bootstrapMainProcess(
       : [...getEnabledProviders()];
 
   const startWatcherWithConfig = async (debounceMs: 1000 | 3000 | 5000) => {
-    if (runtimeState.fileWatcher) {
-      await runtimeState.fileWatcher.stop();
-      runtimeState.fileWatcher = null;
+    if (runtime.fileWatcher) {
+      await runtime.fileWatcher.stop();
+      runtime.fileWatcher = null;
     }
 
     const watcherRoots = listDiscoveryWatchRoots(getEffectiveDiscoveryConfig());
@@ -181,8 +200,8 @@ export async function bootstrapMainProcess(
     ) => {
       const fileWatcher = createFileWatcher(watcherOptions);
       await fileWatcher.start();
-      runtimeState.fileWatcher = fileWatcher;
-      runtimeState.watcherDebounceMs = debounceMs;
+      runtime.fileWatcher = fileWatcher;
+      runtime.watcherDebounceMs = debounceMs;
       watchStatsStore.recordWatcherStart({
         backend,
         watchedRootCount: fileWatcher.getWatchedRoots().length,
@@ -373,11 +392,11 @@ export async function bootstrapMainProcess(
             }
           }
         }
-        if (runtimeState.fileWatcher && runtimeState.watcherDebounceMs !== null) {
+        if (runtime.fileWatcher && runtime.watcherDebounceMs !== null) {
           try {
-            await startWatcherWithConfig(runtimeState.watcherDebounceMs);
+            await startWatcherWithConfig(runtime.watcherDebounceMs);
           } catch {
-            runtimeState.watcherDebounceMs = null;
+            runtime.watcherDebounceMs = null;
           }
         }
       }
@@ -440,7 +459,7 @@ export async function bootstrapMainProcess(
     },
     "watcher:getStatus": async () => {
       return (
-        runtimeState.fileWatcher?.getStatus() ?? {
+        runtime.fileWatcher?.getStatus() ?? {
           running: false,
           processing: false,
           pendingPathCount: 0,
@@ -449,11 +468,11 @@ export async function bootstrapMainProcess(
     },
     "watcher:getStats": async () => watchStatsStore.snapshot(),
     "watcher:stop": async () => {
-      if (runtimeState.fileWatcher) {
-        await runtimeState.fileWatcher.stop();
-        runtimeState.fileWatcher = null;
+      if (runtime.fileWatcher) {
+        await runtime.fileWatcher.stop();
+        runtime.fileWatcher = null;
       }
-      runtimeState.watcherDebounceMs = null;
+      runtime.watcherDebounceMs = null;
       return { ok: true };
     },
   });
@@ -477,16 +496,8 @@ export async function bootstrapMainProcess(
 }
 
 export async function shutdownMainProcess(): Promise<void> {
-  if (runtimeState.fileWatcher) {
-    await runtimeState.fileWatcher.stop();
-    runtimeState.fileWatcher = null;
-  }
-  runtimeState.watcherDebounceMs = null;
-  if (!runtimeState.queryService) {
-    return;
-  }
-  runtimeState.queryService.close();
-  runtimeState.queryService = null;
+  await disposeRuntimeState(runtimeState);
+  runtimeState = null;
 }
 
 function getAllowedOpenInFileManagerRoots(input: {

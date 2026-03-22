@@ -20,6 +20,7 @@ import {
   createBookmarkStore,
   resolveBookmarksDbPath,
 } from "./data/bookmarkStore";
+import type { IndexingJobSource } from "./indexingJobSource";
 import {
   type IndexingWorkerRequest,
   buildSharedIndexingRequestSettings,
@@ -35,14 +36,6 @@ export type RefreshJobRequest = {
 export type RefreshJobResponse = {
   jobId: string;
 };
-
-export type IndexingJobSource =
-  | "startup_incremental"
-  | "manual_incremental"
-  | "manual_force_reindex"
-  | "watch_targeted"
-  | "watch_fallback_incremental"
-  | "watch_initial_scan";
 
 export type IndexingStatus = {
   running: boolean;

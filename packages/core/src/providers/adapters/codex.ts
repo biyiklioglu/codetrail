@@ -5,19 +5,14 @@ import { PROVIDER_EVENT_PARSERS, PROVIDER_PAYLOAD_PARSERS } from "../../parsing/
 import { sanitizeCodexOversizedJsonlEvent } from "../oversized/codex";
 
 import type { ProviderAdapter } from "../types";
-import {
-  defaultTimestampNormalization,
-  emptySourceMetadata,
-  readJsonlStreamSource,
-  sortModels,
-} from "./shared";
+import { defaultTimestampNormalization, emptySourceMetadata, sortModels } from "./shared";
 
 export const codexAdapter: ProviderAdapter = {
   ...PROVIDER_METADATA.codex,
+  sourceFormat: "jsonl_stream",
   supportsIncrementalCheckpoints: true,
   discoverAll: discoverCodexFiles,
   discoverOne: discoverSingleCodexFile,
-  readSource: readJsonlStreamSource,
   sanitizeOversizedJsonlEvent: sanitizeCodexOversizedJsonlEvent,
   parsePayload: PROVIDER_PAYLOAD_PARSERS.codex,
   parseEvent: PROVIDER_EVENT_PARSERS.codex,

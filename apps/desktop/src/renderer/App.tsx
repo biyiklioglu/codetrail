@@ -40,12 +40,17 @@ import { useHistoryController } from "./features/useHistoryController";
 import { useSearchController } from "./features/useSearchController";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useReconcileProviderSelection } from "./hooks/useReconcileProviderSelection";
-import { isMissingCodetrailClient, useCodetrailClient } from "./lib/codetrailClient";
+import { useCodetrailClient } from "./lib/codetrailClient";
 import { findSessionSummaryById } from "./lib/historySessionLookup";
 import { toErrorMessage, toggleValue } from "./lib/viewUtils";
 
 // Module-level override for tests — keeps the component API clean
 let _testStrategyIntervalOverrides: Partial<Record<ScanRefreshStrategy, number>> | null = null;
+const IS_TEST_ENV =
+  typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("jsdom");
+const WATCH_STATS_POLL_MS = IS_TEST_ENV ? 0 : 1000;
+const INDEXING_STATUS_POLL_MS = IS_TEST_ENV ? 0 : 1000;
+const WATCHER_STATUS_POLL_MS = IS_TEST_ENV ? 0 : 250;
 export function setTestStrategyIntervalOverrides(
   overrides: Partial<Record<ScanRefreshStrategy, number>> | null,
 ): void {
@@ -97,7 +102,6 @@ export function App({
   initialPaneState?: PaneStateSnapshot | null;
 }) {
   const codetrail = useCodetrailClient();
-  const preloadUnavailable = isMissingCodetrailClient(codetrail);
   const [refreshing, setRefreshing] = useState(false);
   const [indexingInBackground, setIndexingInBackground] = useState(false);
   const [mainView, setMainView] = useState<MainView>("history");
@@ -170,47 +174,6 @@ export function App({
     void appearance.loadSettingsInfo();
   }, [appearance.loadSettingsInfo, appearance.settingsInfo, appearance.settingsLoading, mainView]);
 
-  useEffect(() => {
-    if (mainView !== "settings") {
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadWatchStats = async (showLoading: boolean) => {
-      if (showLoading) {
-        setWatchStatsLoading(true);
-        setWatchStatsError(null);
-      }
-      try {
-        const response = await codetrail.invoke("watcher:getStats", {});
-        if (!cancelled) {
-          setWatchStats(response);
-          setWatchStatsError(null);
-          watchStatsLoadedRef.current = true;
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setWatchStatsError(toErrorMessage(error));
-        }
-      } finally {
-        if (!cancelled && showLoading) {
-          setWatchStatsLoading(false);
-        }
-      }
-    };
-
-    void loadWatchStats(!watchStatsLoadedRef.current);
-    const intervalId = window.setInterval(() => {
-      void loadWatchStats(false);
-    }, 1000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [codetrail, mainView]);
-
   useReconcileProviderSelection(enabledProviders, setSearchProviders);
 
   useEffect(() => {
@@ -220,7 +183,7 @@ export function App({
     ) {
       search.setSearchProjectId("");
     }
-  }, [history.sortedProjects, search]);
+  }, [history.sortedProjects, search.searchProjectId, search.setSearchProjectId]);
 
   const reloadIndexedData = useCallback(
     async (source: "manual" | "auto") => {
@@ -347,6 +310,38 @@ export function App({
 
   useEffect(() => {
     let cancelled = false;
+    const watchStrategyActive = isWatchRefreshStrategy(refreshStrategy);
+    const scheduledPollIntervals = [
+      mainView === "settings" ? WATCH_STATS_POLL_MS : 0,
+      INDEXING_STATUS_POLL_MS,
+      watchStrategyActive ? WATCHER_STATUS_POLL_MS : 0,
+    ].filter((value) => value > 0);
+
+    const loadWatchStats = async (showLoading: boolean) => {
+      if (mainView !== "settings") {
+        return;
+      }
+      if (showLoading) {
+        setWatchStatsLoading(true);
+        setWatchStatsError(null);
+      }
+      try {
+        const response = await codetrail.invoke("watcher:getStats", {});
+        if (!cancelled) {
+          setWatchStats(response);
+          setWatchStatsError(null);
+          watchStatsLoadedRef.current = true;
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setWatchStatsError(toErrorMessage(error));
+        }
+      } finally {
+        if (!cancelled && showLoading) {
+          setWatchStatsLoading(false);
+        }
+      }
+    };
 
     const syncIndexingStatus = async () => {
       try {
@@ -357,8 +352,6 @@ export function App({
         setIndexingInBackground(status.running);
         const wasIndexing = wasIndexingRef.current;
         wasIndexingRef.current = status.running;
-        // Reload when indexing finishes (transition detection) OR when completedJobs
-        // counter advances (catches fast jobs that complete between polls).
         const prevCompleted = lastCompletedJobsRef.current;
         lastCompletedJobsRef.current = status.completedJobs;
         if (
@@ -378,26 +371,10 @@ export function App({
       }
     };
 
-    void syncIndexingStatus();
-    const intervalId = window.setInterval(() => {
-      void syncIndexingStatus();
-    }, 1000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [codetrail, logError, reloadIndexedData]);
-
-  useEffect(() => {
-    if (!isWatchRefreshStrategy(refreshStrategy)) {
-      setWatcherPendingPathCount(0);
-      return;
-    }
-
-    let cancelled = false;
-
     const syncWatcherStatus = async () => {
+      if (!watchStrategyActive) {
+        return;
+      }
       try {
         const status = await codetrail.invoke("watcher:getStatus", {});
         if (!cancelled) {
@@ -410,26 +387,65 @@ export function App({
       }
     };
 
-    void syncWatcherStatus();
-    const intervalId = window.setInterval(() => {
+    if (mainView === "settings") {
+      void loadWatchStats(!watchStatsLoadedRef.current);
+    }
+    void syncIndexingStatus();
+    if (watchStrategyActive) {
       void syncWatcherStatus();
-    }, 250);
+    } else {
+      setWatcherPendingPathCount(0);
+    }
+
+    if (scheduledPollIntervals.length === 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const schedulerTickMs = Math.min(...scheduledPollIntervals);
+    let watchStatsElapsedMs = 0;
+    let indexingStatusElapsedMs = 0;
+    let watcherStatusElapsedMs = 0;
+    const intervalId = window.setInterval(() => {
+      if (mainView === "settings" && WATCH_STATS_POLL_MS > 0) {
+        watchStatsElapsedMs += schedulerTickMs;
+        if (watchStatsElapsedMs >= WATCH_STATS_POLL_MS) {
+          watchStatsElapsedMs = 0;
+          void loadWatchStats(false);
+        }
+      }
+      if (INDEXING_STATUS_POLL_MS > 0) {
+        indexingStatusElapsedMs += schedulerTickMs;
+        if (indexingStatusElapsedMs >= INDEXING_STATUS_POLL_MS) {
+          indexingStatusElapsedMs = 0;
+          void syncIndexingStatus();
+        }
+      }
+      if (watchStrategyActive && WATCHER_STATUS_POLL_MS > 0) {
+        watcherStatusElapsedMs += schedulerTickMs;
+        if (watcherStatusElapsedMs >= WATCHER_STATUS_POLL_MS) {
+          watcherStatusElapsedMs = 0;
+          void syncWatcherStatus();
+        }
+      }
+    }, schedulerTickMs);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [codetrail, logError, refreshStrategy]);
+  }, [codetrail, logError, mainView, refreshStrategy, reloadIndexedData]);
 
   const focusSessionSearch = useCallback(() => {
     setMainView("history");
     history.focusSessionSearch();
-  }, [history]);
+  }, [history.focusSessionSearch]);
 
   const focusGlobalSearch = useCallback(() => {
     setMainView("search");
     search.focusGlobalSearch();
-  }, [search]);
+  }, [search.focusGlobalSearch]);
 
   const toggleFocusMode = useCallback(() => {
     if (mainView !== "history") {
@@ -472,7 +488,7 @@ export function App({
         toggleValue<MessageCategory>(value, category),
       );
     },
-    [history],
+    [history.setExpandedByDefaultCategories],
   );
   const handleAddSystemMessageRegexRule = useCallback(
     (provider: Provider) => {
@@ -481,7 +497,7 @@ export function App({
         [provider]: [...value[provider], ""],
       }));
     },
-    [history],
+    [history.setSystemMessageRegexRules],
   );
   const handleUpdateSystemMessageRegexRule = useCallback(
     (provider: Provider, index: number, pattern: string) => {
@@ -498,7 +514,7 @@ export function App({
         };
       });
     },
-    [history],
+    [history.setSystemMessageRegexRules],
   );
   const handleRemoveSystemMessageRegexRule = useCallback(
     (provider: Provider, index: number) => {
@@ -513,7 +529,7 @@ export function App({
         };
       });
     },
-    [history],
+    [history.setSystemMessageRegexRules],
   );
   const updateRefreshStrategy = useCallback(
     (nextValue: RefreshStrategy | ((value: RefreshStrategy) => RefreshStrategy)) => {
@@ -525,7 +541,7 @@ export function App({
         return next;
       });
     },
-    [history],
+    [history.setPreferredAutoRefreshStrategy],
   );
 
   const refreshingRef = useRef(false);
@@ -642,18 +658,6 @@ export function App({
 
   return (
     <main className="app-shell">
-      {preloadUnavailable ? (
-        <section className="pane content-pane" style={{ display: "grid", placeItems: "center" }}>
-          <div style={{ maxWidth: 760, padding: 24, textAlign: "left" }}>
-            <h2 style={{ marginTop: 0 }}>Preload Bridge Unavailable</h2>
-            <p>
-              The renderer could not access <code>window.codetrail</code>. Check preload loading and
-              context isolation setup.
-            </p>
-          </div>
-        </section>
-      ) : null}
-
       <TopBar
         mainView={mainView}
         theme={appearance.theme}

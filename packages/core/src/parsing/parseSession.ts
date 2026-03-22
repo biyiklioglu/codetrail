@@ -6,7 +6,6 @@ import {
   type ParseSessionResult,
   type ParserDiagnostic,
   parseSessionInputSchema,
-  parseSessionResultSchema,
 } from "./contracts";
 import type { ParsedProviderMessage } from "./providerParsers";
 
@@ -39,10 +38,10 @@ export function parseSession(input: ParseSessionInput): ParseSessionResult {
     });
   }
 
-  return parseSessionResultSchema.parse({
+  return {
     messages,
     diagnostics,
-  });
+  };
 }
 
 export function parseSessionEvent(args: {
@@ -56,15 +55,10 @@ export function parseSessionEvent(args: {
   messages: ParseSessionResult["messages"];
   nextSequence: number;
 } {
-  const validated = parseSessionInputSchema.parse({
+  const adapter = getProviderAdapter(args.provider);
+  const parsed = adapter.parseEvent({
     provider: args.provider,
     sessionId: args.sessionId,
-    payload: null,
-  });
-  const adapter = getProviderAdapter(validated.provider);
-  const parsed = adapter.parseEvent({
-    provider: validated.provider,
-    sessionId: validated.sessionId,
     eventIndex: args.eventIndex,
     event: args.event,
     diagnostics: args.diagnostics,
@@ -73,8 +67,8 @@ export function parseSessionEvent(args: {
 
   return {
     messages: normalizeParsedMessages(
-      validated.provider,
-      validated.sessionId,
+      args.provider,
+      args.sessionId,
       args.diagnostics,
       parsed.messages,
     ),

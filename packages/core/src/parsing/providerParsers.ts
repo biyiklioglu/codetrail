@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   MessageCategory,
   OperationDurationConfidence,
@@ -1331,7 +1333,7 @@ function dedupeSegments(segments: EventSegment[]): EventSegment[] {
       continue;
     }
 
-    const key = `${segment.category}:${segment.content}`;
+    const key = `${segment.category}:${createHash("sha1").update(segment.content, "utf8").digest("hex")}`;
     if (seen.has(key)) {
       continue;
     }

@@ -94,33 +94,6 @@ export function getFirstVisibleMessageId(container: HTMLElement | null): string 
   return messageElements[0]?.dataset.historyMessageId ?? "";
 }
 
-export function getAdjacentVisibleProjectId(
-  container: HTMLElement | null,
-  currentId: string,
-  direction: Direction,
-): string {
-  if (!container) {
-    return "";
-  }
-
-  const projectElements = Array.from(container.querySelectorAll<HTMLElement>(PROJECT_SELECTOR));
-  const projectIds = projectElements
-    .map((element) => element.dataset.projectNavId ?? "")
-    .filter((id) => id.length > 0);
-
-  if (projectIds.length === 0) {
-    return "";
-  }
-
-  const nextProjectId = getAdjacentItemId(
-    projectIds.map((id) => ({ id })),
-    currentId,
-    direction,
-  );
-
-  return nextProjectId ?? "";
-}
-
 function getNavigationTargetKey(target: ProjectNavigationTarget | null): string {
   return target ? `${target.kind}:${target.id}` : "";
 }
