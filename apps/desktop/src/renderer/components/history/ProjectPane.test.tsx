@@ -775,7 +775,7 @@ describe("ProjectPane", () => {
     const sessionRow = screen.getByRole("button", { name: /Investigate markdown rendering/i });
     const projectRow = screen.getByRole("button", { name: /project one/i });
 
-    sessionRow.focus();
+    fireEvent.focus(sessionRow);
     await user.keyboard("{ArrowLeft}");
 
     expect(projectRow).toHaveFocus();
