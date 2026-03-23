@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -265,13 +265,13 @@ describe("App history navigation", () => {
     });
   });
 
-  it("waits to swap the sessions pane until bookmarks are loaded for the selected project", async () => {
+  it("waits to show bookmark navigation until bookmarks are loaded for the selected project", async () => {
     installScrollIntoViewMock();
 
     const user = userEvent.setup();
     const { client, delayedBookmarks } = createProjectSwitchBookmarksDelayClient();
-
-    renderWithClient(<App />, client);
+    const { container } = renderWithClient(<App />, client);
+    const sessionList = () => container.querySelector<HTMLDivElement>(".list-scroll.session-list");
 
     await waitFor(() => {
       expect(screen.getByText("Project one session")).toBeInTheDocument();
@@ -283,13 +283,15 @@ describe("App history navigation", () => {
       expect(screen.getByText("Project Two")).toBeInTheDocument();
     });
 
-    expect(screen.queryByText("Project two delayed bookmarks session")).toBeNull();
-    expect(screen.queryByText("Bookmarked Messages")).toBeNull();
+    const sessionPane = expectDefined(sessionList(), "Expected session list");
+    expect(within(sessionPane).queryByText("Bookmarked Messages")).toBeNull();
 
     delayedBookmarks.resolve({
       projectId: "project_2",
       totalCount: 1,
       filteredCount: 1,
+      page: 0,
+      pageSize: 100,
       categoryCounts: {
         user: 0,
         assistant: 1,

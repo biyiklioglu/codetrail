@@ -256,6 +256,8 @@ export function useHistoryController({
   );
   const [bookmarksResponse, setBookmarksResponse] =
     useState<BookmarkListResponse>(EMPTY_BOOKMARKS_RESPONSE);
+  const [visibleBookmarkedMessageIds, setVisibleBookmarkedMessageIds] = useState<string[]>([]);
+  const [bookmarkStatesRefreshNonce, setBookmarkStatesRefreshNonce] = useState(0);
   const [sessionPage, setSessionPage] = useState(initialPaneState?.sessionPage ?? 0);
   const [sessionScrollTop, setSessionScrollTop] = useState(initialSessionScrollTop);
   const [systemMessageRegexRules, setSystemMessageRegexRules] = useState<SystemMessageRegexRules>(
@@ -567,29 +569,15 @@ export function useHistoryController({
     if (projectIds.length === 0) {
       return;
     }
-    const responses = await Promise.allSettled(
-      projectIds.map(
-        async (projectId) =>
-          [projectId, (await codetrail.invoke("sessions:list", { projectId })).sessions] as const,
-      ),
-    );
-    const successfulResponses = responses.flatMap((response, index) => {
-      if (response.status === "fulfilled") {
-        return [response.value];
-      }
-      logError(
-        `Failed refreshing tree sessions for project ${projectIds[index] ?? "(unknown project)"}`,
-        response.reason,
-      );
-      return [];
-    });
-    if (successfulResponses.length === 0) {
-      return;
+    try {
+      const response = await codetrail.invoke("sessions:listMany", { projectIds });
+      setTreeProjectSessionsByProjectId((current) => ({
+        ...current,
+        ...response.sessionsByProjectId,
+      }));
+    } catch (error) {
+      logError("Failed refreshing tree sessions", error);
     }
-    setTreeProjectSessionsByProjectId((current) => ({
-      ...current,
-      ...Object.fromEntries(successfulResponses),
-    }));
   }, [codetrail, logError]);
 
   const paneAppearanceState = useMemo(
@@ -887,6 +875,7 @@ export function useHistoryController({
     setFocusMessageId,
     setPendingRevealTarget,
     pendingRevealTarget,
+    bookmarkSortDirection,
     messageSortDirection,
     projectAllSortDirection,
     sessionPage,
@@ -972,6 +961,7 @@ export function useHistoryController({
     selectedSessionId,
     sessionPaneStableProjectId,
     bookmarksResponse,
+    visibleBookmarkedMessageIds,
     bookmarkSortDirection,
     projectCombinedDetail,
     sessionDetail,
@@ -989,6 +979,61 @@ export function useHistoryController({
     sessionPaneCollapsed,
     sessionPaneWidth,
   });
+
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setVisibleBookmarkedMessageIds([]);
+      return;
+    }
+    if (historyMode === "bookmarks") {
+      setVisibleBookmarkedMessageIds(
+        bookmarksResponse.projectId === selectedProjectId
+          ? bookmarksResponse.results.map((entry) => entry.message.id)
+          : [],
+      );
+      return;
+    }
+
+    const messageIds = activeHistoryMessages.map((message) => message.id);
+    if (messageIds.length === 0) {
+      setVisibleBookmarkedMessageIds([]);
+      return;
+    }
+
+    let cancelled = false;
+    void codetrail
+      .invoke("bookmarks:getStates", {
+        projectId: selectedProjectId,
+        messageIds,
+      })
+      .then((response) => {
+        if (!cancelled) {
+          setVisibleBookmarkedMessageIds(response.bookmarkedMessageIds);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setVisibleBookmarkedMessageIds([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeHistoryMessages,
+    bookmarksResponse.projectId,
+    bookmarksResponse.results,
+    bookmarkStatesRefreshNonce,
+    codetrail,
+    historyMode,
+    refreshCounter,
+    selectedProjectId,
+  ]);
+
+  const refreshVisibleBookmarkStates = useCallback(() => {
+    setBookmarkStatesRefreshNonce((value) => value + 1);
+  }, []);
 
   useHistoryViewportEffects({
     messageListRef,
@@ -1095,6 +1140,7 @@ export function useHistoryController({
     sessionSearchInputRef,
     loadProjects,
     loadSessions,
+    refreshVisibleBookmarkStates,
     setProjectProviders,
     setProjectQueryInput,
     refreshContextRef,

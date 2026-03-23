@@ -292,6 +292,7 @@ export async function bootstrapMainProcess(
     },
     "projects:getCombinedDetail": (payload) => queryService.getProjectCombinedDetail(payload),
     "sessions:list": (payload) => queryService.listSessions(payload),
+    "sessions:listMany": (payload) => queryService.listSessionsMany(payload),
     "sessions:getDetail": (payload) => queryService.getSessionDetail(payload),
     "sessions:delete": (payload) => {
       const result = queryService.deleteSession(payload);
@@ -299,6 +300,7 @@ export async function bootstrapMainProcess(
       return result;
     },
     "bookmarks:listProject": (payload) => queryService.listProjectBookmarks(payload),
+    "bookmarks:getStates": (payload) => queryService.getBookmarkStates(payload),
     "bookmarks:toggle": (payload) => queryService.toggleBookmark(payload),
     "history:exportMessages": async (payload, event) =>
       exportHistoryMessages({

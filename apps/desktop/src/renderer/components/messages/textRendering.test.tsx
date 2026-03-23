@@ -896,7 +896,9 @@ describe("CodeBlock", () => {
 
     fireEvent.keyDown(menu, { key: "ArrowDown" });
     expect(items[1]).toHaveFocus();
-    fireEvent.click(items[1]);
+    const secondItem = items[1];
+    expect(secondItem).toBeDefined();
+    fireEvent.click(secondItem!);
 
     await waitFor(() => {
       expect(openContentInEditorMock).toHaveBeenCalledWith(

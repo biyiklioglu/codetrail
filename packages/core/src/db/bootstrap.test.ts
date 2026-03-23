@@ -263,7 +263,13 @@ describe("initializeDatabase", () => {
          token_output INTEGER,
          operation_duration_ms INTEGER,
          operation_duration_source TEXT,
-         operation_duration_confidence TEXT
+         operation_duration_confidence TEXT,
+         created_at_ms INTEGER GENERATED ALWAYS AS (
+           CASE
+             WHEN unixepoch(created_at) IS NOT NULL THEN CAST(unixepoch(created_at) AS INTEGER) * 1000
+             ELSE -9223372036854775808
+           END
+         ) STORED
        )`,
     );
     db.exec(

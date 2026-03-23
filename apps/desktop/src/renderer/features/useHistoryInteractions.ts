@@ -105,6 +105,7 @@ export function useHistoryInteractions({
   sessionSearchInputRef,
   loadProjects,
   loadSessions,
+  refreshVisibleBookmarkStates,
   setProjectProviders,
   setProjectQueryInput,
   refreshContextRef,
@@ -167,6 +168,7 @@ export function useHistoryInteractions({
   sessionSearchInputRef: RefObject<HTMLInputElement | null>;
   loadProjects: (source?: "auto" | "resort") => Promise<void>;
   loadSessions: () => Promise<void>;
+  refreshVisibleBookmarkStates: () => void;
   setProjectProviders: Dispatch<SetStateAction<Provider[]>>;
   setProjectQueryInput: Dispatch<SetStateAction<string>>;
   refreshContextRef: MutableRefObject<RefreshContext | null>;
@@ -318,6 +320,7 @@ export function useHistoryInteractions({
           loadSessions(),
           refreshTreeProjectSessions(),
         ]);
+        refreshVisibleBookmarkStates();
       } catch (error) {
         logError("Failed toggling bookmark", error);
       }
@@ -328,6 +331,7 @@ export function useHistoryInteractions({
       loadProjects,
       loadSessions,
       logError,
+      refreshVisibleBookmarkStates,
       refreshTreeProjectSessions,
       selectedProjectId,
     ],

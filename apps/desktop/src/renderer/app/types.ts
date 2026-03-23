@@ -7,9 +7,11 @@ import type {
 
 export type ProjectSummary = IpcResponse<"projects:list">["projects"][number];
 export type SessionSummary = IpcResponse<"sessions:list">["sessions"][number];
+export type SessionListManyResponse = IpcResponse<"sessions:listMany">;
 export type SessionDetail = IpcResponse<"sessions:getDetail">;
 export type ProjectCombinedDetail = IpcResponse<"projects:getCombinedDetail">;
 export type BookmarkListResponse = IpcResponse<"bookmarks:listProject">;
+export type BookmarkStateResponse = IpcResponse<"bookmarks:getStates">;
 export type SearchQueryResponse = IpcResponse<"search:query">;
 export type SearchResult = SearchQueryResponse["results"][number];
 export type SettingsInfoResponse = IpcResponse<"app:getSettingsInfo">;

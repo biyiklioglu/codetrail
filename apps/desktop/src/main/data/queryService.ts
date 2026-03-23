@@ -1,5 +1,6 @@
 import {
   type IpcRequest,
+  type IpcRequestInput,
   type IpcResponse,
   type MessageCategory,
   PROVIDER_METADATA,
@@ -45,6 +46,7 @@ type SessionSummaryRow = {
   duration_ms: number | null;
   git_branch: string | null;
   cwd: string | null;
+  activity_at: string | null;
   message_count: number;
   token_input_total: number;
   token_output_total: number;
@@ -87,6 +89,7 @@ type MessageRow = {
   category: string;
   content: string;
   created_at: string;
+  created_at_ms: number;
   token_input: number | null;
   token_output: number | null;
   operation_duration_ms: number | null;
@@ -111,9 +114,8 @@ type MessageSortDirection = "asc" | "desc";
 type FocusTargetRow = {
   id: string;
   created_at: string;
+  created_at_ms: number;
 };
-
-const MESSAGE_CREATED_AT_ORDER_EXPR = "COALESCE(unixepoch(m.created_at), -9223372036854775808)";
 
 export type QueryService = {
   listProjects: (request: IpcRequest<"projects:list">) => IpcResponse<"projects:list">;
@@ -122,13 +124,19 @@ export type QueryService = {
   ) => IpcResponse<"projects:getCombinedDetail">;
   deleteProject: (request: IpcRequest<"projects:delete">) => IpcResponse<"projects:delete">;
   listSessions: (request: IpcRequest<"sessions:list">) => IpcResponse<"sessions:list">;
+  listSessionsMany: (
+    request: IpcRequest<"sessions:listMany">,
+  ) => IpcResponse<"sessions:listMany">;
   getSessionDetail: (
     request: IpcRequest<"sessions:getDetail">,
   ) => IpcResponse<"sessions:getDetail">;
   deleteSession: (request: IpcRequest<"sessions:delete">) => IpcResponse<"sessions:delete">;
   listProjectBookmarks: (
-    request: IpcRequest<"bookmarks:listProject">,
+    request: IpcRequestInput<"bookmarks:listProject">,
   ) => IpcResponse<"bookmarks:listProject">;
+  getBookmarkStates: (
+    request: IpcRequest<"bookmarks:getStates">,
+  ) => IpcResponse<"bookmarks:getStates">;
   toggleBookmark: (request: IpcRequest<"bookmarks:toggle">) => IpcResponse<"bookmarks:toggle">;
   runSearchQuery: (request: IpcRequest<"search:query">) => IpcResponse<"search:query">;
   close: () => void;
@@ -174,9 +182,11 @@ export function createQueryServiceFromDb(
     getProjectCombinedDetail: (request) => getProjectCombinedDetailWithDatabase(db, request),
     deleteProject: (request) => deleteProjectWithStore(db, bookmarkStore, request),
     listSessions: (request) => listSessionsWithDatabase(db, bookmarkStore, request),
+    listSessionsMany: (request) => listSessionsManyWithDatabase(db, bookmarkStore, request),
     getSessionDetail: (request) => getSessionDetailWithDatabase(db, request),
     deleteSession: (request) => deleteSessionWithStore(db, bookmarkStore, request),
     listProjectBookmarks: (request) => listProjectBookmarksWithStore(db, bookmarkStore, request),
+    getBookmarkStates: (request) => getBookmarkStatesWithStore(bookmarkStore, request),
     toggleBookmark: (request) => toggleBookmarkWithStore(db, bookmarkStore, request),
     runSearchQuery: (request) => runSearchQueryWithDatabase(db, request),
     close: () => {
@@ -212,6 +222,18 @@ export function listSessions(
   return withDatabaseAndBookmarkStore(
     dbPath,
     (db, bookmarkStore) => listSessionsWithDatabase(db, bookmarkStore, request),
+    dependencies,
+  );
+}
+
+export function listSessionsMany(
+  dbPath: string,
+  request: IpcRequest<"sessions:listMany">,
+  dependencies: QueryServiceDependencies = {},
+): IpcResponse<"sessions:listMany"> {
+  return withDatabaseAndBookmarkStore(
+    dbPath,
+    (db, bookmarkStore) => listSessionsManyWithDatabase(db, bookmarkStore, request),
     dependencies,
   );
 }
@@ -266,12 +288,24 @@ export function deleteSession(
 
 export function listProjectBookmarks(
   dbPath: string,
-  request: IpcRequest<"bookmarks:listProject">,
+  request: IpcRequestInput<"bookmarks:listProject">,
   dependencies: QueryServiceDependencies = {},
 ): IpcResponse<"bookmarks:listProject"> {
   return withDatabaseAndBookmarkStore(
     dbPath,
     (db, bookmarkStore) => listProjectBookmarksWithStore(db, bookmarkStore, request),
+    dependencies,
+  );
+}
+
+export function getBookmarkStates(
+  dbPath: string,
+  request: IpcRequest<"bookmarks:getStates">,
+  dependencies: QueryServiceDependencies = {},
+): IpcResponse<"bookmarks:getStates"> {
+  return withDatabaseAndBookmarkStore(
+    dbPath,
+    (_db, bookmarkStore) => getBookmarkStatesWithStore(bookmarkStore, request),
     dependencies,
   );
 }
@@ -319,7 +353,7 @@ function listProjectsWithDatabase(
 
   const projectPatterns = buildWildcardFilterPatterns(request.query);
   for (const pattern of projectPatterns) {
-    conditions.push("(LOWER(p.name) LIKE ? ESCAPE '\\' OR LOWER(p.path) LIKE ? ESCAPE '\\')");
+    conditions.push("(p.name_folded LIKE ? ESCAPE '\\' OR p.path_folded LIKE ? ESCAPE '\\')");
     params.push(pattern, pattern);
   }
 
@@ -330,24 +364,15 @@ function listProjectsWithDatabase(
          p.provider,
          p.name,
          p.path,
-         COUNT(s.id) as session_count,
-         COALESCE(SUM(s.message_count), 0) as message_count,
-         MAX(COALESCE(s.ended_at, s.started_at)) as last_activity
+         COALESCE(ps.session_count, 0) as session_count,
+         COALESCE(ps.message_count, 0) as message_count,
+         ps.last_activity as last_activity
        FROM projects p
-       LEFT JOIN sessions s ON s.project_id = p.id
+       LEFT JOIN project_stats ps ON ps.project_id = p.id
        ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
-       GROUP BY p.id
-       ORDER BY p.provider, LOWER(p.name), p.id`,
+       ORDER BY p.provider, p.name_folded, p.id`,
     )
-    .all(...params) as Array<{
-    id: string;
-    provider: Provider;
-    name: string;
-    path: string;
-    session_count: number;
-    message_count: number;
-    last_activity: string | null;
-  }>;
+    .all(...params) as ProjectSummaryRow[];
   const bookmarkCounts =
     bookmarkStore.countProjectBookmarksByProjectIds?.(rows.map((row) => row.id)) ?? {};
 
@@ -387,6 +412,7 @@ function listSessionsWithDatabase(
          s.model_names,
          s.started_at,
          s.ended_at,
+         s.activity_at,
          s.duration_ms,
          s.git_branch,
          s.cwd,
@@ -395,7 +421,7 @@ function listSessionsWithDatabase(
          s.token_output_total
        FROM sessions s
        ${whereClause}
-       ORDER BY COALESCE(s.ended_at, s.started_at) DESC, s.id DESC`,
+       ORDER BY s.activity_at_ms DESC, s.activity_at DESC, s.id DESC`,
     )
     .all(...params) as SessionSummaryRow[];
   const sessionBookmarkCounts =
@@ -417,6 +443,75 @@ function listSessionsWithDatabase(
       ),
     ),
   };
+}
+
+function listSessionsManyWithDatabase(
+  db: DatabaseHandle,
+  bookmarkStore: BookmarkStore,
+  request: IpcRequest<"sessions:listMany">,
+): IpcResponse<"sessions:listMany"> {
+  const projectIds = [...new Set(request.projectIds.filter((projectId) => projectId.length > 0))];
+  if (projectIds.length === 0) {
+    return { sessionsByProjectId: {} };
+  }
+
+  const placeholders = projectIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT
+         s.id,
+         s.project_id,
+         s.provider,
+         s.file_path,
+         s.title,
+         s.model_names,
+         s.started_at,
+         s.ended_at,
+         s.activity_at,
+         s.duration_ms,
+         s.git_branch,
+         s.cwd,
+         s.message_count,
+         s.token_input_total,
+         s.token_output_total
+       FROM sessions s
+       WHERE s.project_id IN (${placeholders})
+       ORDER BY s.project_id ASC, s.activity_at_ms DESC, s.activity_at DESC, s.id DESC`,
+    )
+    .all(...projectIds) as SessionSummaryRow[];
+
+  const rowsByProjectId = new Map<string, SessionSummaryRow[]>();
+  for (const row of rows) {
+    const bucket = rowsByProjectId.get(row.project_id);
+    if (bucket) {
+      bucket.push(row);
+    } else {
+      rowsByProjectId.set(row.project_id, [row]);
+    }
+  }
+
+  const sessionsByProjectId = Object.fromEntries(
+    projectIds.map((projectId) => {
+      const sessionRows = rowsByProjectId.get(projectId) ?? [];
+      const sessionBookmarkCounts = bookmarkStore.countSessionBookmarksBySessionIds
+        ? bookmarkStore.countSessionBookmarksBySessionIds(
+            projectId,
+            sessionRows.map((row) => row.id),
+          )
+        : {};
+      return [
+        projectId,
+        sessionRows.map((row) =>
+          mapSessionSummaryRow(
+            row,
+            sessionBookmarkCounts[row.id] ?? bookmarkStore.countSessionBookmarks(projectId, row.id),
+          ),
+        ),
+      ];
+    }),
+  ) as IpcResponse<"sessions:listMany">["sessionsByProjectId"];
+
+  return { sessionsByProjectId };
 }
 
 function getProjectCombinedDetailWithDatabase(
@@ -469,49 +564,41 @@ function getProjectCombinedDetailWithDatabase(
 
   const { whereClause, params } = buildProjectMessageFilters(messageFilters);
 
-  const summary = loadMessageDetailSummary({
-    db,
-    fromSql: `FROM messages m
-              JOIN sessions s ON s.id = m.session_id`,
-    whereClause,
-    params,
-  });
-  const totalCount = summary.totalCount;
-  const queryOnlyFilter = buildProjectMessageFilters({
-    projectId: request.projectId,
-    queryPlan,
-  });
-  const categorySummary = loadMessageDetailSummary({
-    db,
-    fromSql: `FROM messages m
-              JOIN sessions s ON s.id = m.session_id`,
-    whereClause: queryOnlyFilter.whereClause,
-    params: queryOnlyFilter.params,
-  });
-  const categoryCounts = categorySummary.categoryCounts;
   const focusTarget = resolveFocusTarget(db, {
     focusMessageId: request.focusMessageId,
     focusSourceId: request.focusSourceId,
     byMessageIdSql:
-      "SELECT m.id, m.created_at FROM messages m JOIN sessions s ON s.id = m.session_id WHERE s.project_id = ? AND m.id = ?",
+      "SELECT m.id, m.created_at, m.created_at_ms FROM messages m JOIN sessions s ON s.id = m.session_id WHERE s.project_id = ? AND m.id = ?",
     byMessageIdParams: request.focusMessageId ? [request.projectId, request.focusMessageId] : [],
     bySourceIdSql:
-      "SELECT m.id, m.created_at FROM messages m JOIN sessions s ON s.id = m.session_id WHERE s.project_id = ? AND m.source_id = ? ORDER BY m.created_at ASC, m.id ASC LIMIT 1",
+      "SELECT m.id, m.created_at, m.created_at_ms FROM messages m JOIN sessions s ON s.id = m.session_id WHERE s.project_id = ? AND m.source_id = ? ORDER BY m.created_at_ms ASC, m.created_at ASC, m.id ASC LIMIT 1",
     bySourceIdParams: request.focusSourceId ? [request.projectId, request.focusSourceId] : [],
   });
-  const resolvedFocus = resolveFocusIndexAndPage({
+  const overview = loadMessageDetailOverview({
     db,
     fromSql: `FROM messages m
               JOIN sessions s ON s.id = m.session_id`,
     whereClause,
     params,
     focusComparison,
-    focusTarget,
-    page,
-    pageSize,
+    ...(focusTarget ? { focusTarget } : {}),
   });
-  page = resolvedFocus.page;
-  const focusIndex = resolvedFocus.focusIndex;
+  const totalCount = overview.totalCount;
+  const queryOnlyFilter = buildProjectMessageFilters({
+    projectId: request.projectId,
+    queryPlan,
+  });
+  const categoryCounts = loadCategoryCounts(
+    db,
+    `FROM messages m
+              JOIN sessions s ON s.id = m.session_id`,
+    queryOnlyFilter.whereClause,
+    queryOnlyFilter.params,
+  );
+  const focusIndex = overview.focusIndex;
+  if (focusIndex !== null) {
+    page = Math.floor(focusIndex / pageSize);
+  }
 
   if (totalCount > 0 && page * pageSize >= totalCount) {
     page = Math.floor((totalCount - 1) / pageSize);
@@ -527,6 +614,7 @@ function getProjectCombinedDetailWithDatabase(
          m.category,
          m.content,
          m.created_at,
+         m.created_at_ms,
          m.token_input,
          m.token_output,
          m.operation_duration_ms,
@@ -574,6 +662,7 @@ function getSessionDetailWithDatabase(
          s.model_names,
          s.started_at,
          s.ended_at,
+         s.activity_at,
          s.duration_ms,
          s.git_branch,
          s.cwd,
@@ -644,45 +733,39 @@ function getSessionDetailWithDatabase(
 
   const { whereClause, params } = buildMessageFilters(messageFilters);
 
-  const summary = loadMessageDetailSummary({
-    db,
-    fromSql: "FROM messages m",
-    whereClause,
-    params,
-  });
-  const totalCount = summary.totalCount;
-  const queryOnlyFilter = buildMessageFilters({
-    sessionId: request.sessionId,
-    queryPlan,
-  });
-  const categorySummary = loadMessageDetailSummary({
-    db,
-    fromSql: "FROM messages m",
-    whereClause: queryOnlyFilter.whereClause,
-    params: queryOnlyFilter.params,
-  });
-  const categoryCounts = categorySummary.categoryCounts;
   const focusTarget = resolveFocusTarget(db, {
     focusMessageId: request.focusMessageId,
     focusSourceId: request.focusSourceId,
-    byMessageIdSql: "SELECT id, created_at FROM messages WHERE session_id = ? AND id = ?",
+    byMessageIdSql:
+      "SELECT id, created_at, created_at_ms FROM messages WHERE session_id = ? AND id = ?",
     byMessageIdParams: request.focusMessageId ? [request.sessionId, request.focusMessageId] : [],
     bySourceIdSql:
-      "SELECT id, created_at FROM messages WHERE session_id = ? AND source_id = ? ORDER BY created_at ASC, id ASC LIMIT 1",
+      "SELECT id, created_at, created_at_ms FROM messages WHERE session_id = ? AND source_id = ? ORDER BY created_at_ms ASC, created_at ASC, id ASC LIMIT 1",
     bySourceIdParams: request.focusSourceId ? [request.sessionId, request.focusSourceId] : [],
   });
-  const resolvedFocus = resolveFocusIndexAndPage({
+  const overview = loadMessageDetailOverview({
     db,
     fromSql: "FROM messages m",
     whereClause,
     params,
     focusComparison,
-    focusTarget,
-    page,
-    pageSize,
+    ...(focusTarget ? { focusTarget } : {}),
   });
-  page = resolvedFocus.page;
-  const focusIndex = resolvedFocus.focusIndex;
+  const totalCount = overview.totalCount;
+  const queryOnlyFilter = buildMessageFilters({
+    sessionId: request.sessionId,
+    queryPlan,
+  });
+  const categoryCounts = loadCategoryCounts(
+    db,
+    "FROM messages m",
+    queryOnlyFilter.whereClause,
+    queryOnlyFilter.params,
+  );
+  const focusIndex = overview.focusIndex;
+  if (focusIndex !== null) {
+    page = Math.floor(focusIndex / pageSize);
+  }
 
   if (totalCount > 0 && page * pageSize >= totalCount) {
     page = Math.floor((totalCount - 1) / pageSize);
@@ -698,6 +781,7 @@ function getSessionDetailWithDatabase(
          m.category,
          m.content,
          m.created_at,
+         m.created_at_ms,
          m.token_input,
          m.token_output,
          m.operation_duration_ms,
@@ -794,13 +878,12 @@ function deleteProjectWithStore(
          p.path,
          p.created_at,
          p.updated_at,
-         COUNT(DISTINCT s.id) as session_count,
-         COALESCE(SUM(s.message_count), 0) as message_count,
-         MAX(COALESCE(s.ended_at, s.started_at)) as last_activity
+         COALESCE(ps.session_count, 0) as session_count,
+         COALESCE(ps.message_count, 0) as message_count,
+         ps.last_activity as last_activity
        FROM projects p
-       LEFT JOIN sessions s ON s.project_id = p.id
-       WHERE p.id = ?
-       GROUP BY p.id, p.provider, p.name, p.path, p.created_at, p.updated_at`,
+       LEFT JOIN project_stats ps ON ps.project_id = p.id
+       WHERE p.id = ?`,
     )
     .get(request.projectId) as ProjectSummaryRow | undefined;
 
@@ -846,11 +929,12 @@ function deleteProjectWithStore(
 function listProjectBookmarksWithStore(
   db: DatabaseHandle,
   bookmarkStore: BookmarkStore,
-  request: IpcRequest<"bookmarks:listProject">,
+  request: IpcRequestInput<"bookmarks:listProject">,
 ): IpcResponse<"bookmarks:listProject"> {
   const hasQuery = (request.query?.trim().length ?? 0) > 0;
-  const pageSize = request.pageSize;
-  let page = request.page;
+  const countOnly = request.countOnly === true;
+  const pageSize = request.pageSize ?? 100;
+  let page = request.page ?? 0;
   const queryPlan = hasQuery
     ? buildSearchQueryPlan(request.query ?? "", request.searchMode ?? "simple")
     : buildSearchQueryPlan("", request.searchMode ?? "simple");
@@ -873,20 +957,35 @@ function listProjectBookmarksWithStore(
     hasQuery ? request.query : undefined,
     request.searchMode ?? "simple",
   );
+  const bookmarkQuery = hasQuery ? (request.query ?? "") : null;
   const filteredCount = bookmarkStore.countProjectBookmarks(request.projectId, {
-    query: hasQuery ? request.query : undefined,
+    ...(bookmarkQuery !== null ? { query: bookmarkQuery } : {}),
     searchMode: request.searchMode ?? "simple",
-    categories: request.categories,
+    ...(request.categories ? { categories: request.categories } : {}),
   });
   if (filteredCount === 0) {
     page = 0;
   } else if (page * pageSize >= filteredCount) {
     page = Math.floor((filteredCount - 1) / pageSize);
   }
+  if (countOnly) {
+    return {
+      projectId: request.projectId,
+      totalCount,
+      filteredCount,
+      page,
+      pageSize,
+      categoryCounts,
+      queryError: null,
+      highlightPatterns: queryPlan.highlightPatterns,
+      results: [],
+    };
+  }
   const storedRows = bookmarkStore.listProjectBookmarks(request.projectId, {
-    query: hasQuery ? request.query : undefined,
+    ...(bookmarkQuery !== null ? { query: bookmarkQuery } : {}),
     searchMode: request.searchMode ?? "simple",
-    categories: request.categories,
+    ...(request.categories ? { categories: request.categories } : {}),
+    sortDirection: request.sortDirection,
     limit: pageSize,
     offset: page * pageSize,
   });
@@ -926,82 +1025,91 @@ function listProjectBookmarksWithStore(
   };
 }
 
+function getBookmarkStatesWithStore(
+  bookmarkStore: BookmarkStore,
+  request: IpcRequest<"bookmarks:getStates">,
+): IpcResponse<"bookmarks:getStates"> {
+  return {
+    projectId: request.projectId,
+    bookmarkedMessageIds: bookmarkStore.listProjectBookmarkMessageIds(
+      request.projectId,
+      request.messageIds,
+    ),
+  };
+}
+
 function buildMessageSortSql(sortDirection: MessageSortDirection): {
   messageOrder: string;
   focusComparison: string;
 } {
   const isAscending = sortDirection === "asc";
   return {
-    // created_at can be null or invalid in imported data, so use the unixepoch expression as the
-    // primary stable sort key and the raw string/id as deterministic tie-breakers.
     messageOrder: isAscending
-      ? `${MESSAGE_CREATED_AT_ORDER_EXPR} ASC, m.created_at ASC, m.id ASC`
-      : `${MESSAGE_CREATED_AT_ORDER_EXPR} DESC, m.created_at DESC, m.id DESC`,
+      ? "m.created_at_ms ASC, m.created_at ASC, m.id ASC"
+      : "m.created_at_ms DESC, m.created_at DESC, m.id DESC",
     focusComparison: isAscending
       ? `(
-           ${MESSAGE_CREATED_AT_ORDER_EXPR} < COALESCE(unixepoch(?), -9223372036854775808)
+           m.created_at_ms < ?
            OR (
-             ${MESSAGE_CREATED_AT_ORDER_EXPR} = COALESCE(unixepoch(?), -9223372036854775808)
+             m.created_at_ms = ?
              AND (m.created_at < ? OR (m.created_at = ? AND m.id <= ?))
            )
          )`
       : `(
-           ${MESSAGE_CREATED_AT_ORDER_EXPR} > COALESCE(unixepoch(?), -9223372036854775808)
+           m.created_at_ms > ?
            OR (
-             ${MESSAGE_CREATED_AT_ORDER_EXPR} = COALESCE(unixepoch(?), -9223372036854775808)
+             m.created_at_ms = ?
              AND (m.created_at > ? OR (m.created_at = ? AND m.id >= ?))
            )
          )`,
   };
 }
 
-function loadMessageDetailSummary(args: {
+function loadMessageDetailOverview(args: {
   db: DatabaseHandle;
   fromSql: string;
   whereClause: string;
   params: readonly unknown[];
-}): {
-  totalCount: number;
-  categoryCounts: Record<MessageCategory, number>;
-} {
-  const summaryRow = args.db
+  focusComparison: string;
+  focusTarget?: FocusTargetRow;
+}): { totalCount: number; focusIndex: number | null } {
+  const focusParams = args.focusTarget
+    ? [
+        args.focusTarget.created_at_ms,
+        args.focusTarget.created_at_ms,
+        args.focusTarget.created_at,
+        args.focusTarget.created_at,
+        args.focusTarget.id,
+      ]
+    : [-9223372036854775808, -9223372036854775808, "", "", ""];
+  const overviewRow = args.db
     .prepare(
       `SELECT
-         COUNT(*) as total_count,
-         COALESCE(SUM(CASE WHEN m.category = 'user' THEN 1 ELSE 0 END), 0) as user_count,
-         COALESCE(SUM(CASE WHEN m.category = 'assistant' THEN 1 ELSE 0 END), 0) as assistant_count,
-         COALESCE(SUM(CASE WHEN m.category = 'tool_use' THEN 1 ELSE 0 END), 0) as tool_use_count,
-         COALESCE(SUM(CASE WHEN m.category = 'tool_edit' THEN 1 ELSE 0 END), 0) as tool_edit_count,
-         COALESCE(SUM(CASE WHEN m.category = 'tool_result' THEN 1 ELSE 0 END), 0) as tool_result_count,
-         COALESCE(SUM(CASE WHEN m.category = 'thinking' THEN 1 ELSE 0 END), 0) as thinking_count,
-         COALESCE(SUM(CASE WHEN m.category = 'system' THEN 1 ELSE 0 END), 0) as system_count
-       ${args.fromSql}
-       WHERE ${args.whereClause}`,
+        COUNT(*) as total_count,
+        CASE
+          WHEN ? = 0 THEN NULL
+          ELSE NULLIF(COALESCE(SUM(CASE WHEN ${args.focusComparison} THEN 1 ELSE 0 END), 0), 0) - 1
+        END as focus_index
+      ${args.fromSql}
+      WHERE ${args.whereClause}`,
     )
-    .get(...args.params) as
+    .get(
+      args.focusTarget ? 1 : 0,
+      ...focusParams,
+      ...args.params,
+    ) as
     | {
         total_count: number;
-        user_count: number;
-        assistant_count: number;
-        tool_use_count: number;
-        tool_edit_count: number;
-        tool_result_count: number;
-        thinking_count: number;
-        system_count: number;
+        focus_index: number | null;
       }
     | undefined;
 
   return {
-    totalCount: Number(summaryRow?.total_count ?? 0),
-    categoryCounts: {
-      user: Number(summaryRow?.user_count ?? 0),
-      assistant: Number(summaryRow?.assistant_count ?? 0),
-      tool_use: Number(summaryRow?.tool_use_count ?? 0),
-      tool_edit: Number(summaryRow?.tool_edit_count ?? 0),
-      tool_result: Number(summaryRow?.tool_result_count ?? 0),
-      thinking: Number(summaryRow?.thinking_count ?? 0),
-      system: Number(summaryRow?.system_count ?? 0),
-    },
+    totalCount: Number(overviewRow?.total_count ?? 0),
+    focusIndex:
+      overviewRow?.focus_index === null || overviewRow?.focus_index === undefined
+        ? null
+        : Number(overviewRow.focus_index),
   };
 }
 
@@ -1054,47 +1162,6 @@ function resolveFocusTarget(
   return undefined;
 }
 
-function resolveFocusIndexAndPage(args: {
-  db: DatabaseHandle;
-  fromSql: string;
-  whereClause: string;
-  params: readonly unknown[];
-  focusComparison: string;
-  focusTarget: FocusTargetRow | undefined;
-  page: number;
-  pageSize: number;
-}): { page: number; focusIndex: number | null } {
-  let { page } = args;
-  let focusIndex: number | null = null;
-  if (!args.focusTarget) {
-    return { page, focusIndex };
-  }
-
-  // Convert a focus target into the page that should be loaded by counting how many rows sort
-  // before it under the current direction/filter set.
-  const focusRow = args.db
-    .prepare(
-      `SELECT COUNT(*) as cnt
-       ${args.fromSql}
-       WHERE ${args.whereClause}
-       AND ${args.focusComparison}`,
-    )
-    .get(
-      ...args.params,
-      args.focusTarget.created_at,
-      args.focusTarget.created_at,
-      args.focusTarget.created_at,
-      args.focusTarget.created_at,
-      args.focusTarget.id,
-    ) as { cnt: number } | undefined;
-  const countBefore = Number(focusRow?.cnt ?? 0);
-  if (countBefore > 0) {
-    focusIndex = countBefore - 1;
-    page = Math.floor(focusIndex / args.pageSize);
-  }
-  return { page, focusIndex };
-}
-
 function listLiveBookmarkMessagesById(
   db: DatabaseHandle,
   projectId: string,
@@ -1117,6 +1184,7 @@ function listLiveBookmarkMessagesById(
          m.category,
          m.content,
          m.created_at,
+         m.created_at_ms,
          m.token_input,
          m.token_output,
          m.operation_duration_ms,

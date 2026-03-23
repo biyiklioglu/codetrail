@@ -42,13 +42,16 @@ const INLINE_DIFF_MAX_TOKEN_COUNT = 80;
 export function buildDiffRenderSource(
   diffModel: DiffViewModel | null,
   mode: "unified" | "split",
+  maxRows?: number,
 ): { unified: string; splitLeft: string; splitRight: string } {
   if (!diffModel) {
     return { unified: "", splitLeft: "", splitRight: "" };
   }
+  const rows =
+    typeof maxRows === "number" ? diffModel.rows.slice(0, Math.max(0, maxRows)) : diffModel.rows;
   if (mode === "unified") {
     return {
-      unified: diffModel.rows
+      unified: rows
         .flatMap((row) => (row.kind === "paired" ? [row.leftText, row.rightText] : [row.text]))
         .join("\n"),
       splitLeft: "",
@@ -57,7 +60,7 @@ export function buildDiffRenderSource(
   }
   return {
     unified: "",
-    splitLeft: diffModel.rows
+    splitLeft: rows
       .map((row) =>
         row.kind === "context"
           ? row.text
@@ -68,7 +71,7 @@ export function buildDiffRenderSource(
               : "",
       )
       .join("\n"),
-    splitRight: diffModel.rows
+    splitRight: rows
       .map((row) =>
         row.kind === "context"
           ? row.text

@@ -416,6 +416,14 @@ export const ipcContractSchemas = {
       sessions: z.array(sessionSummarySchema),
     }),
   },
+  "sessions:listMany": {
+    request: z.object({
+      projectIds: z.array(z.string().min(1)).max(500),
+    }),
+    response: z.object({
+      sessionsByProjectId: z.record(z.string(), z.array(sessionSummarySchema)),
+    }),
+  },
   "sessions:getDetail": {
     request: z.object({
       sessionId: z.string().min(1),
@@ -458,6 +466,8 @@ export const ipcContractSchemas = {
       projectId: z.string().min(1),
       page: z.number().int().nonnegative().default(0),
       pageSize: z.number().int().positive().max(500).default(100),
+      sortDirection: sortDirectionSchema.default("asc"),
+      countOnly: z.boolean().optional(),
       query: z.string().optional(),
       searchMode: searchModeSchema.optional(),
       categories: z.array(messageCategorySchema).optional(),
@@ -472,6 +482,16 @@ export const ipcContractSchemas = {
       queryError: z.string().nullable().optional(),
       highlightPatterns: z.array(z.string()).optional(),
       results: z.array(bookmarkEntrySchema),
+    }),
+  },
+  "bookmarks:getStates": {
+    request: z.object({
+      projectId: z.string().min(1),
+      messageIds: z.array(z.string().min(1)).max(500),
+    }),
+    response: z.object({
+      projectId: z.string().min(1),
+      bookmarkedMessageIds: z.array(z.string().min(1)),
     }),
   },
   "bookmarks:toggle": {

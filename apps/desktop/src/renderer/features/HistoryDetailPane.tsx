@@ -88,6 +88,13 @@ export function HistoryDetailPane({
   const exportCurrentPageCount = history.activeHistoryMessages.length;
   const exportSortLabel =
     history.activeMessageSortDirection === "asc" ? "Oldest to newest" : "Newest to oldest";
+  const paginationTotal =
+    history.historyMode === "bookmarks"
+      ? history.bookmarksResponse.filteredCount
+      : history.historyMode === "project_all"
+        ? (history.projectCombinedDetail?.totalCount ?? 0)
+        : (history.sessionDetail?.totalCount ?? 0);
+  const paginationUnit = history.historyMode === "bookmarks" ? "bookmarks" : "messages";
   const messageSortScopeSuffix =
     history.historyMode === "project_all"
       ? "all sessions"
@@ -346,37 +353,29 @@ export function HistoryDetailPane({
         )}
       </div>
 
-      {history.historyMode !== "bookmarks" ? (
-        <div className="msg-pagination pagination-row">
-          <button
-            type="button"
-            className="page-btn"
-            onClick={history.goToPreviousHistoryPage}
-            disabled={!history.canGoToPreviousHistoryPage}
-            title="Previous page (Cmd/Ctrl+Left)"
-            aria-label="Previous page"
-          >
-            Previous
-          </button>
-          <span className="page-info">
-            Page {history.sessionPage + 1} / {history.totalPages} (
-            {history.historyMode === "project_all"
-              ? (history.projectCombinedDetail?.totalCount ?? 0)
-              : (history.sessionDetail?.totalCount ?? 0)}{" "}
-            messages)
-          </span>
-          <button
-            type="button"
-            className="page-btn"
-            onClick={history.goToNextHistoryPage}
-            disabled={!history.canGoToNextHistoryPage}
-            title="Next page (Cmd/Ctrl+Right)"
-            aria-label="Next page"
-          >
-            Next
-          </button>
-        </div>
-      ) : null}
+      <div className="msg-pagination pagination-row">
+        <button
+          type="button"
+          className="page-btn"
+          onClick={history.goToPreviousHistoryPage}
+          disabled={!history.canGoToPreviousHistoryPage}
+          title="Previous page (Cmd/Ctrl+Left)"
+          aria-label="Previous page"
+        >
+          Previous
+        </button>
+        <span className="page-info">{`Page ${history.sessionPage + 1} / ${history.totalPages} (${paginationTotal} ${paginationUnit})`}</span>
+        <button
+          type="button"
+          className="page-btn"
+          onClick={history.goToNextHistoryPage}
+          disabled={!history.canGoToNextHistoryPage}
+          title="Next page (Cmd/Ctrl+Right)"
+          aria-label="Next page"
+        >
+          Next
+        </button>
+      </div>
     </div>
   );
 }

@@ -24,6 +24,8 @@ const tableStatements = [
     provider TEXT NOT NULL,
     name TEXT NOT NULL,
     path TEXT NOT NULL,
+    name_folded TEXT GENERATED ALWAYS AS (LOWER(name)) STORED,
+    path_folded TEXT GENERATED ALWAYS AS (LOWER(path)) STORED,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
@@ -42,6 +44,14 @@ const tableStatements = [
     message_count INTEGER NOT NULL DEFAULT 0,
     token_input_total INTEGER NOT NULL DEFAULT 0,
     token_output_total INTEGER NOT NULL DEFAULT 0,
+    activity_at TEXT GENERATED ALWAYS AS (COALESCE(ended_at, started_at)) STORED,
+    activity_at_ms INTEGER GENERATED ALWAYS AS (
+      CASE
+        WHEN unixepoch(ended_at) IS NOT NULL THEN CAST(unixepoch(ended_at) AS INTEGER) * 1000
+        WHEN unixepoch(started_at) IS NOT NULL THEN CAST(unixepoch(started_at) AS INTEGER) * 1000
+        ELSE -9223372036854775808
+      END
+    ) STORED,
     FOREIGN KEY(project_id) REFERENCES projects(id)
   )`,
   `CREATE TABLE IF NOT EXISTS messages (
@@ -57,7 +67,21 @@ const tableStatements = [
     operation_duration_ms INTEGER,
     operation_duration_source TEXT,
     operation_duration_confidence TEXT,
+    created_at_ms INTEGER GENERATED ALWAYS AS (
+      CASE
+        WHEN unixepoch(created_at) IS NOT NULL THEN CAST(unixepoch(created_at) AS INTEGER) * 1000
+        ELSE -9223372036854775808
+      END
+    ) STORED,
     FOREIGN KEY(session_id) REFERENCES sessions(id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS project_stats (
+    project_id TEXT PRIMARY KEY,
+    session_count INTEGER NOT NULL DEFAULT 0,
+    message_count INTEGER NOT NULL DEFAULT 0,
+    last_activity TEXT,
+    last_activity_ms INTEGER NOT NULL DEFAULT -9223372036854775808,
+    FOREIGN KEY(project_id) REFERENCES projects(id)
   )`,
   `CREATE TABLE IF NOT EXISTS tool_calls (
     id TEXT PRIMARY KEY,
@@ -131,10 +155,13 @@ const tableStatements = [
 
 const indexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions(project_id)",
-  "CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(ended_at, started_at, id)",
-  "CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages(session_id, created_at, id)",
-  "CREATE INDEX IF NOT EXISTS idx_messages_session_category_created ON messages(session_id, category, created_at, id)",
+  "CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(activity_at_ms DESC, activity_at DESC, id DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_sessions_project_activity ON sessions(project_id, activity_at_ms DESC, activity_at DESC, id DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_messages_session_created ON messages(session_id, created_at_ms, created_at, id)",
+  "CREATE INDEX IF NOT EXISTS idx_messages_session_category_created ON messages(session_id, category, created_at_ms, created_at, id)",
   "CREATE INDEX IF NOT EXISTS idx_messages_session_source_id ON messages(session_id, source_id)",
+  "CREATE INDEX IF NOT EXISTS idx_projects_provider_name ON projects(provider, name_folded, id)",
+  "CREATE INDEX IF NOT EXISTS idx_project_stats_last_activity ON project_stats(last_activity_ms DESC, project_id)",
   "CREATE INDEX IF NOT EXISTS idx_deleted_sessions_project_path ON deleted_sessions(provider, project_path)",
 ] as const;
 
@@ -143,6 +170,7 @@ const dataTables = [
   "messages",
   "sessions",
   "projects",
+  "project_stats",
   "indexed_files",
   "index_checkpoints",
   "deleted_sessions",
@@ -160,9 +188,12 @@ export function ensureDatabaseSchema(db: SqliteDatabase): DatabaseBootstrapResul
   db.exec(tableStatements[0]);
 
   const existingSchemaVersion = readSchemaVersion(db);
+  const schemaNeedsRebuild =
+    existingSchemaVersion !== null &&
+    (existingSchemaVersion !== DATABASE_SCHEMA_VERSION || !hasRequiredDerivedSchema(db));
   let schemaRebuilt = false;
 
-  if (existingSchemaVersion !== null && existingSchemaVersion !== DATABASE_SCHEMA_VERSION) {
+  if (schemaNeedsRebuild) {
     // Schema upgrades are coarse-grained for now: rebuild deterministically rather than carrying a
     // long chain of handwritten migrations for a local cache database.
     clearAllSchemaObjects(db);
@@ -177,6 +208,7 @@ export function ensureDatabaseSchema(db: SqliteDatabase): DatabaseBootstrapResul
     }
   }
   ensureMessageFtsTable(db);
+  ensureProjectStatsTriggers(db);
 
   db.prepare(
     `INSERT INTO meta (key, value) VALUES ('schema_version', ?)
@@ -242,10 +274,16 @@ function recreateSchema(db: SqliteDatabase): void {
 }
 
 function clearAllSchemaObjects(db: SqliteDatabase): void {
+  db.exec("DROP TRIGGER IF EXISTS projects_insert_project_stats");
+  db.exec("DROP TRIGGER IF EXISTS projects_delete_project_stats");
+  db.exec("DROP TRIGGER IF EXISTS sessions_insert_project_stats");
+  db.exec("DROP TRIGGER IF EXISTS sessions_update_project_stats");
+  db.exec("DROP TRIGGER IF EXISTS sessions_delete_project_stats");
   db.exec("DROP TABLE IF EXISTS message_fts");
   db.exec("DROP TABLE IF EXISTS tool_calls");
   db.exec("DROP TABLE IF EXISTS messages");
   db.exec("DROP TABLE IF EXISTS sessions");
+  db.exec("DROP TABLE IF EXISTS project_stats");
   db.exec("DROP TABLE IF EXISTS projects");
   db.exec("DROP TABLE IF EXISTS indexed_files");
   db.exec("DROP TABLE IF EXISTS index_checkpoints");
@@ -283,6 +321,123 @@ function ensureMessageFtsTable(db: SqliteDatabase): void {
   );
 }
 
+function ensureProjectStatsTriggers(db: SqliteDatabase): void {
+  const refreshProjectStatsSql = (projectIdSql: string) => `
+    INSERT INTO project_stats (
+      project_id,
+      session_count,
+      message_count,
+      last_activity,
+      last_activity_ms
+    )
+    SELECT
+      p.id,
+      COUNT(s.id),
+      COALESCE(SUM(s.message_count), 0),
+      MAX(s.activity_at),
+      COALESCE(MAX(s.activity_at_ms), -9223372036854775808)
+    FROM projects p
+    LEFT JOIN sessions s ON s.project_id = p.id
+    WHERE p.id = ${projectIdSql}
+    GROUP BY p.id
+    ON CONFLICT(project_id) DO UPDATE SET
+      session_count = excluded.session_count,
+      message_count = excluded.message_count,
+      last_activity = excluded.last_activity,
+      last_activity_ms = excluded.last_activity_ms
+  `;
+
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS projects_insert_project_stats
+    AFTER INSERT ON projects
+    BEGIN
+      INSERT INTO project_stats (
+        project_id,
+        session_count,
+        message_count,
+        last_activity,
+        last_activity_ms
+      ) VALUES (NEW.id, 0, 0, NULL, -9223372036854775808)
+      ON CONFLICT(project_id) DO NOTHING;
+    END
+  `);
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS projects_delete_project_stats
+    AFTER DELETE ON projects
+    BEGIN
+      DELETE FROM project_stats WHERE project_id = OLD.id;
+    END
+  `);
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS sessions_insert_project_stats
+    AFTER INSERT ON sessions
+    BEGIN
+      INSERT INTO project_stats (
+        project_id,
+        session_count,
+        message_count,
+        last_activity,
+        last_activity_ms
+      ) VALUES (
+        NEW.project_id,
+        1,
+        NEW.message_count,
+        NEW.activity_at,
+        NEW.activity_at_ms
+      )
+      ON CONFLICT(project_id) DO UPDATE SET
+        session_count = project_stats.session_count + 1,
+        message_count = project_stats.message_count + NEW.message_count,
+        last_activity = CASE
+          WHEN NEW.activity_at_ms > project_stats.last_activity_ms THEN NEW.activity_at
+          ELSE project_stats.last_activity
+        END,
+        last_activity_ms = CASE
+          WHEN NEW.activity_at_ms > project_stats.last_activity_ms THEN NEW.activity_at_ms
+          ELSE project_stats.last_activity_ms
+        END;
+    END
+  `);
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS sessions_update_project_stats
+    AFTER UPDATE OF project_id, started_at, ended_at, message_count ON sessions
+    BEGIN
+      ${refreshProjectStatsSql("NEW.project_id")};
+      ${refreshProjectStatsSql("OLD.project_id")};
+    END
+  `);
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS sessions_delete_project_stats
+    AFTER DELETE ON sessions
+    BEGIN
+      ${refreshProjectStatsSql("OLD.project_id")};
+    END
+  `);
+  db.exec(`
+    INSERT INTO project_stats (
+      project_id,
+      session_count,
+      message_count,
+      last_activity,
+      last_activity_ms
+    )
+    SELECT
+      p.id,
+      COUNT(s.id),
+      COALESCE(SUM(s.message_count), 0),
+      MAX(s.activity_at),
+      COALESCE(MAX(s.activity_at_ms), -9223372036854775808)
+    FROM projects p
+    LEFT JOIN sessions s ON s.project_id = p.id
+    GROUP BY p.id
+    ON CONFLICT(project_id) DO UPDATE SET
+      session_count = excluded.session_count,
+      message_count = excluded.message_count,
+      last_activity = excluded.last_activity,
+      last_activity_ms = excluded.last_activity_ms
+  `);
+}
+
 function readSchemaVersion(db: SqliteDatabase): number | null {
   const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as
     | { value: string }
@@ -294,6 +449,40 @@ function readSchemaVersion(db: SqliteDatabase): number | null {
 
   const parsed = Number(row.value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasRequiredDerivedSchema(db: SqliteDatabase): boolean {
+  return (
+    tableHasColumnsIfPresent(db, "projects", ["name_folded", "path_folded"]) &&
+    tableHasColumnsIfPresent(db, "sessions", ["activity_at", "activity_at_ms"]) &&
+    tableHasColumnsIfPresent(db, "messages", ["created_at_ms"])
+  );
+}
+
+function tableExists(db: SqliteDatabase, tableName: string): boolean {
+  const row = db
+    .prepare("SELECT 1 as found FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tableName) as { found: number } | undefined;
+  return row?.found === 1;
+}
+
+function tableHasColumns(db: SqliteDatabase, tableName: string, requiredColumns: string[]): boolean {
+  const columns = new Set(
+    (
+      db.prepare(`PRAGMA table_xinfo(${JSON.stringify(tableName)})`).all() as Array<{
+        name: string;
+      }>
+    ).map((column) => column.name),
+  );
+  return requiredColumns.every((column) => columns.has(column));
+}
+
+function tableHasColumnsIfPresent(
+  db: SqliteDatabase,
+  tableName: string,
+  requiredColumns: string[],
+): boolean {
+  return !tableExists(db, tableName) || tableHasColumns(db, tableName, requiredColumns);
 }
 
 function listTables(db: SqliteDatabase): string[] {

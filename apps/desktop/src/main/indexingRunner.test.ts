@@ -147,6 +147,16 @@ function createBookmarkStoreHarness() {
   const createBookmarkStore = vi.fn(() => ({
     listProjectBookmarks: vi.fn(),
     countProjectBookmarks: vi.fn(() => 0),
+    listProjectBookmarkMessageIds: vi.fn(() => []),
+    countProjectBookmarkCategories: vi.fn(() => ({
+      user: 0,
+      assistant: 0,
+      tool_use: 0,
+      tool_edit: 0,
+      tool_result: 0,
+      thinking: 0,
+      system: 0,
+    })),
     countSessionBookmarks: vi.fn(() => 0),
     getBookmark: vi.fn(() => null),
     upsertBookmark: vi.fn(),

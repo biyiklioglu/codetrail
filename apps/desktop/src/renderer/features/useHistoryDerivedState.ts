@@ -40,6 +40,7 @@ export function useHistoryDerivedState({
   selectedSessionId,
   sessionPaneStableProjectId,
   bookmarksResponse,
+  visibleBookmarkedMessageIds,
   bookmarkSortDirection,
   projectCombinedDetail,
   sessionDetail,
@@ -64,6 +65,7 @@ export function useHistoryDerivedState({
   selectedSessionId: string;
   sessionPaneStableProjectId: string | null;
   bookmarksResponse: BookmarkListResponse;
+  visibleBookmarkedMessageIds: string[];
   bookmarkSortDirection: SortDirection;
   projectCombinedDetail: ProjectCombinedDetail | null;
   sessionDetail: SessionDetail | null;
@@ -116,8 +118,13 @@ export function useHistoryDerivedState({
     [bookmarksResponse.results],
   );
   const bookmarkedMessageIds = useMemo(
-    () => new Set(bookmarksResponse.results.map((entry) => entry.message.id)),
-    [bookmarksResponse.results],
+    () =>
+      new Set(
+        historyMode === "bookmarks"
+          ? bookmarksResponse.results.map((entry) => entry.message.id)
+          : visibleBookmarkedMessageIds,
+      ),
+    [bookmarksResponse.results, historyMode, visibleBookmarkedMessageIds],
   );
 
   const activeHistoryMessages: HistoryMessage[] = useMemo(() => {
@@ -170,8 +177,12 @@ export function useHistoryDerivedState({
   // Keep rendering pinned to the last fully-loaded project to avoid flashing an empty or mixed
   // session pane while the selected project is still fetching.
   const visibleSessionPaneSessions = isSessionPaneReadyForSelectedProject ? sortedSessions : [];
+  const selectedProjectBookmarkCount =
+    bookmarksResponse.projectId === selectedProjectId
+      ? Math.max(selectedProject?.bookmarkCount ?? 0, bookmarksResponse.totalCount)
+      : (selectedProject?.bookmarkCount ?? 0);
   const visibleSessionPaneBookmarksCount = isSessionPaneReadyForSelectedProject
-    ? bookmarksResponse.totalCount
+    ? selectedProjectBookmarkCount
     : 0;
   const visibleSessionPaneAllSessionsCount = isSessionPaneReadyForSelectedProject
     ? allSessionsCount
@@ -180,8 +191,8 @@ export function useHistoryDerivedState({
     historyMode === "bookmarks"
       ? bookmarksResponse.totalCount
       : historyMode === "session"
-        ? (selectedSession?.bookmarkCount ?? 0)
-        : (selectedProject?.bookmarkCount ?? 0);
+      ? (selectedSession?.bookmarkCount ?? 0)
+        : selectedProjectBookmarkCount;
 
   const sessionPaneNavigationItems = useMemo<SessionPaneNavigationItem[]>(() => {
     // The session pane is modeled as one navigation list that includes synthetic entries for

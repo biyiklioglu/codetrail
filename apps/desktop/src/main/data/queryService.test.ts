@@ -191,6 +191,7 @@ function createBookmarkStoreMock(overrides: Partial<BookmarkStore> = {}): Bookma
   return {
     listProjectBookmarks: vi.fn((_projectId: string, _options?: unknown) => []),
     countProjectBookmarks: vi.fn((_projectId: string, _options?: unknown) => 0),
+    listProjectBookmarkMessageIds: vi.fn((_projectId: string, _messageIds: string[]) => []),
     countProjectBookmarkCategories: vi.fn(() => ({
       user: 0,
       assistant: 0,
@@ -594,11 +595,15 @@ describe("queryService in-memory", () => {
   it("pages bookmarks and clamps out-of-range bookmark pages", () => {
     const db = seedQueryDb();
     const bookmarkStore = createBookmarkStoreMock({
-      countProjectBookmarks: vi.fn((projectId: string, options?: { categories?: string[] }) => {
+      countProjectBookmarks: vi.fn((projectId: string, options?: unknown) => {
+        const typedOptions =
+          typeof options === "object" && options !== null
+            ? (options as { categories?: string[] })
+            : {};
         if (projectId !== "project_1") {
           return 0;
         }
-        return options?.categories?.includes("assistant") ? 1 : 2;
+        return typedOptions.categories?.includes("assistant") ? 1 : 2;
       }),
       countProjectBookmarkCategories: vi.fn(() => ({
         user: 1,
@@ -609,7 +614,11 @@ describe("queryService in-memory", () => {
         thinking: 0,
         system: 0,
       })),
-      listProjectBookmarks: vi.fn((projectId: string, options?: { offset?: number }) => {
+      listProjectBookmarks: vi.fn((projectId: string, options?: unknown) => {
+        const typedOptions =
+          typeof options === "object" && options !== null
+            ? (options as { offset?: number })
+            : {};
         if (projectId !== "project_1") {
           return [];
         }
@@ -647,7 +656,7 @@ describe("queryService in-memory", () => {
             snapshot_json: "{}",
           },
         ];
-        return rows.slice(options?.offset ?? 0, (options?.offset ?? 0) + 1);
+        return rows.slice(typedOptions.offset ?? 0, (typedOptions.offset ?? 0) + 1);
       }),
     });
     const service = createQueryServiceFromDb(db, {
@@ -677,6 +686,256 @@ describe("queryService in-memory", () => {
     expect(clampedPage.page).toBe(0);
     expect(clampedPage.filteredCount).toBe(1);
     expect(clampedPage.categoryCounts.assistant).toBe(1);
+  });
+
+  it("supports count-only bookmark requests without loading bookmark rows", () => {
+    const db = seedQueryDb();
+    const bookmarkStore = createBookmarkStoreMock({
+      countProjectBookmarks: vi.fn((projectId: string, options?: unknown) => {
+        const typedOptions =
+          typeof options === "object" && options !== null
+            ? (options as { query?: string })
+            : {};
+        if (projectId !== "project_1") {
+          return 0;
+        }
+        return typedOptions.query === "stable" ? 1 : 2;
+      }),
+      countProjectBookmarkCategories: vi.fn(() => ({
+        user: 1,
+        assistant: 1,
+        tool_use: 0,
+        tool_edit: 0,
+        tool_result: 0,
+        thinking: 0,
+        system: 0,
+      })),
+      listProjectBookmarks: vi.fn(() => {
+        throw new Error("countOnly should not load bookmark rows");
+      }),
+    });
+    const service = createQueryServiceFromDb(db, {
+      bookmarkStore,
+      ownsBookmarkStore: false,
+    });
+
+    const response = service.listProjectBookmarks({
+      projectId: "project_1",
+      page: 0,
+      pageSize: 1,
+      countOnly: true,
+      query: "stable",
+      categories: undefined,
+    });
+
+    expect(response.totalCount).toBe(2);
+    expect(response.filteredCount).toBe(1);
+    expect(response.results).toEqual([]);
+    expect(bookmarkStore.listProjectBookmarks).not.toHaveBeenCalled();
+  });
+
+  it("applies bookmark sort direction before bookmark pagination", () => {
+    const db = seedQueryDb();
+    const bookmarkStore = createBookmarkStoreMock({
+      countProjectBookmarks: vi.fn((projectId: string) => (projectId === "project_1" ? 3 : 0)),
+      countProjectBookmarkCategories: vi.fn(() => ({
+        user: 1,
+        assistant: 2,
+        tool_use: 0,
+        tool_edit: 0,
+        tool_result: 0,
+        thinking: 0,
+        system: 0,
+      })),
+      listProjectBookmarks: vi.fn((projectId: string, options?: unknown) => {
+        const typedOptions =
+          typeof options === "object" && options !== null
+            ? (options as { sortDirection?: "asc" | "desc"; limit?: number; offset?: number })
+            : {};
+        if (projectId !== "project_1") {
+          return [];
+        }
+        const descRows = [
+          {
+            project_id: "project_1",
+            session_id: "session_1",
+            message_id: "message_3",
+            message_source_id: "source_3",
+            provider: "claude" as const,
+            session_title: "Session one",
+            message_category: "assistant" as const,
+            message_content: "Newest bookmark",
+            message_created_at: "2026-03-01T10:00:10.000Z",
+            bookmarked_at: "2026-03-01T10:01:10.000Z",
+            is_orphaned: 0,
+            orphaned_at: null,
+            snapshot_version: 1,
+            snapshot_json: "{}",
+          },
+          {
+            project_id: "project_1",
+            session_id: "session_1",
+            message_id: "message_2",
+            message_source_id: "source_2",
+            provider: "claude" as const,
+            session_title: "Session one",
+            message_category: "assistant" as const,
+            message_content: "Middle bookmark",
+            message_created_at: "2026-03-01T10:00:05.000Z",
+            bookmarked_at: "2026-03-01T10:01:05.000Z",
+            is_orphaned: 0,
+            orphaned_at: null,
+            snapshot_version: 1,
+            snapshot_json: "{}",
+          },
+          {
+            project_id: "project_1",
+            session_id: "session_1",
+            message_id: "message_1",
+            message_source_id: "source_1",
+            provider: "claude" as const,
+            session_title: "Session one",
+            message_category: "user" as const,
+            message_content: "Oldest bookmark",
+            message_created_at: "2026-03-01T10:00:00.000Z",
+            bookmarked_at: "2026-03-01T10:01:00.000Z",
+            is_orphaned: 0,
+            orphaned_at: null,
+            snapshot_version: 1,
+            snapshot_json: "{}",
+          },
+        ];
+        const rows = typedOptions.sortDirection === "asc" ? [...descRows].reverse() : descRows;
+        const offset = typedOptions.offset ?? 0;
+        const limit = typedOptions.limit ?? rows.length;
+        return rows.slice(offset, offset + limit);
+      }),
+    });
+    const service = createQueryServiceFromDb(db, {
+      bookmarkStore,
+      ownsBookmarkStore: false,
+    });
+
+    const firstAscPage = service.listProjectBookmarks({
+      projectId: "project_1",
+      page: 0,
+      pageSize: 1,
+      sortDirection: "asc",
+      query: "",
+      categories: undefined,
+    });
+    const firstDescPage = service.listProjectBookmarks({
+      projectId: "project_1",
+      page: 0,
+      pageSize: 1,
+      sortDirection: "desc",
+      query: "",
+      categories: undefined,
+    });
+
+    expect(firstAscPage.results[0]?.message.id).toBe("message_1");
+    expect(firstDescPage.results[0]?.message.id).toBe("message_3");
+    expect(bookmarkStore.listProjectBookmarks).toHaveBeenCalledWith(
+      "project_1",
+      expect.objectContaining({
+        sortDirection: "asc",
+        limit: 1,
+        offset: 0,
+      }),
+    );
+  });
+
+  it("lists sessions for multiple projects in grouped activity order with bookmark counts", () => {
+    const db = seedQueryDb();
+    const now = "2026-03-01T10:00:00.000Z";
+
+    db.prepare(
+      `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("project_2", "claude", "Project Two", "/workspace/project-two", now, now);
+
+    const insertSession = db.prepare(
+      `INSERT INTO sessions (
+        id, project_id, provider, file_path, title, model_names, started_at, ended_at,
+        duration_ms, git_branch, cwd, message_count, token_input_total, token_output_total
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+
+    insertSession.run(
+      "session_older",
+      "project_1",
+      "claude",
+      "/workspace/project-one/session-older.jsonl",
+      "Older session",
+      "claude-opus-4-1",
+      "2026-03-01T09:00:00.000Z",
+      "2026-03-01T09:30:00.000Z",
+      1800000,
+      "main",
+      "/workspace/project-one",
+      1,
+      0,
+      0,
+    );
+    insertSession.run(
+      "session_project_2",
+      "project_2",
+      "claude",
+      "/workspace/project-two/session-1.jsonl",
+      "Project two session",
+      "claude-opus-4-1",
+      "2026-03-01T11:00:00.000Z",
+      "2026-03-01T11:15:00.000Z",
+      900000,
+      "main",
+      "/workspace/project-two",
+      1,
+      0,
+      0,
+    );
+
+    const bookmarkStore = createBookmarkStoreMock({
+      countSessionBookmarks: vi.fn(() => 0),
+      countSessionBookmarksBySessionIds: vi.fn((projectId: string, sessionIds: string[]) => {
+        if (projectId === "project_1") {
+          expect(sessionIds).toEqual(["session_1", "session_older"]);
+          return {
+            session_1: 2,
+            session_older: 1,
+          };
+        }
+        if (projectId === "project_2") {
+          expect(sessionIds).toEqual(["session_project_2"]);
+          return {
+            session_project_2: 4,
+          };
+        }
+        return {};
+      }),
+    });
+    const service = createQueryServiceFromDb(db, {
+      bookmarkStore,
+      ownsBookmarkStore: false,
+    });
+
+    const response = service.listSessionsMany({
+      projectIds: ["project_2", "project_1", "", "project_1"],
+    });
+
+    expect(service.listSessionsMany({ projectIds: [] })).toEqual({ sessionsByProjectId: {} });
+    expect(Object.keys(response.sessionsByProjectId)).toEqual(["project_2", "project_1"]);
+    expect(response.sessionsByProjectId.project_1?.map((session) => session.id)).toEqual([
+      "session_1",
+      "session_older",
+    ]);
+    expect(response.sessionsByProjectId.project_1?.map((session) => session.bookmarkCount)).toEqual(
+      [2, 1],
+    );
+    expect(response.sessionsByProjectId.project_2?.map((session) => session.id)).toEqual([
+      "session_project_2",
+    ]);
+    expect(response.sessionsByProjectId.project_2?.[0]?.bookmarkCount).toBe(4);
+    expect(bookmarkStore.countSessionBookmarks).not.toHaveBeenCalled();
   });
 
   it("supports injected openDatabase dependency in path-based helpers", () => {

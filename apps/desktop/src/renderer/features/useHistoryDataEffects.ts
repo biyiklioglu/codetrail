@@ -63,6 +63,7 @@ export function useHistoryDataEffects({
   setFocusMessageId,
   setPendingRevealTarget,
   pendingRevealTarget,
+  bookmarkSortDirection,
   messageSortDirection,
   projectAllSortDirection,
   sessionPage,
@@ -113,6 +114,7 @@ export function useHistoryDataEffects({
   setFocusMessageId: Dispatch<SetStateAction<string>>;
   setPendingRevealTarget: Dispatch<SetStateAction<PendingRevealTarget | null>>;
   pendingRevealTarget: PendingRevealTarget | null;
+  bookmarkSortDirection: SortDirection;
   messageSortDirection: SortDirection;
   projectAllSortDirection: SortDirection;
   sessionPage: number;
@@ -203,11 +205,26 @@ export function useHistoryDataEffects({
       return;
     }
     setBookmarksLoadedProjectId(null);
+    if (historyMode !== "bookmarks") {
+      const response = await codetrail.invoke("bookmarks:listProject", {
+        projectId: selectedProjectId,
+        page: 0,
+        pageSize: 1,
+        countOnly: true,
+      });
+      if (requestToken !== bookmarksLoadTokenRef.current) {
+        return;
+      }
+      setBookmarksResponse(response);
+      setBookmarksLoadedProjectId(selectedProjectId);
+      return;
+    }
     const isAllHistoryCategoriesSelected = historyCategories.length === CATEGORIES.length;
     const response = await codetrail.invoke("bookmarks:listProject", {
       projectId: selectedProjectId,
       page: sessionPage,
       pageSize: messagePageSize,
+      sortDirection: bookmarkSortDirection,
       query: effectiveBookmarkQuery,
       searchMode,
       categories: isAllHistoryCategoriesSelected ? undefined : historyCategories,
@@ -222,9 +239,11 @@ export function useHistoryDataEffects({
     setBookmarksLoadedProjectId(selectedProjectId);
   }, [
     bookmarksLoadTokenRef,
+    bookmarkSortDirection,
     codetrail,
     effectiveBookmarkQuery,
     historyCategories,
+    historyMode,
     messagePageSize,
     searchMode,
     sessionPage,
@@ -239,6 +258,7 @@ export function useHistoryDataEffects({
         effectiveBookmarkQuery,
         effectiveSessionQuery,
         historyCategories.join(","),
+        bookmarkSortDirection,
         messageSortDirection,
         projectAllSortDirection,
         searchMode,
@@ -247,6 +267,7 @@ export function useHistoryDataEffects({
       effectiveBookmarkQuery,
       effectiveSessionQuery,
       historyCategories,
+      bookmarkSortDirection,
       messageSortDirection,
       projectAllSortDirection,
       searchMode,
@@ -465,8 +486,8 @@ export function useHistoryDataEffects({
   // filters, search query/mode) would cause data effects to re-fire. These deps are disjoint from
   // refreshCounter, so this effect only fires for user actions, never for refresh ticks. React runs
   // effects in declaration order, so this clears the ref before the detail effects read it.
-  // Note: bookmarkSortDirection is not included because it only affects in-memory sorting in
-  // useHistoryDerivedState, never triggering a server fetch or consuming refreshContextRef.
+  // Bookmark sort direction participates here because bookmark pagination must be computed against
+  // the requested order before the backend applies LIMIT/OFFSET.
   useEffect(() => {
     if (previousRefreshInvalidationKeyRef.current === refreshInvalidationKey) {
       return;
@@ -639,18 +660,16 @@ export function useHistoryDataEffects({
       setSessionPaneStableProjectId(null);
       return;
     }
-    // The session pane should not flip to a new project until both sessions and bookmarks for that
-    // project are loaded, otherwise the pane briefly renders mismatched content.
-    if (
-      sessionsLoadedProjectId === selectedProjectId &&
-      bookmarksLoadedProjectId === selectedProjectId
-    ) {
+    const bookmarksReady =
+      historyMode === "bookmarks" ? bookmarksLoadedProjectId === selectedProjectId : true;
+    if (sessionsLoadedProjectId === selectedProjectId && bookmarksReady) {
       setSessionPaneStableProjectId((value) =>
         value === selectedProjectId ? value : selectedProjectId,
       );
     }
   }, [
     bookmarksLoadedProjectId,
+    historyMode,
     selectedProjectId,
     sessionsLoadedProjectId,
     setSessionPaneStableProjectId,

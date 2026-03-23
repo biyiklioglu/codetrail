@@ -61,13 +61,17 @@ export type BookmarkListOptions = {
   query?: string;
   searchMode?: SearchMode;
   categories?: MessageCategory[];
+  sortDirection?: "asc" | "desc";
   limit?: number;
   offset?: number;
 };
 
+type BookmarkListOptionsInput = BookmarkListOptions | string | undefined;
+
 export type BookmarkStore = {
-  listProjectBookmarks: (projectId: string, options?: BookmarkListOptions) => StoredBookmark[];
-  countProjectBookmarks: (projectId: string, options?: BookmarkListOptions) => number;
+  listProjectBookmarks: (projectId: string, options?: BookmarkListOptionsInput) => StoredBookmark[];
+  countProjectBookmarks: (projectId: string, options?: BookmarkListOptionsInput) => number;
+  listProjectBookmarkMessageIds: (projectId: string, messageIds: string[]) => string[];
   countProjectBookmarkCategories: (
     projectId: string,
     query?: string,
@@ -178,18 +182,20 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
   );
 
   return {
-    listProjectBookmarks: (projectId, options = {}) => {
+    listProjectBookmarks: (projectId, optionsInput = {}) => {
+      const options = normalizeBookmarkListOptions(optionsInput);
       const built = buildProjectBookmarkQuery(projectId, options);
       if (built.impossible) {
         return [];
       }
+      const orderDirection = options.sortDirection === "asc" ? "ASC" : "DESC";
       const limitOffsetSql =
         options.limit !== undefined
           ? " LIMIT ? OFFSET ?"
           : options.offset !== undefined
             ? " LIMIT -1 OFFSET ?"
             : "";
-      const params = [...built.params];
+      const params: Array<string | number> = [...built.params];
       if (options.limit !== undefined) {
         params.push(Math.max(0, options.limit), Math.max(0, options.offset ?? 0));
       } else if (options.offset !== undefined) {
@@ -215,11 +221,12 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
              b.snapshot_json
            ${built.fromSql}
            WHERE ${built.whereClause}
-           ORDER BY b.message_created_at DESC, b.message_id DESC${limitOffsetSql}`,
+           ORDER BY b.message_created_at ${orderDirection}, b.message_id ${orderDirection}${limitOffsetSql}`,
         )
         .all(...params) as StoredBookmark[];
     },
-    countProjectBookmarks: (projectId, options = {}) => {
+    countProjectBookmarks: (projectId, optionsInput = {}) => {
+      const options = normalizeBookmarkListOptions(optionsInput);
       if (
         options.query === undefined &&
         options.searchMode === undefined &&
@@ -241,8 +248,26 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
         .get(...built.params) as { cnt: number } | undefined;
       return Number(row?.cnt ?? 0);
     },
+    listProjectBookmarkMessageIds: (projectId, messageIds) => {
+      if (messageIds.length === 0) {
+        return [];
+      }
+      const placeholders = messageIds.map(() => "?").join(",");
+      const rows = db
+        .prepare(
+          `SELECT message_id
+           FROM bookmarks
+           WHERE project_id = ?
+             AND message_id IN (${placeholders})`,
+        )
+        .all(projectId, ...messageIds) as Array<{ message_id: string }>;
+      return rows.map((row) => row.message_id);
+    },
     countProjectBookmarkCategories: (projectId, query, searchMode = "simple") => {
-      const built = buildProjectBookmarkQuery(projectId, { query, searchMode });
+      const built = buildProjectBookmarkQuery(projectId, {
+        ...(query !== undefined ? { query } : {}),
+        searchMode,
+      });
       const counts = makeEmptyCategoryCounts();
       if (built.impossible) {
         return counts;
@@ -438,6 +463,13 @@ function ensureBookmarkSchema(db: DatabaseHandle): void {
     `INSERT INTO meta (key, value) VALUES ('schema_version', ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
   ).run(String(BOOKMARKS_DB_SCHEMA_VERSION));
+}
+
+function normalizeBookmarkListOptions(options: BookmarkListOptionsInput): BookmarkListOptions {
+  if (typeof options === "string") {
+    return { query: options };
+  }
+  return options ?? {};
 }
 
 function ensureBookmarksFtsTable(db: DatabaseHandle): void {

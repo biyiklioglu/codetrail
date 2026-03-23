@@ -64,6 +64,7 @@ describe("registerIpcHandlers", () => {
           messages: [],
         }),
         "sessions:list": () => ({ sessions: [] }),
+        "sessions:listMany": () => ({ sessionsByProjectId: {} }),
         "sessions:getDetail": () => ({
           session: null,
           totalCount: 0,
@@ -93,6 +94,8 @@ describe("registerIpcHandlers", () => {
           projectId: "project_1",
           totalCount: 0,
           filteredCount: 0,
+          page: 0,
+          pageSize: 100,
           categoryCounts: {
             user: 0,
             assistant: 0,
@@ -103,6 +106,10 @@ describe("registerIpcHandlers", () => {
             system: 0,
           },
           results: [],
+        }),
+        "bookmarks:getStates": () => ({
+          projectId: "project_1",
+          bookmarkedMessageIds: [],
         }),
         "bookmarks:toggle": () => ({
           bookmarked: true,
@@ -238,6 +245,7 @@ describe("registerIpcHandlers", () => {
           messages: [],
         }),
         "sessions:list": () => ({ sessions: [] }),
+        "sessions:listMany": () => ({ sessionsByProjectId: {} }),
         "sessions:getDetail": () => ({
           session: null,
           totalCount: 0,
@@ -267,6 +275,8 @@ describe("registerIpcHandlers", () => {
           projectId: "project_1",
           totalCount: 0,
           filteredCount: 0,
+          page: 0,
+          pageSize: 100,
           categoryCounts: {
             user: 0,
             assistant: 0,
@@ -277,6 +287,10 @@ describe("registerIpcHandlers", () => {
             system: 0,
           },
           results: [],
+        }),
+        "bookmarks:getStates": () => ({
+          projectId: "project_1",
+          bookmarkedMessageIds: [],
         }),
         "bookmarks:toggle": () => ({ bookmarked: true }),
         "history:exportMessages": () => ({

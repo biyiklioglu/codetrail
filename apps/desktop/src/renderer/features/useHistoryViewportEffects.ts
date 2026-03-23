@@ -35,7 +35,7 @@ export function useHistoryViewportEffects({
   setFocusMessageId,
   scrollPreservationRef,
 }: {
-  messageListRef: RefObject<HTMLDivElement>;
+  messageListRef: RefObject<HTMLDivElement | null>;
   historyMode: "session" | "bookmarks" | "project_all";
   selectedProjectId: string;
   selectedSessionId: string;
@@ -55,7 +55,7 @@ export function useHistoryViewportEffects({
   focusMessageId: string;
   visibleFocusedMessageId: string;
   focusedMessagePosition: number;
-  focusedMessageRef: RefObject<HTMLDivElement>;
+  focusedMessageRef: RefObject<HTMLDivElement | null>;
   pendingMessageAreaFocus: boolean;
   setPendingMessageAreaFocus: Dispatch<SetStateAction<boolean>>;
   pendingMessagePageNavigation: PendingMessagePageNavigation | null;

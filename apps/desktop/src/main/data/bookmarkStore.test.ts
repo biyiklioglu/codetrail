@@ -170,6 +170,66 @@ describe("bookmarkStore", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("applies sort direction before limit and offset when listing bookmarks", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-bookmark-sort-"));
+    const indexedDbPath = join(dir, "indexed.sqlite");
+    seedIndexedDb(indexedDbPath);
+
+    const store = createBookmarkStore(resolveBookmarksDbPath(indexedDbPath));
+    store.upsertBookmark({
+      projectId: "p1",
+      sessionId: "s1",
+      messageId: "m1",
+      messageSourceId: "src1",
+      provider: "claude",
+      sessionTitle: "Project intro",
+      messageCategory: "assistant",
+      messageContent: "Oldest",
+      messageCreatedAt: "2026-03-01T10:00:01.000Z",
+      bookmarkedAt: "2026-03-01T10:01:01.000Z",
+    });
+    store.upsertBookmark({
+      projectId: "p1",
+      sessionId: "s1",
+      messageId: "m2",
+      messageSourceId: "src2",
+      provider: "claude",
+      sessionTitle: "Project intro",
+      messageCategory: "assistant",
+      messageContent: "Middle",
+      messageCreatedAt: "2026-03-01T10:00:02.000Z",
+      bookmarkedAt: "2026-03-01T10:01:02.000Z",
+    });
+    store.upsertBookmark({
+      projectId: "p1",
+      sessionId: "s1",
+      messageId: "m3",
+      messageSourceId: "src3",
+      provider: "claude",
+      sessionTitle: "Project intro",
+      messageCategory: "assistant",
+      messageContent: "Newest",
+      messageCreatedAt: "2026-03-01T10:00:03.000Z",
+      bookmarkedAt: "2026-03-01T10:01:03.000Z",
+    });
+
+    expect(
+      store.listProjectBookmarks("p1", { sortDirection: "asc", limit: 1, offset: 0 })[0]
+        ?.message_id,
+    ).toBe("m1");
+    expect(
+      store.listProjectBookmarks("p1", { sortDirection: "asc", limit: 1, offset: 1 })[0]
+        ?.message_id,
+    ).toBe("m2");
+    expect(
+      store.listProjectBookmarks("p1", { sortDirection: "desc", limit: 1, offset: 0 })[0]
+        ?.message_id,
+    ).toBe("m3");
+
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("applies additive schema changes for existing bookmark databases on open", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-bookmark-migrate-"));
     const indexedDbPath = join(dir, "indexed.sqlite");

@@ -11,6 +11,7 @@ import {
   asObject,
   asString,
   buildUnifiedDiffFromTextPair,
+  tryParseJsonRecord,
 } from "./toolParsing";
 import type { SessionMessage } from "./types";
 

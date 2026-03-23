@@ -19,7 +19,6 @@ import { createHighlighter } from "shiki";
 import { buildSearchHighlightRegex } from "@codetrail/core/browser";
 import {
   type ExternalToolConfig,
-  UI_SHIKI_THEME_VALUES,
   getDefaultShikiThemeForUiTheme,
   getThemeFamily,
   resolveShikiThemeForUiTheme,
@@ -174,7 +173,10 @@ const highlightRegexCache = new Map<string, RegExp | null>();
 const MARKDOWN_COMPONENTS_CACHE_LIMIT = 32;
 const markdownComponentsCache = new Map<string, Components>();
 const SHIKI_TOKEN_CACHE_LIMIT = 48;
-let shikiHighlighterPromise: Promise<Awaited<ReturnType<typeof createHighlighter>>> | null = null;
+const shikiHighlighterPromises = new Map<
+  string,
+  Promise<Awaited<ReturnType<typeof createHighlighter>>>
+>();
 let availableEditorsPromise: Promise<Awaited<ReturnType<typeof listAvailableEditors>>> | null =
   null;
 let availableEditorsPromiseKey = "";
@@ -226,7 +228,7 @@ const tokenLineCache = new Map<
 >();
 
 export function resetContentViewerCachesForTests(): void {
-  shikiHighlighterPromise = null;
+  shikiHighlighterPromises.clear();
   availableEditorsPromise = null;
   paneStatePromise = null;
   viewerExternalAppsStore.unsubscribePaneState?.();
@@ -240,27 +242,49 @@ export function resetContentViewerCachesForTests(): void {
   tokenLineCache.clear();
 }
 
-async function getShikiHighlighter() {
-  if (!shikiHighlighterPromise) {
-    shikiHighlighterPromise = createHighlighter({
-      themes: [...UI_SHIKI_THEME_VALUES],
-      langs: [
-        "plaintext",
-        "javascript",
-        "jsx",
-        "typescript",
-        "tsx",
-        "json",
-        "bash",
-        "python",
-        "sql",
-        "html",
-        "css",
-        "markdown",
-      ],
-    });
+function resolveViewerShikiThemes(themeVariant: string, shikiTheme: string) {
+  const defaultTheme = getDefaultShikiThemeForUiTheme(
+    themeVariant as Parameters<typeof getDefaultShikiThemeForUiTheme>[0],
+  );
+  const family = getThemeFamily(themeVariant as Parameters<typeof getDefaultShikiThemeForUiTheme>[0]);
+  const selectedTheme = resolveShikiThemeForUiTheme(
+    themeVariant as Parameters<typeof resolveShikiThemeForUiTheme>[0],
+    family === "dark" ? shikiTheme : null,
+    family === "light" ? shikiTheme : null,
+  );
+  return {
+    defaultTheme,
+    selectedTheme,
+    themes: [...new Set([defaultTheme, selectedTheme])],
+  };
+}
+
+async function getShikiHighlighter(themeVariant: string, shikiTheme: string) {
+  const { themes } = resolveViewerShikiThemes(themeVariant, shikiTheme);
+  const cacheKey = themes.join("\u0000");
+  const existing = shikiHighlighterPromises.get(cacheKey);
+  if (existing) {
+    return existing;
   }
-  return shikiHighlighterPromise;
+  const pending = createHighlighter({
+    themes,
+    langs: [
+      "plaintext",
+      "javascript",
+      "jsx",
+      "typescript",
+      "tsx",
+      "json",
+      "bash",
+      "python",
+      "sql",
+      "html",
+      "css",
+      "markdown",
+    ],
+  });
+  shikiHighlighterPromises.set(cacheKey, pending);
+  return pending;
 }
 
 function getCurrentThemeVariant(): string {
@@ -561,7 +585,7 @@ export function normalizeTokenColorForContrast(
 function useTokenColorResolver(): (color: string | undefined) => string | undefined {
   const themeVariant = useDocumentThemeVariant();
   return useMemo(() => {
-    if (getThemeFamily(themeVariant) !== "light") {
+    if (getThemeFamily(themeVariant as Parameters<typeof getThemeFamily>[0]) !== "light") {
       return (color: string | undefined) => color;
     }
     const backgroundColor = getThemeCssColor("--code-bg", "#fafbfe");
@@ -733,22 +757,9 @@ async function loadShikiTokenLines(
     return existing.pending;
   }
 
-  const pending = getShikiHighlighter()
+  const pending = getShikiHighlighter(themeVariant, shikiTheme)
     .then(async (highlighter) => {
-      const defaultTheme = getDefaultShikiThemeForUiTheme(
-        themeVariant as Parameters<typeof getDefaultShikiThemeForUiTheme>[0],
-      );
-      const selectedTheme = resolveShikiThemeForUiTheme(
-        themeVariant as Parameters<typeof resolveShikiThemeForUiTheme>[0],
-        getThemeFamily(themeVariant as Parameters<typeof getDefaultShikiThemeForUiTheme>[0]) ===
-          "dark"
-          ? shikiTheme
-          : null,
-        getThemeFamily(themeVariant as Parameters<typeof getDefaultShikiThemeForUiTheme>[0]) ===
-          "light"
-          ? shikiTheme
-          : null,
-      );
+      const { defaultTheme, selectedTheme } = resolveViewerShikiThemes(themeVariant, shikiTheme);
       try {
         return (await highlighter.codeToTokens(codeValue, {
           lang: normalizedLanguage as never,
@@ -945,26 +956,6 @@ function ContentViewer({
   const absoluteFilePath = diffModel?.absoluteFilePath ?? (filePath ? toLocalPath(filePath) : null);
   const syntaxLanguage = kind === "diff" ? (diffModel?.sourceLanguage ?? language) : language;
   const textAnalysis = useMemo(() => analyzeTextContent(codeValue), [codeValue]);
-  const diffRenderSource = useMemo(
-    () => buildDiffRenderSource(diffModel, diffMode),
-    [diffModel, diffMode],
-  );
-  const tokenLines = useShikiTokenLines(syntaxLanguage, codeValue, kind !== "diff");
-  const diffUnifiedTokenLines = useShikiTokenLines(
-    syntaxLanguage,
-    diffRenderSource.unified,
-    kind === "diff" && diffMode === "unified",
-  );
-  const diffSplitLeftTokenLines = useShikiTokenLines(
-    syntaxLanguage,
-    diffRenderSource.splitLeft,
-    kind === "diff" && diffMode === "split",
-  );
-  const diffSplitRightTokenLines = useShikiTokenLines(
-    syntaxLanguage,
-    diffRenderSource.splitRight,
-    kind === "diff" && diffMode === "split",
-  );
   const totalLines = kind === "diff" ? (diffModel?.rows.length ?? 0) : textAnalysis.totalLines;
   const isLarge =
     kind === "diff" ? shouldProgressivelyRender(codeValue, totalLines) : textAnalysis.isLarge;
@@ -987,6 +978,35 @@ function ContentViewer({
   useEffect(() => {
     setVisibleCount(isLarge ? Math.min(totalLines, INITIAL_EXPANDED_LINES) : totalLines);
   }, [isLarge, totalLines]);
+
+  const visibleCodeValue = useMemo(
+    () => textAnalysis.lineValues.slice(0, visibleCount).join("\n"),
+    [textAnalysis.lineValues, visibleCount],
+  );
+  const diffRenderSource = useMemo(
+    () => buildDiffRenderSource(diffModel, diffMode, visibleCount),
+    [diffModel, diffMode, visibleCount],
+  );
+  const tokenLines = useShikiTokenLines(
+    syntaxLanguage,
+    visibleCodeValue,
+    kind !== "diff" && !highlightActive,
+  );
+  const diffUnifiedTokenLines = useShikiTokenLines(
+    syntaxLanguage,
+    diffRenderSource.unified,
+    kind === "diff" && diffMode === "unified" && !highlightActive,
+  );
+  const diffSplitLeftTokenLines = useShikiTokenLines(
+    syntaxLanguage,
+    diffRenderSource.splitLeft,
+    kind === "diff" && diffMode === "split" && !highlightActive,
+  );
+  const diffSplitRightTokenLines = useShikiTokenLines(
+    syntaxLanguage,
+    diffRenderSource.splitRight,
+    kind === "diff" && diffMode === "split" && !highlightActive,
+  );
 
   const canReveal =
     absoluteFilePath !== null && isPathUnderProjectRoots(absoluteFilePath, pathRoots);

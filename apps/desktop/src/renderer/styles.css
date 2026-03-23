@@ -1772,6 +1772,8 @@ body.platform-macos .titlebar-left {
   padding: 12px;
   text-align: left;
   transition: all 0.15s;
+  content-visibility: auto;
+  contain-intrinsic-size: 84px;
 }
 
 .list-item:hover,
@@ -1798,6 +1800,8 @@ body.platform-macos .titlebar-left {
 
 .project-folder-group {
   margin-bottom: 2px;
+  content-visibility: auto;
+  contain-intrinsic-size: 34px;
 }
 
 .project-folder-row {
@@ -1968,6 +1972,8 @@ body.platform-macos .titlebar-left {
   width: 100%;
   min-width: 0;
   margin-bottom: 1px;
+  content-visibility: auto;
+  contain-intrinsic-size: 72px;
 }
 
 .project-tree-project-row-main {
@@ -2178,6 +2184,8 @@ body.platform-macos .titlebar-left {
   appearance: none;
   -webkit-appearance: none;
   transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  content-visibility: auto;
+  contain-intrinsic-size: 30px;
 }
 
 .project-tree-session-row:hover {
@@ -2894,6 +2902,8 @@ button svg *,
   box-shadow: var(--shadow-card);
   overflow: hidden;
   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: 180px;
 }
 
 .message:hover {

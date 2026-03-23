@@ -88,6 +88,10 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
     request: { projectId: "project_1" },
     response: { sessions: [] },
   },
+  "sessions:listMany": {
+    request: { projectIds: ["project_1", "project_2"] },
+    response: { sessionsByProjectId: { project_1: [], project_2: [] } },
+  },
   "sessions:getDetail": {
     request: {
       sessionId: "session_1",
@@ -134,6 +138,8 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
       projectId: "project_1",
       page: 0,
       pageSize: 100,
+      sortDirection: "asc",
+      countOnly: true,
       query: "parser",
       categories: ["assistant"],
     },
@@ -153,6 +159,16 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
         system: 0,
       },
       results: [],
+    },
+  },
+  "bookmarks:getStates": {
+    request: {
+      projectId: "project_1",
+      messageIds: ["message_1", "message_2"],
+    },
+    response: {
+      projectId: "project_1",
+      bookmarkedMessageIds: ["message_2"],
     },
   },
   "bookmarks:toggle": {

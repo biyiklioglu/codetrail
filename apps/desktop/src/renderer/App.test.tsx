@@ -104,12 +104,12 @@ describe("App shell", () => {
     renderWithClient(<App />, client);
 
     await waitFor(() => {
-      expect(screen.getByText("Page 1 / 3 (250 messages)")).toBeInTheDocument();
+      expect(screen.getByText("Page 1 / 5 (250 messages)")).toBeInTheDocument();
     });
 
     fireEvent.keyDown(window, { key: "ArrowRight", ctrlKey: true });
     await waitFor(() => {
-      expect(screen.getByText("Page 2 / 3 (250 messages)")).toBeInTheDocument();
+      expect(screen.getByText("Page 2 / 5 (250 messages)")).toBeInTheDocument();
     });
 
     await user.click(screen.getByRole("button", { name: "Search" }));
@@ -603,11 +603,13 @@ describe("App shell", () => {
       }),
       "bookmarks:listProject": () => ({
         projectId: "project_1",
-        totalCount: 2,
-        filteredCount: 2,
+        totalCount: 25,
+        filteredCount: 25,
+        page: 0,
+        pageSize: 10,
         categoryCounts: {
           user: 0,
-          assistant: 2,
+          assistant: 25,
           tool_use: 0,
           tool_edit: 0,
           tool_result: 0,
@@ -670,6 +672,7 @@ describe("App shell", () => {
             selectedProjectId: "project_1",
             selectedSessionId: "session_1",
             historyMode: "session",
+            messagePageSize: 10,
           } as PaneStateSnapshot
         }
       />,
@@ -686,6 +689,7 @@ describe("App shell", () => {
       expect(screen.getByRole("button", { name: "Close bookmarks" })).toBeInTheDocument();
     });
     expect(screen.getByText("Saved markdown summary")).toBeInTheDocument();
+    expect(screen.getByText("Page 1 / 3 (25 bookmarks)")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Close bookmarks" }));
 
