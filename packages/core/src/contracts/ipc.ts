@@ -354,6 +354,12 @@ export const ipcContractSchemas = {
       version: z.string().min(1),
     }),
   },
+  "app:flushState": {
+    request: z.object({}),
+    response: z.object({
+      ok: z.literal(true),
+    }),
+  },
   "app:getSettingsInfo": {
     request: z.object({}),
     response: settingsInfoResponseSchema,

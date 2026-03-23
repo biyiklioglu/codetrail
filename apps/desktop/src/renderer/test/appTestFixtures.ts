@@ -72,6 +72,9 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
     if (channel === "bookmarks:toggle") {
       return { bookmarked: true };
     }
+    if (channel === "app:flushState") {
+      return { ok: true };
+    }
     if (channel === "app:getSettingsInfo") {
       return SETTINGS_INFO;
     }

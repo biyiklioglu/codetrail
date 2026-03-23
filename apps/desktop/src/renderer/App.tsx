@@ -141,6 +141,7 @@ export function App({
   const logError = useCallback((context: string, error: unknown) => {
     console.error(`[codetrail] ${context}: ${toErrorMessage(error)}`);
   }, []);
+  const previousMainViewRef = useRef<MainView>(mainView);
   const wasIndexingRef = useRef(false);
   const lastCompletedJobsRef = useRef(-1);
   const watchStatsLoadedRef = useRef(false);
@@ -178,6 +179,17 @@ export function App({
     }
     void appearance.loadSettingsInfo();
   }, [appearance.loadSettingsInfo, appearance.settingsInfo, appearance.settingsLoading, mainView]);
+
+  useEffect(() => {
+    const previousMainView = previousMainViewRef.current;
+    previousMainViewRef.current = mainView;
+    if (previousMainView !== "settings" || mainView === "settings") {
+      return;
+    }
+    void codetrail.invoke("app:flushState", {}).catch((error: unknown) => {
+      logError("Failed flushing app state after closing settings", error);
+    });
+  }, [codetrail, logError, mainView]);
 
   useReconcileProviderSelection(enabledProviders, setSearchProviders);
 

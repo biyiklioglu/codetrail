@@ -26,6 +26,10 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
     request: {},
     response: { status: "ok", version: "0.1.0" },
   },
+  "app:flushState": {
+    request: {},
+    response: { ok: true },
+  },
   "app:getSettingsInfo": {
     request: {},
     response: createSettingsInfoFixture({

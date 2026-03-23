@@ -36,6 +36,7 @@ describe("registerIpcHandlers", () => {
       },
       {
         "app:getHealth": () => ({ status: "ok", version: "0.1.0" }),
+        "app:flushState": () => ({ ok: true }),
         "app:getSettingsInfo": () => settingsInfo,
         "db:getSchemaVersion": () => ({ schemaVersion: 1 }),
         "indexer:refresh": (payload) => ({ jobId: payload.force ? "force-1" : "normal-1" }),
@@ -217,6 +218,7 @@ describe("registerIpcHandlers", () => {
       },
       {
         "app:getHealth": () => ({ status: "ok", version: "0.1.0" }),
+        "app:flushState": () => ({ ok: true }),
         "app:getSettingsInfo": () => settingsInfo,
         "db:getSchemaVersion": () => ({ schemaVersion: 1 }),
         "indexer:refresh": () => ({ jobId: "refresh-1" }),

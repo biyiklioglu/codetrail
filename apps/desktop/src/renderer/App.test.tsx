@@ -97,6 +97,38 @@ describe("App shell", () => {
     });
   });
 
+  it("flushes app state when settings closes", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    expect(
+      client.invoke.mock.calls.filter(([channel]) => channel === "app:flushState"),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Open settings" }));
+    await waitFor(() => {
+      expect(screen.getByText("Discovery Roots")).toBeInTheDocument();
+    });
+
+    expect(
+      client.invoke.mock.calls.filter(([channel]) => channel === "app:flushState"),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Return to history view" }));
+
+    await waitFor(() => {
+      expect(
+        client.invoke.mock.calls.filter(([channel]) => channel === "app:flushState"),
+      ).toHaveLength(1);
+    });
+  });
+
   it("routes Cmd/Ctrl+Left/Right to history and global search pagination", async () => {
     const user = userEvent.setup();
     const client = createAppClient();

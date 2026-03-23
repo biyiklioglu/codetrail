@@ -260,6 +260,7 @@ function getRequiredHandler(handlers: HandlerMap, channel: string): Handler {
 
 describe("bootstrapMainProcess", () => {
   let handlers: HandlerMap;
+  let flush: ReturnType<typeof vi.fn>;
   let setPaneState: ReturnType<typeof vi.fn>;
   let setPaneStateRuntimeOnly: ReturnType<typeof vi.fn>;
   let setIndexingState: ReturnType<typeof vi.fn>;
@@ -271,6 +272,7 @@ describe("bootstrapMainProcess", () => {
     | "setPaneStateRuntimeOnly"
     | "getIndexingState"
     | "setIndexingState"
+    | "flush"
   >;
   const paneState: PaneState = {
     projectPaneWidth: 220,
@@ -312,6 +314,7 @@ describe("bootstrapMainProcess", () => {
 
   beforeEach(() => {
     handlers = {};
+    flush = vi.fn();
     setPaneState = vi.fn();
     setPaneStateRuntimeOnly = vi.fn();
     setIndexingState = vi.fn();
@@ -356,6 +359,7 @@ describe("bootstrapMainProcess", () => {
         enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
         removeMissingSessionsDuringIncrementalIndexing: false,
       }),
+      flush,
       setPaneState,
       setPaneStateRuntimeOnly,
       setIndexingState,
@@ -793,6 +797,7 @@ describe("bootstrapMainProcess", () => {
         enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
         removeMissingSessionsDuringIncrementalIndexing: false,
       }),
+      flush,
       setIndexingState: vi.fn(),
       setPaneState: setPaneStatePersisted,
       setPaneStateRuntimeOnly,
@@ -813,6 +818,29 @@ describe("bootstrapMainProcess", () => {
     expect(setPaneStatePersisted).not.toHaveBeenCalled();
   });
 
+  it("flushes app state immediately from app:flushState", async () => {
+    const appStateStore: AppStateStoreMock = {
+      getFilePath: () => "/tmp/state.json",
+      getPaneState: () => paneState,
+      getIndexingState: () => ({
+        enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+        removeMissingSessionsDuringIncrementalIndexing: false,
+      }),
+      flush,
+      setIndexingState: vi.fn(),
+      setPaneState: vi.fn(),
+      setPaneStateRuntimeOnly: vi.fn(),
+    };
+
+    await bootstrapMainProcess({
+      appStateStore: appStateStore as AppStateStore,
+      runStartupIndexing: false,
+    });
+
+    expect(getRequiredHandler(handlers, "app:flushState")({})).toEqual({ ok: true });
+    expect(flush).toHaveBeenCalledTimes(1);
+  });
+
   it("purges disabled providers and then runs a full incremental refresh", async () => {
     const currentPaneState: PaneState = {
       ...paneState,
@@ -826,6 +854,7 @@ describe("bootstrapMainProcess", () => {
     const appStateStore: AppStateStoreMock = {
       getFilePath: () => "/tmp/state.json",
       getPaneState: () => currentPaneState,
+      flush,
       setPaneState: vi.fn(),
       setPaneStateRuntimeOnly: vi.fn(),
       getIndexingState: () => currentIndexingState,

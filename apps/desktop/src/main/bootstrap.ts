@@ -243,6 +243,10 @@ export async function bootstrapMainProcess(
       status: "ok",
       version: app.getVersion(),
     }),
+    "app:flushState": () => {
+      options.appStateStore?.flush();
+      return { ok: true };
+    },
     "app:getSettingsInfo": () => ({
       storage: {
         settingsFile: settingsFilePath,
