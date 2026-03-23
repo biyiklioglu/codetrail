@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { applyTheme, resolveThemeCssBase } from "./theme";
+import { applyDocumentAppearance, applyTheme, resolveThemeCssBase } from "./theme";
 
 describe("theme helpers", () => {
   it("resolves imported variants onto their css bases", () => {
@@ -24,5 +24,19 @@ describe("theme helpers", () => {
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(document.documentElement.dataset.themeVariant).toBe("light");
     expect(document.documentElement.style.getPropertyValue("--bg-base")).toBe("");
+  });
+
+  it("applies the shiki theme alongside the document theme", () => {
+    applyDocumentAppearance("dark", "vesper");
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(document.documentElement.dataset.themeVariant).toBe("dark");
+    expect(document.documentElement.dataset.shikiTheme).toBe("vesper");
+
+    applyDocumentAppearance("light", null);
+
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.documentElement.dataset.themeVariant).toBe("light");
+    expect(document.documentElement.dataset.shikiTheme).toBeUndefined();
   });
 });

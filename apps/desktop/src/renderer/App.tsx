@@ -696,7 +696,11 @@ export function App({
             setMainView((value) => (value === "search" ? "history" : "search"))
           }
           onThemeChange={appearance.setTheme}
+          onThemePreview={appearance.previewTheme}
+          onThemePreviewReset={appearance.clearPreviewTheme}
           onShikiThemeChange={appearance.setShikiTheme}
+          onShikiThemePreview={appearance.previewShikiTheme}
+          onShikiThemePreviewReset={appearance.clearPreviewShikiTheme}
           onIncrementalRefresh={() => void handleIncrementalRefresh()}
           refreshStrategy={refreshStrategy}
           onRefreshStrategyChange={updateRefreshStrategy}

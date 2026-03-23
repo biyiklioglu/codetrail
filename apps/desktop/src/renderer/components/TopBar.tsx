@@ -1,4 +1,13 @@
-import { type Dispatch, Fragment, type SetStateAction, useCallback, useRef, useState } from "react";
+import {
+  type Dispatch,
+  Fragment,
+  type KeyboardEvent,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import {
   type ShikiThemeId,
@@ -11,6 +20,178 @@ import {
 import { REFRESH_STRATEGY_OPTIONS, type RefreshStrategy } from "../app/autoRefresh";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { ToolbarIcon } from "./ToolbarIcon";
+
+function wrapMenuIndex(index: number, count: number): number {
+  return ((index % count) + count) % count;
+}
+
+function clampMenuIndex(index: number, count: number): number {
+  if (count <= 0) {
+    return 0;
+  }
+  return Math.min(Math.max(index, 0), count - 1);
+}
+
+function useToolbarDropdownKeyboardNavigation({
+  open,
+  setOpen,
+  itemCount,
+  defaultIndex,
+  closeDropdown,
+}: {
+  open: boolean;
+  setOpen: Dispatch<SetStateAction<boolean>>;
+  itemCount: number;
+  defaultIndex: number;
+  closeDropdown: () => void;
+}) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+
+  const resolveInitialIndex = useCallback(
+    (preferredIndex?: number) => {
+      if (itemCount === 0) {
+        return null;
+      }
+      const fallbackIndex = defaultIndex >= 0 ? defaultIndex : 0;
+      return clampMenuIndex(preferredIndex ?? fallbackIndex, itemCount);
+    },
+    [defaultIndex, itemCount],
+  );
+
+  const focusItem = useCallback((index: number) => {
+    itemRefs.current[index]?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!open || focusedIndex === null) {
+      return;
+    }
+
+    const rafId = window.requestAnimationFrame(() => {
+      focusItem(focusedIndex);
+    });
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [focusItem, focusedIndex, open]);
+
+  const openDropdown = useCallback(
+    (preferredIndex?: number) => {
+      setFocusedIndex(resolveInitialIndex(preferredIndex));
+      setOpen(true);
+    },
+    [resolveInitialIndex, setOpen],
+  );
+
+  const closeDropdownMenu = useCallback(() => {
+    setFocusedIndex(null);
+    closeDropdown();
+  }, [closeDropdown]);
+
+  const closeDropdownAndFocusTrigger = useCallback(() => {
+    closeDropdownMenu();
+    window.requestAnimationFrame(() => {
+      triggerRef.current?.focus();
+    });
+  }, [closeDropdownMenu]);
+
+  const moveFocus = useCallback(
+    (delta: number) => {
+      if (itemCount === 0) {
+        return;
+      }
+      setFocusedIndex((current) => {
+        const startIndex = current ?? resolveInitialIndex() ?? 0;
+        return wrapMenuIndex(startIndex + delta, itemCount);
+      });
+    },
+    [itemCount, resolveInitialIndex],
+  );
+
+  const handleTriggerKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        if (!open) {
+          openDropdown();
+          return;
+        }
+        moveFocus(1);
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (!open) {
+          openDropdown(itemCount - 1);
+          return;
+        }
+        moveFocus(-1);
+        return;
+      }
+
+      if (event.key === "Escape" && open) {
+        event.preventDefault();
+        closeDropdownMenu();
+      }
+    },
+    [closeDropdownMenu, itemCount, moveFocus, open, openDropdown],
+  );
+
+  const handleItemKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setFocusedIndex(wrapMenuIndex(index + 1, itemCount));
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setFocusedIndex(wrapMenuIndex(index - 1, itemCount));
+        return;
+      }
+
+      if (event.key === "Home") {
+        event.preventDefault();
+        setFocusedIndex(0);
+        return;
+      }
+
+      if (event.key === "End") {
+        event.preventDefault();
+        setFocusedIndex(itemCount - 1);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDropdownAndFocusTrigger();
+        return;
+      }
+
+      if (event.key === "Tab") {
+        closeDropdownMenu();
+      }
+    },
+    [closeDropdownAndFocusTrigger, closeDropdownMenu, itemCount],
+  );
+
+  const setItemRef = useCallback((index: number, node: HTMLButtonElement | null) => {
+    itemRefs.current[index] = node;
+  }, []);
+
+  return {
+    triggerRef,
+    openDropdown,
+    closeDropdownMenu,
+    handleTriggerKeyDown,
+    handleItemKeyDown,
+    setItemRef,
+  };
+}
 
 function RefreshStrategyDropdown({
   value,
@@ -84,23 +265,60 @@ function RefreshStrategyDropdown({
 function ThemeDropdown({
   value,
   onChange,
+  onPreview,
+  onPreviewReset,
 }: {
   value: ThemeMode;
   onChange: (theme: ThemeMode) => void;
+  onPreview: (theme: ThemeMode) => void;
+  onPreviewReset: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const previewActiveRef = useRef(false);
+  const themeOptions = THEME_GROUPS.flatMap((group) => group.options);
+  const selectedIndex = themeOptions.findIndex((option) => option.value === value);
+  const restorePreview = useCallback(() => {
+    if (!previewActiveRef.current) {
+      return;
+    }
+    previewActiveRef.current = false;
+    onPreviewReset();
+  }, [onPreviewReset]);
   const closeDropdown = useCallback(() => {
+    restorePreview();
     setOpen(false);
-  }, []);
+  }, [restorePreview]);
+  const {
+    triggerRef,
+    openDropdown,
+    closeDropdownMenu,
+    handleTriggerKeyDown,
+    handleItemKeyDown,
+    setItemRef,
+  } = useToolbarDropdownKeyboardNavigation({
+    open,
+    setOpen,
+    itemCount: themeOptions.length,
+    defaultIndex: selectedIndex,
+    closeDropdown,
+  });
   useClickOutside(containerRef, open, closeDropdown);
 
   return (
     <div className="tb-dropdown" ref={containerRef}>
       <button
+        ref={triggerRef}
         type="button"
         className={open ? "tb-btn tb-btn-icon active" : "tb-btn tb-btn-icon"}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (open) {
+            closeDropdownMenu();
+            return;
+          }
+          openDropdown();
+        }}
+        onKeyDown={handleTriggerKeyDown}
         aria-label="Choose theme"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -112,28 +330,55 @@ function ThemeDropdown({
         <div
           className="tb-dropdown-menu tb-dropdown-menu-wide tb-dropdown-menu-right tb-dropdown-menu-scrollable"
           aria-label="Theme"
+          onMouseLeave={restorePreview}
         >
           {THEME_GROUPS.map((group, groupIndex) => (
             <Fragment key={group.value}>
               {groupIndex > 0 ? <div className="tb-dropdown-separator" aria-hidden /> : null}
               <div className="tb-dropdown-group-label">{group.label}</div>
-              {group.options.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  aria-pressed={option.value === value}
-                  className={`tb-dropdown-item tb-dropdown-item-checkable${
-                    option.value === value ? " selected" : ""
-                  }`}
-                  onClick={() => {
-                    onChange(option.value);
-                    setOpen(false);
-                  }}
-                >
-                  <span>{option.label}</span>
-                  {option.value === value ? <span className="tb-dropdown-check">✓</span> : null}
-                </button>
-              ))}
+              {group.options.map((option) => {
+                const optionIndex = themeOptions.findIndex((item) => item.value === option.value);
+                return (
+                  <button
+                    key={option.value}
+                    ref={(node) => {
+                      setItemRef(optionIndex, node);
+                    }}
+                    type="button"
+                    aria-pressed={option.value === value}
+                    className={`tb-dropdown-item tb-dropdown-item-checkable${
+                      option.value === value ? " selected" : ""
+                    }`}
+                    onFocus={() => {
+                      if (option.value === value) {
+                        restorePreview();
+                        return;
+                      }
+                      previewActiveRef.current = true;
+                      onPreview(option.value);
+                    }}
+                    onMouseEnter={() => {
+                      if (option.value === value) {
+                        restorePreview();
+                        return;
+                      }
+                      previewActiveRef.current = true;
+                      onPreview(option.value);
+                    }}
+                    onKeyDown={(event) => {
+                      handleItemKeyDown(event, optionIndex);
+                    }}
+                    onClick={() => {
+                      previewActiveRef.current = false;
+                      onChange(option.value);
+                      setOpen(false);
+                    }}
+                  >
+                    <span>{option.label}</span>
+                    {option.value === value ? <span className="tb-dropdown-check">✓</span> : null}
+                  </button>
+                );
+              })}
             </Fragment>
           ))}
         </div>
@@ -146,25 +391,61 @@ function ShikiThemeDropdown({
   value,
   theme,
   onChange,
+  onPreview,
+  onPreviewReset,
 }: {
   value: ShikiThemeId;
   theme: ThemeMode;
   onChange: (theme: ShikiThemeId) => void;
+  onPreview: (theme: ShikiThemeId) => void;
+  onPreviewReset: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const previewActiveRef = useRef(false);
+  const restorePreview = useCallback(() => {
+    if (!previewActiveRef.current) {
+      return;
+    }
+    previewActiveRef.current = false;
+    onPreviewReset();
+  }, [onPreviewReset]);
   const closeDropdown = useCallback(() => {
+    restorePreview();
     setOpen(false);
-  }, []);
+  }, [restorePreview]);
   const shikiThemeGroup = getShikiThemeGroupForUiTheme(theme);
+  const selectedIndex = shikiThemeGroup.options.findIndex((option) => option.value === value);
+  const {
+    triggerRef,
+    openDropdown,
+    closeDropdownMenu,
+    handleTriggerKeyDown,
+    handleItemKeyDown,
+    setItemRef,
+  } = useToolbarDropdownKeyboardNavigation({
+    open,
+    setOpen,
+    itemCount: shikiThemeGroup.options.length,
+    defaultIndex: selectedIndex,
+    closeDropdown,
+  });
   useClickOutside(containerRef, open, closeDropdown);
 
   return (
     <div className="tb-dropdown" ref={containerRef}>
       <button
+        ref={triggerRef}
         type="button"
         className={open ? "tb-btn tb-btn-icon active" : "tb-btn tb-btn-icon"}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (open) {
+            closeDropdownMenu();
+            return;
+          }
+          openDropdown();
+        }}
+        onKeyDown={handleTriggerKeyDown}
         aria-label="Choose text viewer theme"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -176,17 +457,47 @@ function ShikiThemeDropdown({
         <div
           className="tb-dropdown-menu tb-dropdown-menu-wide tb-dropdown-menu-right tb-dropdown-menu-scrollable"
           aria-label="Text viewer theme"
+          onMouseLeave={restorePreview}
         >
           <div className="tb-dropdown-group-label">{shikiThemeGroup.label}</div>
           {shikiThemeGroup.options.map((option) => (
             <button
               key={option.value}
+              ref={(node) => {
+                const optionIndex = shikiThemeGroup.options.findIndex(
+                  (item) => item.value === option.value,
+                );
+                setItemRef(optionIndex, node);
+              }}
               type="button"
               aria-pressed={option.value === value}
               className={`tb-dropdown-item tb-dropdown-item-checkable${
                 option.value === value ? " selected" : ""
               }`}
+              onFocus={() => {
+                if (option.value === value) {
+                  restorePreview();
+                  return;
+                }
+                previewActiveRef.current = true;
+                onPreview(option.value);
+              }}
+              onMouseEnter={() => {
+                if (option.value === value) {
+                  restorePreview();
+                  return;
+                }
+                previewActiveRef.current = true;
+                onPreview(option.value);
+              }}
+              onKeyDown={(event) => {
+                const optionIndex = shikiThemeGroup.options.findIndex(
+                  (item) => item.value === option.value,
+                );
+                handleItemKeyDown(event, optionIndex);
+              }}
               onClick={() => {
+                previewActiveRef.current = false;
                 onChange(option.value);
                 setOpen(false);
               }}
@@ -210,7 +521,11 @@ export function TopBar({
   focusDisabled,
   onToggleSearchView,
   onThemeChange,
+  onThemePreview,
+  onThemePreviewReset,
   onShikiThemeChange,
+  onShikiThemePreview,
+  onShikiThemePreviewReset,
   onIncrementalRefresh,
   refreshStrategy,
   onRefreshStrategyChange,
@@ -229,7 +544,11 @@ export function TopBar({
   focusDisabled: boolean;
   onToggleSearchView: () => void;
   onThemeChange: (theme: ThemeMode) => void;
+  onThemePreview: (theme: ThemeMode) => void;
+  onThemePreviewReset: () => void;
   onShikiThemeChange: (theme: ShikiThemeId) => void;
+  onShikiThemePreview: (theme: ShikiThemeId) => void;
+  onShikiThemePreviewReset: () => void;
   onIncrementalRefresh: () => void;
   refreshStrategy: RefreshStrategy;
   onRefreshStrategyChange: Dispatch<SetStateAction<RefreshStrategy>>;
@@ -327,8 +646,19 @@ export function TopBar({
           <ToolbarIcon name="help" />
           Help
         </button>
-        <ThemeDropdown value={theme} onChange={onThemeChange} />
-        <ShikiThemeDropdown value={shikiTheme} theme={theme} onChange={onShikiThemeChange} />
+        <ThemeDropdown
+          value={theme}
+          onChange={onThemeChange}
+          onPreview={onThemePreview}
+          onPreviewReset={onThemePreviewReset}
+        />
+        <ShikiThemeDropdown
+          value={shikiTheme}
+          theme={theme}
+          onChange={onShikiThemeChange}
+          onPreview={onShikiThemePreview}
+          onPreviewReset={onShikiThemePreviewReset}
+        />
         <span className="titlebar-divider" aria-hidden />
         <button
           type="button"

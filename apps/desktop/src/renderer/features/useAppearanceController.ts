@@ -24,8 +24,9 @@ import {
 } from "../../shared/uiPreferences";
 import { MONO_FONT_STACKS, REGULAR_FONT_STACKS } from "../app/constants";
 import type { PaneStateSnapshot, SettingsInfoResponse } from "../app/types";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { useCodetrailClient } from "../lib/codetrailClient";
-import { applyTheme } from "../lib/theme";
+import { applyDocumentAppearance } from "../lib/theme";
 import { toErrorMessage } from "../lib/viewUtils";
 import {
   DEFAULT_ZOOM_PERCENT,
@@ -33,7 +34,6 @@ import {
   MIN_ZOOM_PERCENT,
   clampZoomPercent,
 } from "../lib/zoom";
-import { useDebouncedValue } from "../hooks/useDebouncedValue";
 
 function pickPreferredExternalApp(
   apps:
@@ -140,6 +140,12 @@ export function useAppearanceController({
   const hasAutoSelectedPreferredDiffToolRef = useRef(false);
 
   const shikiTheme = resolveShikiThemeForUiTheme(theme, darkShikiTheme, lightShikiTheme);
+  const applyCommittedAppearance = useCallback(
+    (nextTheme: ThemeMode, nextShikiTheme: ShikiThemeId) => {
+      applyDocumentAppearance(nextTheme, nextShikiTheme);
+    },
+    [],
+  );
 
   const setTheme = useCallback((value: SetStateAction<ThemeMode>) => {
     setThemeState((currentTheme) => (typeof value === "function" ? value(currentTheme) : value));
@@ -211,8 +217,6 @@ export function useAppearanceController({
     availableDiffTools,
     initialPaneState?.preferredExternalDiffTool,
     initialPaneState?.preferredExternalEditor,
-    hasAutoSelectedPreferredDiffToolRef,
-    hasAutoSelectedPreferredEditorRef,
     preferredExternalDiffTool,
     preferredExternalEditor,
   ]);
@@ -238,7 +242,10 @@ export function useAppearanceController({
   }, [codetrail, logError]);
 
   useEffect(() => {
-    applyTheme(theme);
+    applyCommittedAppearance(theme, shikiTheme);
+  }, [applyCommittedAppearance, shikiTheme, theme]);
+
+  useEffect(() => {
     try {
       window.localStorage.setItem("codetrail-theme", theme);
     } catch {
@@ -291,9 +298,30 @@ export function useAppearanceController({
     document.documentElement.dataset.defaultDiffViewMode = defaultDiffViewMode;
   }, [defaultDiffViewMode]);
 
-  useEffect(() => {
-    document.documentElement.dataset.shikiTheme = shikiTheme;
-  }, [shikiTheme]);
+  const previewTheme = useCallback(
+    (nextTheme: ThemeMode) => {
+      applyDocumentAppearance(
+        nextTheme,
+        resolveShikiThemeForUiTheme(nextTheme, darkShikiTheme, lightShikiTheme),
+      );
+    },
+    [darkShikiTheme, lightShikiTheme],
+  );
+
+  const previewShikiTheme = useCallback(
+    (nextShikiTheme: ShikiThemeId) => {
+      applyDocumentAppearance(theme, nextShikiTheme);
+    },
+    [theme],
+  );
+
+  const clearPreviewTheme = useCallback(() => {
+    applyCommittedAppearance(theme, shikiTheme);
+  }, [applyCommittedAppearance, shikiTheme, theme]);
+
+  const clearPreviewShikiTheme = useCallback(() => {
+    applyCommittedAppearance(theme, shikiTheme);
+  }, [applyCommittedAppearance, shikiTheme, theme]);
 
   const applyZoomAction = useCallback(
     async (action: "in" | "out" | "reset") => {
@@ -342,6 +370,10 @@ export function useAppearanceController({
     setLightShikiTheme,
     shikiTheme,
     setShikiTheme,
+    previewTheme,
+    clearPreviewTheme,
+    previewShikiTheme,
+    clearPreviewShikiTheme,
     monoFontFamily,
     setMonoFontFamily,
     regularFontFamily,

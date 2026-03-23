@@ -17,7 +17,7 @@ import "@fontsource/plus-jakarta-sans/700.css";
 import { type ThemeMode, resolveShikiThemeForUiTheme } from "../shared/uiPreferences";
 import "./styles.css";
 import { getCodetrailClient, isMissingCodetrailClient } from "./lib/codetrailClient";
-import { applyTheme } from "./lib/theme";
+import { applyDocumentAppearance } from "./lib/theme";
 
 function requireRootElement(): HTMLElement {
   const element = document.getElementById("root");
@@ -67,11 +67,9 @@ function applyInitialTheme(
   darkShikiTheme?: string | null,
   lightShikiTheme?: string | null,
 ): void {
-  applyTheme(theme);
-  document.documentElement.dataset.shikiTheme = resolveShikiThemeForUiTheme(
+  applyDocumentAppearance(
     theme,
-    darkShikiTheme,
-    lightShikiTheme,
+    resolveShikiThemeForUiTheme(theme, darkShikiTheme, lightShikiTheme),
   );
   try {
     window.localStorage.setItem("codetrail-theme", theme);
