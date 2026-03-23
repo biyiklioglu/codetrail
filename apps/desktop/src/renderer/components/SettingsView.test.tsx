@@ -1,12 +1,31 @@
 // @vitest-environment jsdom
 
+import { useState } from "react";
+
 import type { IpcResponse, MessageCategory, Provider } from "@codetrail/core/browser";
 import { createSettingsInfoFixture } from "@codetrail/core/testing";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-const { copyTextToClipboard, openPath } = vi.hoisted(() => ({
+import {
+  type DiffViewMode,
+  type ExternalEditorId,
+  type ExternalToolConfig,
+  type MessagePageSize,
+  type ShikiThemeId,
+  type ViewerWrapMode,
+  createDefaultExternalTools,
+  createKnownToolId,
+  getShikiThemeGroupForUiTheme,
+} from "../../shared/uiPreferences";
+
+const { browseExternalToolCommand, copyTextToClipboard, openPath } = vi.hoisted(() => ({
+  browseExternalToolCommand: vi.fn(async () => ({
+    canceled: false,
+    path: "/System/Applications/TextEdit.app",
+    error: null,
+  })),
   copyTextToClipboard: vi.fn(async () => true),
   openPath: vi.fn(async () => ({ ok: true, error: null })),
 }));
@@ -16,6 +35,7 @@ vi.mock("../lib/clipboard", () => ({
 }));
 
 vi.mock("../lib/pathActions", () => ({
+  browseExternalToolCommand,
   openPath,
 }));
 
@@ -71,25 +91,133 @@ const diagnostics = {
 };
 
 function createBaseProps() {
+  const externalTools: ExternalToolConfig[] = [
+    ...createDefaultExternalTools().map((tool) =>
+      tool.appId === "vscode"
+        ? tool
+        : {
+            ...tool,
+            enabledForEditor: false,
+            enabledForDiff: false,
+          },
+    ),
+    {
+      id: "custom:1",
+      kind: "custom",
+      label: "Custom Tool 1",
+      appId: null,
+      command: "",
+      editorArgs: ["{file}"],
+      diffArgs: ["{left}", "{right}"],
+      enabledForEditor: true,
+      enabledForDiff: false,
+    },
+  ];
+
   return {
     diagnostics,
     diagnosticsLoading: false,
     diagnosticsError: null,
     appearance: {
       theme: "dark" as const,
+      shikiTheme: "github-dark-default" as ShikiThemeId,
       zoomPercent: 100,
+      messagePageSize: 50 as MessagePageSize,
       monoFontFamily: "droid_sans_mono" as const,
       regularFontFamily: "current" as const,
       monoFontSize: "12px" as const,
       regularFontSize: "13.5px" as const,
       useMonospaceForAllMessages: false,
+      autoHideMessageActions: true,
+      autoHideViewerHeaderActions: false,
+      defaultViewerWrapMode: "nowrap" as ViewerWrapMode,
+      defaultDiffViewMode: "unified" as DiffViewMode,
+      preferredExternalEditor: createKnownToolId("vscode") as ExternalEditorId,
+      preferredExternalDiffTool: createKnownToolId("vscode") as ExternalEditorId,
+      terminalAppCommand: "",
+      externalTools,
+      availableEditors: [
+        {
+          id: createKnownToolId("vscode"),
+          kind: "known" as const,
+          label: "VS Code",
+          appId: "vscode" as const,
+          detected: true,
+          command: "/usr/bin/code",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+        {
+          id: createKnownToolId("cursor"),
+          kind: "known" as const,
+          label: "Cursor",
+          appId: "cursor" as const,
+          detected: true,
+          command: "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+        {
+          id: "custom:1" as const,
+          kind: "custom" as const,
+          label: "Custom Editor",
+          appId: null,
+          detected: false,
+          command: null,
+          args: ["{file}"],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: false,
+          },
+        },
+      ],
+      availableDiffTools: [
+        {
+          id: createKnownToolId("vscode"),
+          kind: "known" as const,
+          label: "VS Code",
+          appId: "vscode" as const,
+          detected: true,
+          command: "/usr/bin/code",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
       onThemeChange: vi.fn(),
+      onShikiThemeChange: vi.fn(),
       onZoomPercentChange: vi.fn(),
+      onMessagePageSizeChange: vi.fn(),
       onMonoFontFamilyChange: vi.fn(),
       onRegularFontFamilyChange: vi.fn(),
       onMonoFontSizeChange: vi.fn(),
       onRegularFontSizeChange: vi.fn(),
       onUseMonospaceForAllMessagesChange: vi.fn(),
+      onAutoHideMessageActionsChange: vi.fn(),
+      onAutoHideViewerHeaderActionsChange: vi.fn(),
+      onDefaultViewerWrapModeChange: vi.fn(),
+      onDefaultDiffViewModeChange: vi.fn(),
+      onPreferredExternalEditorChange: vi.fn(),
+      onPreferredExternalDiffToolChange: vi.fn(),
+      onTerminalAppCommandChange: vi.fn(),
+      onExternalToolsChange: vi.fn(),
+      onRescanExternalTools: vi.fn(),
     },
     indexing: {
       enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"] as Provider[],
@@ -144,6 +272,9 @@ describe("SettingsView", () => {
       sectionHeadings.indexOf("Providers"),
     );
     expect(sectionHeadings.indexOf("Providers")).toBeLessThan(
+      sectionHeadings.indexOf("External Tools"),
+    );
+    expect(sectionHeadings.indexOf("External Tools")).toBeLessThan(
       sectionHeadings.indexOf("Database Maintenance"),
     );
     expect(screen.getByText("Storage")).toBeInTheDocument();
@@ -151,19 +282,71 @@ describe("SettingsView", () => {
     expect(screen.getByText("System Message Rules")).toBeInTheDocument();
 
     const selects = screen.getAllByRole("combobox");
-    expect(selects).toHaveLength(5);
-    await user.selectOptions(selects[0] as HTMLElement, "midnight");
-    await user.selectOptions(selects[1] as HTMLElement, "current");
-    await user.selectOptions(selects[2] as HTMLElement, "13px");
-    await user.selectOptions(selects[3] as HTMLElement, "inter");
-    await user.selectOptions(selects[4] as HTMLElement, "14px");
+    expect(selects.length).toBeGreaterThanOrEqual(9);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Theme" }), "midnight");
+    expect(screen.getByRole("option", { name: "Tokyo Night" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Light Plus" })).not.toBeInTheDocument();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Text viewer theme" }),
+      "tokyo-night",
+    );
+    await user.selectOptions(screen.getByRole("combobox", { name: "Messages per page" }), "25");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Monospaced font" }), "current");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Monospaced size" }), "13px");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Regular font" }), "inter");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Regular size" }), "14px");
     await user.clear(screen.getByRole("textbox", { name: "Zoom" }));
     await user.type(screen.getByRole("textbox", { name: "Zoom" }), "104%");
     await user.tab();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Preferred editor" }),
+      "custom:1",
+    );
 
     await user.click(
       screen.getByRole("checkbox", { name: "Use monospaced fonts for all messages" }),
     );
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Default text viewer wrap" }),
+      "wrap",
+    );
+    await user.selectOptions(screen.getByRole("combobox", { name: "Default diff view" }), "split");
+    await user.click(screen.getByRole("checkbox", { name: "Auto-hide message actions" }));
+    await user.click(
+      screen.getByRole("checkbox", { name: "Auto-hide text viewer header actions" }),
+    );
+
+    const presetToolsList = screen.getByRole("list", { name: "Preset tools" });
+    const cursorPresetRow = within(presetToolsList)
+      .getByText("Cursor")
+      .closest(".settings-tool-row") as HTMLElement;
+    const vscodePresetRow = within(presetToolsList)
+      .getByText("VS Code")
+      .closest(".settings-tool-row") as HTMLElement;
+    await user.click(within(cursorPresetRow).getByRole("button", { name: "Editor" }));
+    await user.click(within(vscodePresetRow).getByRole("button", { name: "Diff" }));
+
+    await user.click(screen.getByRole("button", { name: "Expand Custom Tool 1" }));
+    const customRow = screen
+      .getByRole("button", { name: "Collapse Custom Tool 1" })
+      .closest(".settings-tool-row") as HTMLElement;
+    fireEvent.change(screen.getByRole("textbox", { name: "Custom Tool 1 command" }), {
+      target: { value: "my-editor" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Custom Tool 1 editor arguments" }), {
+      target: { value: "{file} {line}" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Custom Tool 1 diff arguments" }), {
+      target: { value: "{left} {right} {title}" },
+    });
+    await user.click(within(customRow).getByRole("button", { name: "Browse" }));
+    await user.click(within(customRow).getByRole("button", { name: "Diff" }));
+    await user.click(screen.getByRole("button", { name: "Add Custom Tool" }));
+    await user.type(screen.getByRole("textbox", { name: "New custom tool name" }), "Helix");
+    await user.type(screen.getByRole("textbox", { name: "New custom tool command" }), "hx");
+    await user.click(screen.getByRole("button", { name: "Add Tool" }));
+    await user.click(screen.getByRole("button", { name: "Remove Custom Tool 1" }));
+    await user.click(screen.getByRole("button", { name: "Rescan System" }));
     await user.click(screen.getByRole("checkbox", { name: "Claude" }));
     await user.click(screen.getByRole("button", { name: "Force reindex" }));
     await user.click(
@@ -184,12 +367,75 @@ describe("SettingsView", () => {
     await user.click(openButtons[0] as HTMLElement);
 
     expect(baseProps.appearance.onThemeChange).toHaveBeenCalledWith("midnight");
+    expect(baseProps.appearance.onShikiThemeChange).toHaveBeenCalledWith("tokyo-night");
+    expect(baseProps.appearance.onMessagePageSizeChange).toHaveBeenCalledWith(25);
     expect(baseProps.appearance.onZoomPercentChange).toHaveBeenCalledWith(104);
     expect(baseProps.appearance.onMonoFontFamilyChange).toHaveBeenCalledWith("current");
     expect(baseProps.appearance.onMonoFontSizeChange).toHaveBeenCalledWith("13px");
     expect(baseProps.appearance.onRegularFontFamilyChange).toHaveBeenCalledWith("inter");
     expect(baseProps.appearance.onRegularFontSizeChange).toHaveBeenCalledWith("14px");
     expect(baseProps.appearance.onUseMonospaceForAllMessagesChange).toHaveBeenCalledWith(true);
+    expect(baseProps.appearance.onDefaultViewerWrapModeChange).toHaveBeenCalledWith("wrap");
+    expect(baseProps.appearance.onDefaultDiffViewModeChange).toHaveBeenCalledWith("split");
+    expect(baseProps.appearance.onAutoHideMessageActionsChange).toHaveBeenCalledWith(false);
+    expect(baseProps.appearance.onAutoHideViewerHeaderActionsChange).toHaveBeenCalledWith(true);
+    expect(baseProps.appearance.onPreferredExternalEditorChange).toHaveBeenCalledWith("custom:1");
+    expect(baseProps.appearance.onPreferredExternalDiffToolChange).toHaveBeenCalledWith("");
+    const externalToolCalls = baseProps.appearance.onExternalToolsChange.mock.calls.map(
+      ([tools]) => tools as ExternalToolConfig[],
+    );
+    expect(
+      externalToolCalls.some((tools) =>
+        tools.some(
+          (tool) =>
+            tool.id === createKnownToolId("cursor") &&
+            tool.enabledForEditor &&
+            !tool.enabledForDiff,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      externalToolCalls.some((tools) =>
+        tools.some((tool) => tool.id === createKnownToolId("vscode") && !tool.enabledForDiff),
+      ),
+    ).toBe(true);
+    expect(
+      externalToolCalls.some((tools) =>
+        tools.some(
+          (tool) => tool.id === "custom:1" && tool.command === "/System/Applications/TextEdit.app",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      externalToolCalls.some((tools) =>
+        tools.some(
+          (tool) => tool.id === "custom:1" && tool.editorArgs.join(" ") === "{file} {line}",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      externalToolCalls.some((tools) =>
+        tools.some(
+          (tool) => tool.id === "custom:1" && tool.diffArgs.join(" ") === "{left} {right} {title}",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      externalToolCalls.some((tools) =>
+        tools.some((tool) => tool.id === "custom:1" && tool.enabledForDiff),
+      ),
+    ).toBe(true);
+    expect(
+      externalToolCalls.some((tools) =>
+        tools.some(
+          (tool) => tool.kind === "custom" && tool.label === "Helix" && tool.command === "hx",
+        ),
+      ),
+    ).toBe(true);
+    expect(externalToolCalls.some((tools) => !tools.some((tool) => tool.id === "custom:1"))).toBe(
+      true,
+    );
+    expect(baseProps.appearance.onRescanExternalTools).toHaveBeenCalledTimes(1);
     expect(baseProps.indexing.onToggleProviderEnabled).toHaveBeenCalledWith("claude");
     expect(baseProps.indexing.onForceReindex).toHaveBeenCalledTimes(1);
     expect(
@@ -203,8 +449,131 @@ describe("SettingsView", () => {
       "^<command-name>$",
     );
     expect(baseProps.messageRules.onRemoveSystemMessageRegexRule).toHaveBeenCalledWith("claude", 0);
+    expect(browseExternalToolCommand).toHaveBeenCalled();
     expect(copyTextToClipboard).toHaveBeenCalled();
     expect(openPath).toHaveBeenCalled();
+  });
+
+  it("ignores invalid text viewer theme selections", () => {
+    const baseProps = createBaseProps();
+
+    render(<SettingsView info={info} loading={false} error={null} {...baseProps} />);
+
+    const textViewerThemeSelect = screen.getByRole("combobox", { name: "Text viewer theme" });
+    const validTheme = getShikiThemeGroupForUiTheme(baseProps.appearance.theme).options[0]?.value;
+    expect(validTheme).toBeTruthy();
+
+    fireEvent.change(textViewerThemeSelect, { target: { value: "__invalid_theme__" } });
+
+    expect(baseProps.appearance.onShikiThemeChange).toHaveBeenCalledWith(
+      baseProps.appearance.shikiTheme,
+    );
+  });
+
+  it("keeps existing custom tools collapsed and expands newly added custom tools", async () => {
+    const user = userEvent.setup();
+
+    function Harness() {
+      const initialProps = createBaseProps();
+      const [appearanceState, setAppearanceState] = useState(initialProps.appearance);
+
+      return (
+        <SettingsView
+          info={info}
+          loading={false}
+          error={null}
+          diagnostics={initialProps.diagnostics}
+          diagnosticsLoading={initialProps.diagnosticsLoading}
+          diagnosticsError={initialProps.diagnosticsError}
+          indexing={initialProps.indexing}
+          messageRules={initialProps.messageRules}
+          onActionError={initialProps.onActionError}
+          appearance={{
+            ...appearanceState,
+            onThemeChange: initialProps.appearance.onThemeChange,
+            onShikiThemeChange: (theme) =>
+              setAppearanceState((current) => ({ ...current, shikiTheme: theme })),
+            onZoomPercentChange: initialProps.appearance.onZoomPercentChange,
+            onMessagePageSizeChange: (pageSize) =>
+              setAppearanceState((current) => ({ ...current, messagePageSize: pageSize })),
+            onMonoFontFamilyChange: initialProps.appearance.onMonoFontFamilyChange,
+            onRegularFontFamilyChange: initialProps.appearance.onRegularFontFamilyChange,
+            onMonoFontSizeChange: initialProps.appearance.onMonoFontSizeChange,
+            onRegularFontSizeChange: initialProps.appearance.onRegularFontSizeChange,
+            onUseMonospaceForAllMessagesChange:
+              initialProps.appearance.onUseMonospaceForAllMessagesChange,
+            onAutoHideMessageActionsChange: (enabled) =>
+              setAppearanceState((current) => ({ ...current, autoHideMessageActions: enabled })),
+            onAutoHideViewerHeaderActionsChange: (enabled) =>
+              setAppearanceState((current) => ({
+                ...current,
+                autoHideViewerHeaderActions: enabled,
+              })),
+            onDefaultViewerWrapModeChange: (mode) =>
+              setAppearanceState((current) => ({ ...current, defaultViewerWrapMode: mode })),
+            onDefaultDiffViewModeChange: (mode) =>
+              setAppearanceState((current) => ({ ...current, defaultDiffViewMode: mode })),
+            onPreferredExternalEditorChange: (editor) =>
+              setAppearanceState((current) => ({ ...current, preferredExternalEditor: editor })),
+            onPreferredExternalDiffToolChange: (editor) =>
+              setAppearanceState((current) => ({ ...current, preferredExternalDiffTool: editor })),
+            onTerminalAppCommandChange: (value) =>
+              setAppearanceState((current) => ({ ...current, terminalAppCommand: value })),
+            onExternalToolsChange: (tools) =>
+              setAppearanceState((current) => ({ ...current, externalTools: tools })),
+            onRescanExternalTools: initialProps.appearance.onRescanExternalTools,
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    expect(
+      screen.queryByRole("textbox", { name: "Custom Tool 1 command" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Expand Custom Tool 1" }));
+    expect(screen.getByRole("textbox", { name: "Custom Tool 1 command" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add Custom Tool" }));
+    await user.type(screen.getByRole("textbox", { name: "New custom tool name" }), "Helix");
+    await user.type(screen.getByRole("textbox", { name: "New custom tool command" }), "hx");
+    await user.click(screen.getByRole("button", { name: "Add Tool" }));
+
+    expect(screen.getByRole("button", { name: "Collapse Helix" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Helix command" })).toHaveValue("hx");
+
+    const helixRow = screen
+      .getByRole("button", { name: "Collapse Helix" })
+      .closest(".settings-tool-row") as HTMLElement;
+    await user.click(within(helixRow).getByRole("button", { name: "Editor" }));
+    expect(helixRow.className).toContain("disabled");
+
+    await user.click(within(helixRow).getByRole("button", { name: "Remove Helix" }));
+    expect(screen.queryByText("Helix")).not.toBeInTheDocument();
+  });
+
+  it("persists external tool ordering changes", async () => {
+    const user = userEvent.setup();
+    const baseProps = createBaseProps();
+
+    render(<SettingsView {...baseProps} info={info} loading={false} error={null} />);
+
+    await user.click(screen.getByRole("button", { name: "Move Zed up" }));
+
+    const toolCalls = baseProps.appearance.onExternalToolsChange.mock.calls;
+    expect(toolCalls.length).toBeGreaterThan(0);
+    const reorderedTools = toolCalls.at(-1)?.[0] as ExternalToolConfig[];
+    expect(reorderedTools.map((tool) => tool.id)).toEqual([
+      createKnownToolId("text_edit"),
+      createKnownToolId("sublime_text"),
+      createKnownToolId("zed"),
+      createKnownToolId("vscode"),
+      createKnownToolId("neovim"),
+      createKnownToolId("cursor"),
+      "custom:1",
+    ]);
   });
 
   it("shows diagnostics in a separate tab", async () => {

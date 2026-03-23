@@ -31,48 +31,10 @@ function OverflowAwareLabel({
   className: string;
   innerClassName?: string;
 }) {
-  const containerRef = useRef<HTMLSpanElement | null>(null);
-  const [showTitle, setShowTitle] = useState(false);
-  const updateOverflowState = useCallback(() => {
-    const element = containerRef.current;
-    if (!element) {
-      return;
-    }
-    setShowTitle(element.scrollWidth > element.clientWidth + 1);
-  }, []);
-
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element) {
-      return;
-    }
-
-    updateOverflowState();
-
-    const resizeObserver =
-      typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(() => {
-            updateOverflowState();
-          })
-        : null;
-    resizeObserver?.observe(element);
-    window.addEventListener("resize", updateOverflowState);
-
-    return () => {
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateOverflowState);
-    };
-  }, [updateOverflowState]);
-
-  useEffect(() => {
-    void text;
-    updateOverflowState();
-  }, [text, updateOverflowState]);
-
   if (innerClassName) {
     return (
-      <span ref={containerRef} className={className}>
-        <span className={innerClassName} title={showTitle ? text : undefined}>
+      <span className={className}>
+        <span className={innerClassName} title={text}>
           {text}
         </span>
       </span>
@@ -80,7 +42,7 @@ function OverflowAwareLabel({
   }
 
   return (
-    <span ref={containerRef} className={className} title={showTitle ? text : undefined}>
+    <span className={className} title={text}>
       {text}
     </span>
   );

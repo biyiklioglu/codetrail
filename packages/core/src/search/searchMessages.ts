@@ -1,4 +1,4 @@
-import { type MessageCategory, PROVIDER_VALUES, type Provider } from "../contracts/canonical";
+import { type MessageCategory, type Provider } from "../contracts/canonical";
 import {
   makeEmptyCategoryCounts,
   normalizeMessageCategories,
@@ -99,33 +99,56 @@ export function searchMessages(
   const whereClause = sqlWhereClause([...queryFilter.conditions, ...filters.conditions]);
   const whereParams = [...queryFilter.params, ...filters.params];
 
-  const countRow = db
-    .prepare(
-      `SELECT COUNT(*) as cnt
-       ${SEARCH_FROM_SQL}
-       ${whereClause}`,
-    )
-    .get(...whereParams) as { cnt: number } | undefined;
-  const totalCount = Number(countRow?.cnt ?? 0);
-
   const facetFilters = buildFilters(input, false);
   // Facets intentionally ignore the category filter so the UI can show "what else is available"
   // for the current text/project/provider query.
   const facetWhereClause = sqlWhereClause([...queryFilter.conditions, ...facetFilters.conditions]);
   const facetWhereParams = [...queryFilter.params, ...facetFilters.params];
-  const facetRows = db
+  const categoryFilter = buildCategoryFilter("category", input.categories);
+  const resultMatchWhereClause = sqlWhereClause(categoryFilter.conditions);
+  const summaryRow = db
     .prepare(
-      `SELECT m.category as category, COUNT(*) as cnt
-       ${SEARCH_FROM_SQL}
-       ${facetWhereClause}
-       GROUP BY m.category`,
+      `WITH facet_matches AS (
+         SELECT m.category as category
+         ${SEARCH_FROM_SQL}
+         ${facetWhereClause}
+       ),
+       result_matches AS (
+         SELECT category
+         FROM facet_matches
+         ${resultMatchWhereClause}
+       )
+       SELECT
+         (SELECT COUNT(*) FROM result_matches) as total_count,
+         COALESCE(SUM(CASE WHEN category = 'user' THEN 1 ELSE 0 END), 0) as user_count,
+         COALESCE(SUM(CASE WHEN category = 'assistant' THEN 1 ELSE 0 END), 0) as assistant_count,
+         COALESCE(SUM(CASE WHEN category = 'tool_use' THEN 1 ELSE 0 END), 0) as tool_use_count,
+         COALESCE(SUM(CASE WHEN category = 'tool_edit' THEN 1 ELSE 0 END), 0) as tool_edit_count,
+         COALESCE(SUM(CASE WHEN category = 'tool_result' THEN 1 ELSE 0 END), 0) as tool_result_count,
+         COALESCE(SUM(CASE WHEN category = 'thinking' THEN 1 ELSE 0 END), 0) as thinking_count,
+         COALESCE(SUM(CASE WHEN category = 'system' THEN 1 ELSE 0 END), 0) as system_count
+       FROM facet_matches`,
     )
-    .all(...facetWhereParams) as Array<{ category: string; cnt: number }>;
-
-  for (const row of facetRows) {
-    const category = normalizeMessageCategory(row.category);
-    categoryCounts[category] += Number(row.cnt ?? 0);
-  }
+    .get(...facetWhereParams, ...categoryFilter.params) as
+    | {
+        total_count: number;
+        user_count: number;
+        assistant_count: number;
+        tool_use_count: number;
+        tool_edit_count: number;
+        tool_result_count: number;
+        thinking_count: number;
+        system_count: number;
+      }
+    | undefined;
+  const totalCount = Number(summaryRow?.total_count ?? 0);
+  categoryCounts.user = Number(summaryRow?.user_count ?? 0);
+  categoryCounts.assistant = Number(summaryRow?.assistant_count ?? 0);
+  categoryCounts.tool_use = Number(summaryRow?.tool_use_count ?? 0);
+  categoryCounts.tool_edit = Number(summaryRow?.tool_edit_count ?? 0);
+  categoryCounts.tool_result = Number(summaryRow?.tool_result_count ?? 0);
+  categoryCounts.thinking = Number(summaryRow?.thinking_count ?? 0);
+  categoryCounts.system = Number(summaryRow?.system_count ?? 0);
 
   const limit = Math.max(1, input.limit ?? 50);
   const offset = Math.max(0, input.offset ?? 0);
@@ -194,8 +217,6 @@ function buildFilters(
   const conditions: string[] = [];
   const params: Array<string | number> = [];
 
-  appendInFilter(conditions, params, "s.provider", PROVIDER_VALUES);
-
   if (includeCategories && input.categories !== undefined) {
     appendInFilter(conditions, params, "m.category", normalizeMessageCategories(input.categories));
   }
@@ -222,6 +243,25 @@ function buildFilters(
     params.push(pattern);
   }
 
+  return { conditions, params };
+}
+
+function buildCategoryFilter(
+  column: string,
+  categories: string[] | undefined,
+): { conditions: string[]; params: string[] } {
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (categories === undefined) {
+    return { conditions, params };
+  }
+  const normalized = normalizeMessageCategories(categories);
+  if (normalized.length === 0) {
+    conditions.push("1 = 0");
+    return { conditions, params };
+  }
+  conditions.push(`${column} IN (${normalized.map(() => "?").join(",")})`);
+  params.push(...normalized);
   return { conditions, params };
 }
 

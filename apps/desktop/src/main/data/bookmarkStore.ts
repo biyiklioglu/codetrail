@@ -7,6 +7,9 @@ import {
   type Provider,
   type SearchMode,
   buildSearchQueryPlan,
+  makeEmptyCategoryCounts,
+  normalizeMessageCategories,
+  normalizeMessageCategory,
   openDatabase,
 } from "@codetrail/core";
 
@@ -54,13 +57,22 @@ export type BookmarkReconciliationResult = {
   restored: number;
 };
 
+export type BookmarkListOptions = {
+  query?: string;
+  searchMode?: SearchMode;
+  categories?: MessageCategory[];
+  limit?: number;
+  offset?: number;
+};
+
 export type BookmarkStore = {
-  listProjectBookmarks: (
+  listProjectBookmarks: (projectId: string, options?: BookmarkListOptions) => StoredBookmark[];
+  countProjectBookmarks: (projectId: string, options?: BookmarkListOptions) => number;
+  countProjectBookmarkCategories: (
     projectId: string,
     query?: string,
     searchMode?: SearchMode,
-  ) => StoredBookmark[];
-  countProjectBookmarks: (projectId: string) => number;
+  ) => Record<MessageCategory, number>;
   countProjectBookmarksByProjectIds?: (projectIds: string[]) => Record<string, number>;
   countSessionBookmarks: (projectId: string, sessionId: string) => number;
   countSessionBookmarksBySessionIds?: (
@@ -89,26 +101,6 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
   const db = openDatabase(bookmarksDbPath);
   ensureBookmarkSchema(db);
 
-  const listStmt = db.prepare(
-    `SELECT
-       project_id,
-       session_id,
-       message_id,
-       message_source_id,
-       provider,
-       session_title,
-       message_category,
-       message_content,
-       message_created_at,
-       bookmarked_at,
-       is_orphaned,
-       orphaned_at,
-       snapshot_version,
-       snapshot_json
-     FROM bookmarks
-     WHERE project_id = ?
-     ORDER BY message_created_at DESC, message_id DESC`,
-  );
   const getStmt = db.prepare(
     `SELECT
        project_id,
@@ -186,25 +178,22 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
   );
 
   return {
-    listProjectBookmarks: (projectId, query, searchMode = "simple") => {
-      const normalizedQuery = query?.trim() ?? "";
-      if (normalizedQuery.length === 0) {
-        return listStmt.all(projectId) as StoredBookmark[];
-      }
-
-      const queryPlan = buildSearchQueryPlan(normalizedQuery, searchMode);
-      if (queryPlan.error) {
+    listProjectBookmarks: (projectId, options = {}) => {
+      const built = buildProjectBookmarkQuery(projectId, options);
+      if (built.impossible) {
         return [];
       }
-      if (!queryPlan.hasTerms) {
-        return [];
-      }
-
-      const conditions = ["b.project_id = ?"];
-      const params: string[] = [projectId];
-      if (queryPlan.ftsQuery) {
-        conditions.push("bookmarks_fts MATCH ?");
-        params.push(queryPlan.ftsQuery);
+      const limitOffsetSql =
+        options.limit !== undefined
+          ? " LIMIT ? OFFSET ?"
+          : options.offset !== undefined
+            ? " LIMIT -1 OFFSET ?"
+            : "";
+      const params = [...built.params];
+      if (options.limit !== undefined) {
+        params.push(Math.max(0, options.limit), Math.max(0, options.offset ?? 0));
+      } else if (options.offset !== undefined) {
+        params.push(Math.max(0, options.offset));
       }
 
       return db
@@ -224,18 +213,52 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
              b.orphaned_at,
              b.snapshot_version,
              b.snapshot_json
-           FROM bookmarks b
-           JOIN bookmarks_fts
-             ON bookmarks_fts.project_id = b.project_id
-            AND bookmarks_fts.message_id = b.message_id
-           WHERE ${conditions.join(" AND ")}
-           ORDER BY b.message_created_at DESC, b.message_id DESC`,
+           ${built.fromSql}
+           WHERE ${built.whereClause}
+           ORDER BY b.message_created_at DESC, b.message_id DESC${limitOffsetSql}`,
         )
         .all(...params) as StoredBookmark[];
     },
-    countProjectBookmarks: (projectId) => {
-      const row = countStmt.get(projectId) as { cnt: number } | undefined;
+    countProjectBookmarks: (projectId, options = {}) => {
+      if (
+        options.query === undefined &&
+        options.searchMode === undefined &&
+        options.categories === undefined
+      ) {
+        const row = countStmt.get(projectId) as { cnt: number } | undefined;
+        return Number(row?.cnt ?? 0);
+      }
+      const built = buildProjectBookmarkQuery(projectId, options);
+      if (built.impossible) {
+        return 0;
+      }
+      const row = db
+        .prepare(
+          `SELECT COUNT(*) as cnt
+           ${built.fromSql}
+           WHERE ${built.whereClause}`,
+        )
+        .get(...built.params) as { cnt: number } | undefined;
       return Number(row?.cnt ?? 0);
+    },
+    countProjectBookmarkCategories: (projectId, query, searchMode = "simple") => {
+      const built = buildProjectBookmarkQuery(projectId, { query, searchMode });
+      const counts = makeEmptyCategoryCounts();
+      if (built.impossible) {
+        return counts;
+      }
+      const rows = db
+        .prepare(
+          `SELECT b.message_category as category, COUNT(*) as cnt
+           ${built.fromSql}
+           WHERE ${built.whereClause}
+           GROUP BY b.message_category`,
+        )
+        .all(...built.params) as Array<{ category: string; cnt: number }>;
+      for (const row of rows) {
+        counts[normalizeMessageCategory(row.category)] += Number(row.cnt ?? 0);
+      }
+      return counts;
     },
     countProjectBookmarksByProjectIds: (projectIds) => {
       return countBookmarksByProjectIds(db, projectIds);
@@ -311,6 +334,64 @@ export function createBookmarkStore(bookmarksDbPath: string): BookmarkStore {
     },
     reconcileWithIndexedData: (indexedDbPath) => reconcileBookmarks(db, indexedDbPath),
     close: () => db.close(),
+  };
+}
+
+function buildProjectBookmarkQuery(
+  projectId: string,
+  options: BookmarkListOptions,
+): {
+  fromSql: string;
+  whereClause: string;
+  params: Array<string>;
+  impossible: boolean;
+} {
+  const normalizedQuery = options.query?.trim() ?? "";
+  const queryPlan =
+    normalizedQuery.length > 0
+      ? buildSearchQueryPlan(normalizedQuery, options.searchMode ?? "simple")
+      : null;
+  if (queryPlan?.error || (normalizedQuery.length > 0 && !queryPlan?.hasTerms)) {
+    return {
+      fromSql: "FROM bookmarks b",
+      whereClause: "1 = 0",
+      params: [],
+      impossible: true,
+    };
+  }
+
+  const conditions = ["b.project_id = ?"];
+  const params: string[] = [projectId];
+  let fromSql = "FROM bookmarks b";
+  if (queryPlan?.ftsQuery) {
+    fromSql = `FROM bookmarks b
+               JOIN bookmarks_fts
+                 ON bookmarks_fts.project_id = b.project_id
+                AND bookmarks_fts.message_id = b.message_id`;
+    conditions.push("bookmarks_fts MATCH ?");
+    params.push(queryPlan.ftsQuery);
+  }
+
+  if (options.categories !== undefined) {
+    const categories = normalizeMessageCategories(options.categories);
+    if (categories.length === 0) {
+      conditions.push("1 = 0");
+      return {
+        fromSql,
+        whereClause: conditions.join(" AND "),
+        params,
+        impossible: true,
+      };
+    }
+    conditions.push(`b.message_category IN (${categories.map(() => "?").join(",")})`);
+    params.push(...categories);
+  }
+
+  return {
+    fromSql,
+    whereClause: conditions.join(" AND "),
+    params,
+    impossible: false,
   };
 }
 

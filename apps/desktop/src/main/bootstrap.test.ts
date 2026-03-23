@@ -18,11 +18,19 @@ const {
   mockPurgeProviders,
   mockEnqueueChangedFiles,
   mockGetStatus,
+  mockAccess,
+  mockMkdir,
+  mockMkdtemp,
+  mockReadFile,
+  mockReaddir,
+  mockRm,
   mockStat,
+  mockWriteFile,
   mockRealpath,
   mockOpenPath,
   mockShowItemInFolder,
   mockShowSaveDialog,
+  mockShowOpenDialog,
   mockBrowserWindowFromWebContents,
   mockListProjects,
   mockGetProjectCombinedDetail,
@@ -84,13 +92,21 @@ const {
       activeJobId: null,
       completedJobs: 0,
     })),
+    mockAccess: vi.fn(async () => undefined),
+    mockMkdir: vi.fn(async () => undefined),
+    mockMkdtemp: vi.fn(async () => "/tmp/codetrail-test"),
+    mockReadFile: vi.fn(async () => ""),
+    mockReaddir: vi.fn(async () => []),
+    mockRm: vi.fn(async () => undefined),
     mockStat: vi.fn<() => Promise<{ isFile: () => boolean }>>(async () => ({
       isFile: () => false,
     })),
+    mockWriteFile: vi.fn(async () => undefined),
     mockRealpath: vi.fn(async (pathValue: string) => pathValue),
     mockOpenPath: vi.fn(async () => ""),
     mockShowItemInFolder: vi.fn(),
     mockShowSaveDialog: vi.fn(async () => ({ canceled: true, filePath: undefined })),
+    mockShowOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })),
     mockBrowserWindowFromWebContents: vi.fn(() => null),
     mockListProjects: vi.fn(() => ({
       projects: [
@@ -199,8 +215,15 @@ vi.mock("./fileWatcherService", () => ({
 }));
 
 vi.mock("node:fs/promises", () => ({
+  access: mockAccess,
+  mkdir: mockMkdir,
+  mkdtemp: mockMkdtemp,
+  readFile: mockReadFile,
   realpath: mockRealpath,
+  readdir: mockReaddir,
+  rm: mockRm,
   stat: mockStat,
+  writeFile: mockWriteFile,
 }));
 
 vi.mock("electron", () => ({
@@ -214,6 +237,7 @@ vi.mock("electron", () => ({
   },
   dialog: {
     showSaveDialog: mockShowSaveDialog,
+    showOpenDialog: mockShowOpenDialog,
   },
   shell: {
     openPath: mockOpenPath,
@@ -254,6 +278,7 @@ describe("bootstrapMainProcess", () => {
     regularFontFamily: "inter",
     monoFontSize: "13px",
     regularFontSize: "14px",
+    messagePageSize: 50,
     useMonospaceForAllMessages: true,
     preferredAutoRefreshStrategy: "watch-5s",
     selectedProjectId: "project-1",
@@ -520,6 +545,76 @@ describe("bootstrapMainProcess", () => {
     });
   });
 
+  it("opens a native picker for external tool commands and accepts macOS app bundles", async () => {
+    await bootstrapMainProcess({ runStartupIndexing: false });
+    const pickCommand = getRequiredHandler(handlers, "dialog:pickExternalToolCommand");
+
+    mockShowOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ["/System/Applications/TextEdit.app"] as string[],
+    });
+    mockStat.mockResolvedValueOnce({ isFile: () => false });
+
+    await expect(pickCommand({})).resolves.toEqual({
+      canceled: false,
+      path: "/System/Applications/TextEdit.app",
+      error: null,
+    });
+  });
+
+  it("honors editor:listAvailable external tool overrides even without persisted pane state", async () => {
+    await bootstrapMainProcess({
+      appStateStore: {
+        getFilePath: () => "/tmp/state.json",
+        getPaneState: () => null,
+        getIndexingState: () => null,
+      } as AppStateStore,
+      runStartupIndexing: false,
+    });
+
+    const result = await getRequiredHandler(handlers, "editor:listAvailable")({
+      externalTools: [
+        {
+          id: "custom:1",
+          kind: "custom",
+          label: "Custom Editor",
+          appId: null,
+          command: "",
+          editorArgs: ["{file}"],
+          diffArgs: ["{left}", "{right}"],
+          enabledForEditor: true,
+          enabledForDiff: false,
+        },
+      ],
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        editors: expect.arrayContaining([
+          expect.objectContaining({
+            id: "custom:1",
+            kind: "custom",
+            label: "Custom Editor",
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("rejects relative file paths for editor:open", async () => {
+    await bootstrapMainProcess({ runStartupIndexing: false });
+
+    await expect(
+      getRequiredHandler(handlers, "editor:open")({
+        kind: "file",
+        filePath: "../outside.txt",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: "File path must be absolute.",
+    });
+  });
+
   it("hydrates and persists pane state through ui handlers", async () => {
     const appStateStore: Pick<
       AppStateStore,
@@ -552,11 +647,22 @@ describe("bootstrapMainProcess", () => {
       expandedByDefaultCategories: ["assistant", "tool_use"],
       searchProviders: ["claude"],
       theme: "dark",
+      darkShikiTheme: null,
+      lightShikiTheme: null,
       monoFontFamily: "droid_sans_mono",
       regularFontFamily: "inter",
       monoFontSize: "13px",
       regularFontSize: "14px",
+      messagePageSize: 50,
       useMonospaceForAllMessages: true,
+      autoHideMessageActions: null,
+      autoHideViewerHeaderActions: null,
+      defaultViewerWrapMode: null,
+      defaultDiffViewMode: null,
+      preferredExternalEditor: null,
+      preferredExternalDiffTool: null,
+      terminalAppCommand: null,
+      externalTools: null,
       preferredAutoRefreshStrategy: "watch-5s",
       selectedProjectId: "project-1",
       selectedSessionId: "session-1",

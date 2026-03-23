@@ -469,26 +469,26 @@ function getProjectCombinedDetailWithDatabase(
 
   const { whereClause, params } = buildProjectMessageFilters(messageFilters);
 
-  const totalRow = db
-    .prepare(
-      `SELECT COUNT(*) as cnt
-       FROM messages m
-       JOIN sessions s ON s.id = m.session_id
-       WHERE ${whereClause}`,
-    )
-    .get(...params) as { cnt: number } | undefined;
-  const totalCount = Number(totalRow?.cnt ?? 0);
+  const summary = loadMessageDetailSummary({
+    db,
+    fromSql: `FROM messages m
+              JOIN sessions s ON s.id = m.session_id`,
+    whereClause,
+    params,
+  });
+  const totalCount = summary.totalCount;
   const queryOnlyFilter = buildProjectMessageFilters({
     projectId: request.projectId,
     queryPlan,
   });
-  const categoryCounts = loadCategoryCounts(
+  const categorySummary = loadMessageDetailSummary({
     db,
-    `FROM messages m
-     JOIN sessions s ON s.id = m.session_id`,
-    queryOnlyFilter.whereClause,
-    queryOnlyFilter.params,
-  );
+    fromSql: `FROM messages m
+              JOIN sessions s ON s.id = m.session_id`,
+    whereClause: queryOnlyFilter.whereClause,
+    params: queryOnlyFilter.params,
+  });
+  const categoryCounts = categorySummary.categoryCounts;
   const focusTarget = resolveFocusTarget(db, {
     focusMessageId: request.focusMessageId,
     focusSourceId: request.focusSourceId,
@@ -644,20 +644,24 @@ function getSessionDetailWithDatabase(
 
   const { whereClause, params } = buildMessageFilters(messageFilters);
 
-  const totalRow = db
-    .prepare(`SELECT COUNT(*) as cnt FROM messages m WHERE ${whereClause}`)
-    .get(...params) as { cnt: number } | undefined;
-  const totalCount = Number(totalRow?.cnt ?? 0);
+  const summary = loadMessageDetailSummary({
+    db,
+    fromSql: "FROM messages m",
+    whereClause,
+    params,
+  });
+  const totalCount = summary.totalCount;
   const queryOnlyFilter = buildMessageFilters({
     sessionId: request.sessionId,
     queryPlan,
   });
-  const categoryCounts = loadCategoryCounts(
+  const categorySummary = loadMessageDetailSummary({
     db,
-    "FROM messages m",
-    queryOnlyFilter.whereClause,
-    queryOnlyFilter.params,
-  );
+    fromSql: "FROM messages m",
+    whereClause: queryOnlyFilter.whereClause,
+    params: queryOnlyFilter.params,
+  });
+  const categoryCounts = categorySummary.categoryCounts;
   const focusTarget = resolveFocusTarget(db, {
     focusMessageId: request.focusMessageId,
     focusSourceId: request.focusSourceId,
@@ -845,49 +849,52 @@ function listProjectBookmarksWithStore(
   request: IpcRequest<"bookmarks:listProject">,
 ): IpcResponse<"bookmarks:listProject"> {
   const hasQuery = (request.query?.trim().length ?? 0) > 0;
+  const pageSize = request.pageSize;
+  let page = request.page;
   const queryPlan = hasQuery
     ? buildSearchQueryPlan(request.query ?? "", request.searchMode ?? "simple")
     : buildSearchQueryPlan("", request.searchMode ?? "simple");
-  const storedRows = bookmarkStore.listProjectBookmarks(
-    request.projectId,
-    hasQuery ? request.query : undefined,
-    request.searchMode ?? "simple",
-  );
-  const totalCount = hasQuery
-    ? bookmarkStore.countProjectBookmarks(request.projectId)
-    : storedRows.length;
+  const totalCount = bookmarkStore.countProjectBookmarks(request.projectId);
   if (queryPlan.error) {
     return {
       projectId: request.projectId,
       totalCount,
       filteredCount: 0,
+      page: 0,
+      pageSize,
       categoryCounts: makeEmptyCategoryCounts(),
       queryError: queryPlan.error,
       highlightPatterns: [],
       results: [],
     };
   }
+  const categoryCounts = bookmarkStore.countProjectBookmarkCategories(
+    request.projectId,
+    hasQuery ? request.query : undefined,
+    request.searchMode ?? "simple",
+  );
+  const filteredCount = bookmarkStore.countProjectBookmarks(request.projectId, {
+    query: hasQuery ? request.query : undefined,
+    searchMode: request.searchMode ?? "simple",
+    categories: request.categories,
+  });
+  if (filteredCount === 0) {
+    page = 0;
+  } else if (page * pageSize >= filteredCount) {
+    page = Math.floor((filteredCount - 1) / pageSize);
+  }
+  const storedRows = bookmarkStore.listProjectBookmarks(request.projectId, {
+    query: hasQuery ? request.query : undefined,
+    searchMode: request.searchMode ?? "simple",
+    categories: request.categories,
+    limit: pageSize,
+    offset: page * pageSize,
+  });
   const liveRowsByMessageId = listLiveBookmarkMessagesById(
     db,
     request.projectId,
     storedRows.map((row) => row.message_id),
   );
-
-  const categoryCounts = makeEmptyCategoryCounts();
-  const normalizedRequestedCategories =
-    request.categories === undefined ? null : normalizeMessageCategories(request.categories);
-
-  const includeCategory = (
-    category: IpcResponse<"sessions:getDetail">["messages"][number]["category"],
-  ) => {
-    if (normalizedRequestedCategories === null) {
-      return true;
-    }
-    if (normalizedRequestedCategories.length === 0) {
-      return false;
-    }
-    return normalizedRequestedCategories.includes(category);
-  };
 
   const results: IpcResponse<"bookmarks:listProject">["results"] = [];
 
@@ -895,12 +902,6 @@ function listProjectBookmarksWithStore(
     const live = liveRowsByMessageId.get(row.message_id);
     const isLiveMatch = live !== undefined && live.session_id === row.session_id;
     const message = isLiveMatch ? mapSessionMessageRow(live) : mapStoredBookmarkMessageRow(row);
-
-    categoryCounts[message.category] += 1;
-    if (!includeCategory(message.category)) {
-      continue;
-    }
-
     results.push({
       projectId: row.project_id,
       sessionId: row.session_id,
@@ -915,7 +916,9 @@ function listProjectBookmarksWithStore(
   return {
     projectId: request.projectId,
     totalCount,
-    filteredCount: results.length,
+    filteredCount,
+    page,
+    pageSize,
     categoryCounts,
     queryError: null,
     highlightPatterns: queryPlan.highlightPatterns,
@@ -949,6 +952,56 @@ function buildMessageSortSql(sortDirection: MessageSortDirection): {
              AND (m.created_at > ? OR (m.created_at = ? AND m.id >= ?))
            )
          )`,
+  };
+}
+
+function loadMessageDetailSummary(args: {
+  db: DatabaseHandle;
+  fromSql: string;
+  whereClause: string;
+  params: readonly unknown[];
+}): {
+  totalCount: number;
+  categoryCounts: Record<MessageCategory, number>;
+} {
+  const summaryRow = args.db
+    .prepare(
+      `SELECT
+         COUNT(*) as total_count,
+         COALESCE(SUM(CASE WHEN m.category = 'user' THEN 1 ELSE 0 END), 0) as user_count,
+         COALESCE(SUM(CASE WHEN m.category = 'assistant' THEN 1 ELSE 0 END), 0) as assistant_count,
+         COALESCE(SUM(CASE WHEN m.category = 'tool_use' THEN 1 ELSE 0 END), 0) as tool_use_count,
+         COALESCE(SUM(CASE WHEN m.category = 'tool_edit' THEN 1 ELSE 0 END), 0) as tool_edit_count,
+         COALESCE(SUM(CASE WHEN m.category = 'tool_result' THEN 1 ELSE 0 END), 0) as tool_result_count,
+         COALESCE(SUM(CASE WHEN m.category = 'thinking' THEN 1 ELSE 0 END), 0) as thinking_count,
+         COALESCE(SUM(CASE WHEN m.category = 'system' THEN 1 ELSE 0 END), 0) as system_count
+       ${args.fromSql}
+       WHERE ${args.whereClause}`,
+    )
+    .get(...args.params) as
+    | {
+        total_count: number;
+        user_count: number;
+        assistant_count: number;
+        tool_use_count: number;
+        tool_edit_count: number;
+        tool_result_count: number;
+        thinking_count: number;
+        system_count: number;
+      }
+    | undefined;
+
+  return {
+    totalCount: Number(summaryRow?.total_count ?? 0),
+    categoryCounts: {
+      user: Number(summaryRow?.user_count ?? 0),
+      assistant: Number(summaryRow?.assistant_count ?? 0),
+      tool_use: Number(summaryRow?.tool_use_count ?? 0),
+      tool_edit: Number(summaryRow?.tool_edit_count ?? 0),
+      tool_result: Number(summaryRow?.tool_result_count ?? 0),
+      thinking: Number(summaryRow?.thinking_count ?? 0),
+      system: Number(summaryRow?.system_count ?? 0),
+    },
   };
 }
 

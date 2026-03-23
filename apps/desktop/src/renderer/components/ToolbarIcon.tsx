@@ -9,6 +9,7 @@ export type ToolbarIconName =
   | "shortcuts"
   | "help"
   | "theme"
+  | "codeTheme"
   | "settings"
   | "zoomIn"
   | "zoomOut"
@@ -35,6 +36,7 @@ const TOOLBAR_ICON_PATHS = {
   help: "M12 22a10 10 0 1 0 0-20a10 10 0 0 0 0 20M9.1 9a3 3 0 1 1 5.8 1c0 2-3 2-3 4M12 17h.01",
   theme:
     "M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41M12 16a4 4 0 1 0 0-8a4 4 0 0 0 0 8",
+  codeTheme: "M4 5h16v14H4zM4 9h16M7 7h2M9 13l-2 2 2 2M15 13l2 2-2 2M12.5 12l-1 8",
   settings:
     "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 15a3 3 0 1 1 0-6a3 3 0 0 1 0 6z",
   zoomIn: "M12 7v10M7 12h10",
@@ -60,6 +62,7 @@ const TOOLBAR_ICON_TITLES: Record<ToolbarIconName, string> = {
   shortcuts: "Shortcuts",
   help: "Help",
   theme: "Theme",
+  codeTheme: "Text viewer theme",
   settings: "Settings",
   zoomIn: "Zoom in",
   zoomOut: "Zoom out",

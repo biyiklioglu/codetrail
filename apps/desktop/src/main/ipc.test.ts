@@ -137,6 +137,19 @@ describe("registerIpcHandlers", () => {
           ok: true,
           error: null,
         }),
+        "dialog:pickExternalToolCommand": () => ({
+          canceled: true,
+          path: null,
+          error: null,
+        }),
+        "editor:listAvailable": () => ({
+          editors: [],
+          diffTools: [],
+        }),
+        "editor:open": () => ({
+          ok: true,
+          error: null,
+        }),
         "ui:getPaneState": () => allNullPaneState,
         "ui:setPaneState": () => ({
           ok: true,
@@ -293,6 +306,13 @@ describe("registerIpcHandlers", () => {
           removedBookmarkCount: 0,
         }),
         "path:openInFileManager": () => ({ ok: true, error: null }),
+        "dialog:pickExternalToolCommand": () => ({
+          canceled: true,
+          path: null,
+          error: null,
+        }),
+        "editor:listAvailable": () => ({ editors: [], diffTools: [] }),
+        "editor:open": () => ({ ok: true, error: null }),
         "ui:getPaneState": () => allNullPaneState,
         "ui:setPaneState": () => ({ ok: true }),
         "indexer:getConfig": () => allNullIndexerConfig,

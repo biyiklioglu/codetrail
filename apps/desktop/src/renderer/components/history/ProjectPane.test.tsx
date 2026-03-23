@@ -110,6 +110,21 @@ function renderProjectPane(overrides: ProjectPaneOverrides = {}) {
 }
 
 describe("ProjectPane", () => {
+  it("does not create a ResizeObserver per label", () => {
+    const resizeObserver = vi.fn(() => ({
+      observe: vi.fn(),
+      disconnect: vi.fn(),
+    }));
+    Object.defineProperty(window, "ResizeObserver", {
+      value: resizeObserver,
+      configurable: true,
+    });
+
+    renderProjectPane();
+
+    expect(resizeObserver).not.toHaveBeenCalled();
+  });
+
   it("renders projects and dispatches list interactions through the new toolbar", async () => {
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
       value: () => undefined,

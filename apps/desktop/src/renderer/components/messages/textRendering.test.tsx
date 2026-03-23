@@ -1,6 +1,84 @@
+// @vitest-environment jsdom
+
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const {
+  codeToTokensMock,
+  createHighlighterMock,
+  listAvailableEditorsMock,
+  paneStateMock,
+  openContentInEditorMock,
+  openDiffInEditorMock,
+  openFileInEditorMock,
+  openPathMock,
+} = vi.hoisted(() => ({
+  codeToTokensMock: vi.fn((code: string, options?: { theme?: string }) => {
+    const theme = options?.theme ?? "github-dark-default";
+    const themeColorByTheme: Record<string, string> = {
+      "github-dark-default": "rgb(96, 165, 250)",
+      vesper: "rgb(248, 189, 96)",
+      "night-owl": "rgb(129, 230, 217)",
+      "github-light-high-contrast": "#8cb4ff",
+      "github-light-default": "rgb(9, 105, 218)",
+    };
+    const color = themeColorByTheme[theme] ?? "rgb(180, 180, 180)";
+    return code.split(/\r?\n/).map((line) => {
+      if (line.startsWith("const ")) {
+        return [{ content: "const", color }, { content: line.slice("const".length) }];
+      }
+      return [{ content: line, color }];
+    });
+  }),
+  createHighlighterMock: vi.fn(async () => ({
+    codeToTokens: codeToTokensMock,
+  })),
+  listAvailableEditorsMock: vi.fn(async () => ({ editors: [], diffTools: [] })),
+  paneStateMock: {
+    preferredExternalEditor: null,
+    preferredExternalDiffTool: null,
+    terminalAppCommand: "",
+    externalTools: [],
+  } as {
+    preferredExternalEditor: string | null;
+    preferredExternalDiffTool: string | null;
+    terminalAppCommand: string;
+    externalTools: Array<{
+      id: string;
+      enabledForEditor?: boolean;
+      enabledForDiff?: boolean;
+    }>;
+  },
+  openContentInEditorMock: vi.fn(async () => ({ ok: true, error: null })),
+  openDiffInEditorMock: vi.fn(async () => ({ ok: true, error: null })),
+  openFileInEditorMock: vi.fn(async () => ({ ok: true, error: null })),
+  openPathMock: vi.fn(async () => ({ ok: true, error: null })),
+}));
+
+vi.mock("shiki", () => ({
+  createHighlighter: createHighlighterMock,
+}));
+
+vi.mock("../../lib/pathActions", () => ({
+  listAvailableEditors: listAvailableEditorsMock,
+  openContentInEditor: openContentInEditorMock,
+  openDiffInEditor: openDiffInEditorMock,
+  openFileInEditor: openFileInEditorMock,
+  openPath: openPathMock,
+}));
+
+vi.mock("../../lib/codetrailClient", () => ({
+  getCodetrailClient: () => ({
+    invoke: vi.fn(async (channel: string) => {
+      if (channel === "ui:getPaneState") {
+        return paneStateMock;
+      }
+      return { ok: true };
+    }),
+  }),
+}));
 
 vi.mock("./toolParsing", () => ({
   tryParseJsonRecord(value: string): Record<string, unknown> | null {
@@ -15,6 +93,8 @@ vi.mock("./toolParsing", () => ({
   },
 }));
 
+import { PANE_STATE_UPDATED_EVENT } from "../../lib/paneStateEvents";
+import { ViewerExternalAppsProvider } from "../../lib/viewerExternalAppsContext";
 import {
   CodeBlock,
   DiffBlock,
@@ -23,10 +103,13 @@ import {
   detectLanguageFromFilePath,
   escapeRegExp,
   isLikelyDiff,
+  looksLikeLogContent,
   looksLikeMarkdown,
+  normalizeTokenColorForContrast,
   renderMarkedSnippet,
   renderPlainText,
   renderRichText,
+  resetContentViewerCachesForTests,
   tryFormatJson,
 } from "./textRendering";
 
@@ -164,8 +247,9 @@ describe("renderRichText", () => {
 
     const html = renderNodes(renderRichText(markdown, "", "code-block"));
 
-    expect(html).toContain('class="code-block"');
-    expect(html).toContain('<div class="code-meta">ts</div>');
+    expect(html).toContain('class="code-block content-viewer');
+    expect(html).toContain('class="code-meta content-viewer-header"');
+    expect(html).toContain(">ts<");
     expect(html).toContain('class="tok-keyword">const</span>');
     expect(html).toContain('class="tok-number">42</span>');
   });
@@ -181,10 +265,8 @@ describe("renderRichText", () => {
 
     const html = renderNodes(renderRichText(markdown, "", "source-ref", ["/Users/acme/repo"]));
 
-    expect(html).toContain(
-      '<div class="code-meta">packages/core/src/search/searchMessages.ts:190</div>',
-    );
-    expect(html).not.toContain('<div class="code-meta">190</div>');
+    expect(html).toContain('class="content-viewer-path"');
+    expect(html).toContain(">packages/core/src/search/searchMessages.ts:190<");
     expect(html).toContain('class="tok-keyword">function</span>');
   });
 
@@ -202,16 +284,12 @@ describe("renderRichText", () => {
 
     const html = renderNodes(renderRichText(markdown, "", "diff-block"));
 
-    expect(html).toContain('class="code-block diff-block"');
+    expect(html).toContain('class="code-block diff-block content-viewer');
     expect(html).toContain('class="diff-table"');
     expect(html).toContain('class="diff-row diff-remove"');
     expect(html).toContain('class="diff-row diff-add"');
     expect(html).toContain('class="diff-word-remove"');
     expect(html).toContain('class="diff-word-add"');
-    expect(html).toContain('class="diff-ln"> </span>');
-    expect(html).not.toContain('class="diff-ln old"');
-    expect(html).not.toContain('class="diff-ln new"');
-    expect(html).toContain(">a.ts<");
     expect(html).toContain(">+1<");
     expect(html).toContain(">-1<");
     expect(html).not.toContain("diff --git a/a.ts b/a.ts");
@@ -264,6 +342,272 @@ describe("renderPlainText", () => {
   });
 });
 
+describe("theme-aware Shiki rendering", () => {
+  beforeEach(() => {
+    resetContentViewerCachesForTests();
+  });
+
+  it("preserves italic styling when Shiki emits bold+italic bitmasks", async () => {
+    codeToTokensMock.mockImplementationOnce(() => [
+      [{ content: "const", color: "rgb(96, 165, 250)", fontStyle: 3 }],
+    ]);
+
+    render(<CodeBlock language="ts" codeValue="const value = 1" />);
+
+    await waitFor(() => {
+      const style = screen.getByText("const").getAttribute("style") ?? "";
+      expect(style).toContain("font-style: italic");
+      expect(style).toContain("font-weight: 650");
+    });
+  });
+
+  it("keeps the active dark viewer theme across dark app themes and switches on family change", async () => {
+    document.documentElement.dataset.theme = "dark";
+    document.documentElement.dataset.themeVariant = "dark";
+    delete document.documentElement.dataset.shikiTheme;
+
+    render(<CodeBlock language="ts" codeValue="const value = 1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("const").getAttribute("style")).toContain("rgb(96, 165, 250)");
+    });
+
+    await act(async () => {
+      document.documentElement.dataset.theme = "dark";
+      document.documentElement.dataset.themeVariant = "ft-dark";
+    });
+    await waitFor(() => {
+      expect(screen.getByText("const").getAttribute("style")).toContain("rgb(96, 165, 250)");
+    });
+
+    await act(async () => {
+      document.documentElement.dataset.theme = "light";
+      document.documentElement.dataset.themeVariant = "light";
+    });
+    await waitFor(() => {
+      expect(screen.getByText("const").getAttribute("style")).toContain("rgb(9, 105, 218)");
+    });
+  });
+
+  it("uses the explicit Shiki override instead of the paired app theme", async () => {
+    document.documentElement.dataset.theme = "dark";
+    document.documentElement.dataset.themeVariant = "dark";
+    document.documentElement.dataset.shikiTheme = "night-owl";
+
+    render(<CodeBlock language="ts" codeValue="const value = 1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("const").getAttribute("style")).toContain("rgb(129, 230, 217)");
+    });
+
+    await act(async () => {
+      document.documentElement.dataset.shikiTheme = "vesper";
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("const").getAttribute("style")).toContain("rgb(248, 189, 96)");
+    });
+  });
+
+  it("falls back to the paired Shiki theme when the selected theme is unavailable", async () => {
+    document.documentElement.dataset.theme = "dark";
+    document.documentElement.dataset.themeVariant = "dark";
+    document.documentElement.dataset.shikiTheme = "missing-theme";
+
+    render(<CodeBlock language="ts" codeValue="const value = 1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("const").getAttribute("style")).toContain("rgb(96, 165, 250)");
+    });
+  });
+
+  it("defers split diff tokenization until the user toggles views", async () => {
+    codeToTokensMock.mockClear();
+    document.documentElement.dataset.theme = "dark";
+    document.documentElement.dataset.themeVariant = "dark";
+    document.documentElement.dataset.defaultDiffViewMode = "unified";
+
+    render(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(codeToTokensMock.mock.calls.length).toBeGreaterThan(0);
+    });
+    const initialCallCount = codeToTokensMock.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Unified" }));
+
+    await waitFor(() => {
+      expect(codeToTokensMock.mock.calls.length).toBe(initialCallCount + 2);
+    });
+  });
+
+  it("uses configured default wrap and diff view settings", async () => {
+    document.documentElement.dataset.theme = "dark";
+    document.documentElement.dataset.themeVariant = "dark";
+    document.documentElement.dataset.defaultViewerWrapMode = "wrap";
+    document.documentElement.dataset.defaultDiffViewMode = "split";
+    resetContentViewerCachesForTests();
+
+    render(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Wrap" })).toBeInTheDocument();
+    });
+  });
+
+  it("virtualizes large expanded diffs and swaps rendered rows on scroll", async () => {
+    const lines = Array.from({ length: 2000 }, (_, index) => `+line ${index + 1}`);
+    document.documentElement.dataset.defaultViewerWrapMode = "nowrap";
+    document.documentElement.dataset.defaultDiffViewMode = "split";
+    render(
+      <DiffBlock
+        codeValue={["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -1,2000 +1,2000 @@", ...lines].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+      />,
+    );
+
+    const showMore = screen.getByRole("button", { name: "Show More" });
+    fireEvent.click(showMore);
+    fireEvent.click(showMore);
+    fireEvent.click(showMore);
+    fireEvent.click(showMore);
+
+    const body = document.querySelector(".content-viewer-body") as HTMLDivElement | null;
+    expect(body).not.toBeNull();
+
+    await waitFor(() => {
+      const renderedRows = document.querySelectorAll(".diff-split-row");
+      expect(renderedRows.length).toBeLessThan(200);
+      expect(screen.getByText("line 1")).toBeInTheDocument();
+      expect(screen.queryByText("line 1500")).toBeNull();
+    });
+
+    act(() => {
+      fireEvent.scroll(body!, { target: { scrollTop: 32_000 } });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("line 1500")).toBeInTheDocument();
+      expect(screen.queryByText("line 1")).toBeNull();
+    });
+  });
+
+  it("orders diff actions as Open, Open With, Diff, Diff With", async () => {
+    resetContentViewerCachesForTests();
+    listAvailableEditorsMock.mockResolvedValue({
+      editors: [
+        {
+          id: "editor:vscode",
+          kind: "known",
+          label: "VS Code",
+          appId: "vscode",
+          detected: true,
+          command: "/usr/local/bin/code",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
+      diffTools: [
+        {
+          id: "diff:zed",
+          kind: "known",
+          label: "Zed",
+          appId: "zed",
+          detected: true,
+          command: "/usr/local/bin/zed",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
+    } as never);
+
+    render(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+      />,
+    );
+
+    await screen.findByRole("button", { name: "Open With" });
+    await screen.findByRole("button", { name: "Diff With" });
+
+    const openButton = screen.getByRole("button", { name: "Open" });
+    const openWithButton = screen.getByRole("button", { name: "Open With" });
+    const diffButton = screen.getByRole("button", { name: "Diff" });
+    const diffWithButton = screen.getByRole("button", { name: "Diff With" });
+
+    expect(openButton.compareDocumentPosition(openWithButton)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(openWithButton.compareDocumentPosition(diffButton)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(diffButton.compareDocumentPosition(diffWithButton)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it("does not render a diff kind pill for diff viewers", () => {
+    render(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-before",
+          "+after",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+      />,
+    );
+
+    expect(screen.queryByText("DIFF")).not.toBeInTheDocument();
+  });
+});
+
 describe("looksLikeMarkdown", () => {
   it("detects markdown headings, lists, links, and emphasis", () => {
     expect(looksLikeMarkdown("# Header")).toBe(true);
@@ -288,8 +632,22 @@ describe("language detection", () => {
     expect(detectLanguageFromContent("")).toBe("text");
     expect(detectLanguageFromContent('{"a":1}')).toBe("json");
     expect(detectLanguageFromContent("[1,2,3]")).toBe("json");
+    expect(detectLanguageFromContent("[not json at all")).toBe("text");
     expect(detectLanguageFromContent("<html><body></body></html>")).toBe("html");
     expect(detectLanguageFromContent("@@ -1,1 +1,1 @@\n-a\n+b")).toBe("diff");
+  });
+
+  it("detects log-like multi-line content", () => {
+    expect(
+      looksLikeLogContent(
+        [
+          "2026-03-23 10:00:00 INFO starting worker",
+          "2026-03-23 10:00:01 WARN retrying connection",
+          "2026-03-23 10:00:02 ERROR failed to connect",
+        ].join("\n"),
+      ),
+    ).toBe(true);
+    expect(looksLikeLogContent("plain\ntext\nwithout\nmarkers")).toBe(false);
   });
 
   it("detects language from file path extension", () => {
@@ -383,6 +741,14 @@ describe("text helpers", () => {
     expect(tryFormatJson('{"a":1}')).toBe('{\n  "a": 1\n}');
     expect(tryFormatJson("{oops")).toBe("{oops");
   });
+
+  it("darkens low-contrast token colors against light code backgrounds", () => {
+    expect(normalizeTokenColorForContrast("#8cb4ff", "#fafbfe", "#1a1c24")).not.toBe("#8cb4ff");
+  });
+
+  it("preserves already-readable token colors", () => {
+    expect(normalizeTokenColorForContrast("#0f766e", "#fafbfe", "#1a1c24")).toBe("#0f766e");
+  });
 });
 
 describe("CodeBlock", () => {
@@ -410,5 +776,1219 @@ describe("CodeBlock", () => {
     );
 
     expect(html).toContain("<mark>history): add</mark>");
+  });
+
+  it("opens viewer content from the Open With menu and preserves focus", async () => {
+    resetContentViewerCachesForTests();
+    paneStateMock.externalTools = [];
+    listAvailableEditorsMock.mockResolvedValue({
+      editors: [
+        {
+          id: "editor:vscode",
+          kind: "known",
+          label: "VS Code",
+          appId: "vscode",
+          detected: true,
+          command: "/usr/local/bin/code",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+        {
+          id: "editor:zed",
+          kind: "known",
+          label: "Zed",
+          appId: "zed",
+          detected: true,
+          command: "/usr/local/bin/zed",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
+      diffTools: [],
+    } as never);
+    openContentInEditorMock.mockClear();
+
+    render(
+      <div tabIndex={-1} data-testid="focus-host">
+        <CodeBlock language="json" codeValue='{"value": 1}' />
+      </div>,
+    );
+
+    const focusHost = screen.getByTestId("focus-host");
+    focusHost.focus();
+    expect(document.activeElement).toBe(focusHost);
+
+    const menuButton = await screen.findByRole("button", { name: "Open With" });
+    fireEvent.mouseDown(menuButton);
+    fireEvent.click(menuButton);
+    expect(screen.queryByText(/Detected/i)).not.toBeInTheDocument();
+    fireEvent.mouseDown(await screen.findByRole("menuitem", { name: /Zed/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Zed/i }));
+
+    await waitFor(() => {
+      expect(openContentInEditorMock).toHaveBeenCalledWith(
+        expect.objectContaining({ editorId: "editor:zed" }),
+      );
+    });
+    expect(document.activeElement).toBe(focusHost);
+  });
+
+  it("supports keyboard navigation and menuitem roles in the viewer app menu", async () => {
+    resetContentViewerCachesForTests();
+    paneStateMock.externalTools = [];
+    listAvailableEditorsMock.mockResolvedValue({
+      editors: [
+        {
+          id: "editor:vscode",
+          kind: "known",
+          label: "VS Code",
+          appId: "vscode",
+          detected: true,
+          command: "/usr/local/bin/code",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+        {
+          id: "editor:zed",
+          kind: "known",
+          label: "Zed",
+          appId: "zed",
+          detected: true,
+          command: "/usr/local/bin/zed",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
+      diffTools: [],
+    } as never);
+    openContentInEditorMock.mockClear();
+
+    render(<CodeBlock language="json" codeValue='{"value": 1}' />);
+
+    const menuButton = await screen.findByRole("button", { name: "Open With" });
+    menuButton.focus();
+    fireEvent.keyDown(menuButton, { key: "ArrowDown" });
+
+    const menu = await screen.findByRole("menu", { name: "Open With" });
+    const items = within(menu).getAllByRole("menuitem");
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveFocus();
+
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(items[1]).toHaveFocus();
+    fireEvent.click(items[1]);
+
+    await waitFor(() => {
+      expect(openContentInEditorMock).toHaveBeenCalledWith(
+        expect.objectContaining({ editorId: "editor:zed" }),
+      );
+    });
+    expect(menuButton).toHaveFocus();
+  });
+
+  it("progressively expands large non-diff viewers with Show More", () => {
+    const codeValue = Array.from({ length: 850 }, (_, index) => `line ${index + 1}`).join("\n");
+    render(<CodeBlock language="text" codeValue={codeValue} />);
+
+    expect(screen.getByText("line 1")).toBeInTheDocument();
+    expect(screen.queryByText("line 850")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show More" }));
+    expect(screen.queryByText("line 850")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show More" }));
+    expect(screen.getByText("line 850")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show More" })).toBeNull();
+  });
+
+  it("opens viewer content with the default Open action", async () => {
+    resetContentViewerCachesForTests();
+    paneStateMock.externalTools = [];
+    listAvailableEditorsMock.mockResolvedValue({
+      editors: [
+        {
+          id: "editor:vscode",
+          kind: "known",
+          label: "VS Code",
+          appId: "vscode",
+          detected: true,
+          command: "/usr/local/bin/code",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
+      diffTools: [],
+    } as never);
+    openContentInEditorMock.mockClear();
+
+    render(<CodeBlock language="json" codeValue='{"value": 1}' metaLabel="payload.json" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+
+    await waitFor(() => {
+      expect(openContentInEditorMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "payload.json",
+          language: "json",
+          content: '{"value": 1}',
+        }),
+      );
+    });
+  });
+
+  it("opens diffs from the Diff With menu", async () => {
+    resetContentViewerCachesForTests();
+    paneStateMock.externalTools = [];
+    listAvailableEditorsMock.mockResolvedValue({
+      editors: [],
+      diffTools: [
+        {
+          id: "diff:vscode",
+          kind: "known",
+          label: "VS Code",
+          appId: "vscode",
+          detected: true,
+          command: "/usr/local/bin/code",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+        {
+          id: "diff:zed",
+          kind: "known",
+          label: "Zed",
+          appId: "zed",
+          detected: true,
+          command: "/usr/local/bin/zed",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
+    } as never);
+    openDiffInEditorMock.mockClear();
+
+    render(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+      />,
+    );
+
+    const menuButton = await screen.findByRole("button", { name: "Diff With" });
+    fireEvent.mouseDown(menuButton);
+    fireEvent.click(menuButton);
+    expect(screen.queryByText(/Detected/i)).not.toBeInTheDocument();
+    fireEvent.mouseDown(await screen.findByRole("menuitem", { name: /Zed/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Zed/i }));
+
+    await waitFor(() => {
+      expect(openDiffInEditorMock).toHaveBeenCalledWith(
+        expect.objectContaining({ editorId: "diff:zed" }),
+      );
+    });
+  });
+
+  it("opens diffs with the default Diff action", async () => {
+    resetContentViewerCachesForTests();
+    paneStateMock.externalTools = [];
+    listAvailableEditorsMock.mockResolvedValue({
+      editors: [],
+      diffTools: [
+        {
+          id: "diff:vscode",
+          kind: "known",
+          label: "VS Code",
+          appId: "vscode",
+          detected: true,
+          command: "/usr/local/bin/code",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
+    } as never);
+    openDiffInEditorMock.mockClear();
+
+    render(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Diff" }));
+
+    await waitFor(() => {
+      expect(openDiffInEditorMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "/Users/acme/repo/a.ts",
+          filePath: "/Users/acme/repo/a.ts",
+        }),
+      );
+    });
+  });
+
+  it("does not expose Open for relative diff header paths", async () => {
+    resetContentViewerCachesForTests();
+    paneStateMock.externalTools = [];
+    listAvailableEditorsMock.mockResolvedValue({
+      editors: [
+        {
+          id: "editor:vscode",
+          kind: "known",
+          label: "VS Code",
+          appId: "vscode",
+          detected: true,
+          command: "/usr/local/bin/code",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
+      diffTools: [],
+    } as never);
+
+    render(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/src/a.ts b/src/a.ts",
+          "--- a/src/a.ts",
+          "+++ b/src/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n")}
+        pathRoots={["/Users/acme/repo"]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("src/a.ts")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Open" })).toBeNull();
+  });
+
+  it("orders Open With menu items using the saved external tool order", async () => {
+    resetContentViewerCachesForTests();
+    paneStateMock.externalTools = [
+      { id: "editor:zed" },
+      { id: "editor:textedit" },
+      { id: "editor:nvim" },
+    ];
+    listAvailableEditorsMock.mockResolvedValue({
+      editors: [
+        {
+          id: "editor:nvim",
+          kind: "known",
+          label: "Neovim",
+          appId: "neovim",
+          detected: true,
+          command: "/opt/homebrew/bin/nvim",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+        {
+          id: "editor:textedit",
+          kind: "custom",
+          label: "TextEdit",
+          appId: null,
+          detected: true,
+          command: "/System/Applications/TextEdit.app",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: false,
+          },
+        },
+        {
+          id: "editor:zed",
+          kind: "known",
+          label: "Zed",
+          appId: "zed",
+          detected: true,
+          command: "/usr/local/bin/zed",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
+      diffTools: [],
+    } as never);
+
+    render(<CodeBlock language="json" codeValue='{"value": 1}' />);
+
+    const menuButton = await screen.findByRole("button", { name: "Open With" });
+    fireEvent.mouseDown(menuButton);
+    fireEvent.click(menuButton);
+
+    const menu = await screen.findByRole("menu", { name: "Open With" });
+    const labels = within(menu)
+      .getAllByRole("menuitem")
+      .map((item: HTMLElement) => item.textContent?.trim());
+
+    expect(labels).toEqual(["Zed", "TextEdit", "Neovim"]);
+  });
+
+  it("updates Open With ordering after settings change without restarting", async () => {
+    resetContentViewerCachesForTests();
+    paneStateMock.preferredExternalEditor = null;
+    paneStateMock.preferredExternalDiffTool = null;
+    paneStateMock.externalTools = [];
+    const allEditors = [
+      {
+        id: "editor:nvim",
+        kind: "known",
+        label: "Neovim",
+        appId: "neovim",
+        detected: true,
+        command: "/opt/homebrew/bin/nvim",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: true,
+        },
+      },
+      {
+        id: "editor:zed",
+        kind: "known",
+        label: "Zed",
+        appId: "zed",
+        detected: true,
+        command: "/usr/local/bin/zed",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: true,
+        },
+      },
+      {
+        id: "editor:textedit",
+        kind: "custom",
+        label: "TextEdit",
+        appId: null,
+        detected: true,
+        command: "/System/Applications/TextEdit.app",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: false,
+        },
+      },
+    ];
+    listAvailableEditorsMock.mockImplementation(
+      async (options?: { externalTools?: Array<{ id: string }> }) => {
+        const allowedIds = new Set(options?.externalTools?.map((tool) => tool.id) ?? []);
+        return {
+          editors: allEditors.filter(
+            (editor) => allowedIds.size === 0 || allowedIds.has(editor.id),
+          ),
+          diffTools: [],
+        } as never;
+      },
+    );
+
+    render(<CodeBlock language="json" codeValue='{"value": 1}' />);
+    await screen.findByRole("button", { name: "Open With" });
+
+    paneStateMock.externalTools = [
+      { id: "editor:zed" },
+      { id: "editor:textedit" },
+      { id: "editor:nvim" },
+    ];
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(PANE_STATE_UPDATED_EVENT, {
+          detail: {
+            preferredExternalEditor: null,
+            preferredExternalDiffTool: null,
+            terminalAppCommand: "",
+            externalTools: paneStateMock.externalTools,
+          },
+        }),
+      );
+    });
+
+    const menuButton = await screen.findByRole("button", { name: "Open With" });
+    fireEvent.mouseDown(menuButton);
+    fireEvent.click(menuButton);
+
+    const menu = await screen.findByRole("menu", { name: "Open With" });
+    await waitFor(() => {
+      const labels = within(menu)
+        .getAllByRole("menuitem")
+        .map((item: HTMLElement) => item.textContent?.trim());
+      expect(labels).toEqual(["Zed", "TextEdit", "Neovim"]);
+    });
+  });
+
+  it("uses saved external tools on the first viewer load", async () => {
+    resetContentViewerCachesForTests();
+    paneStateMock.preferredExternalEditor = "tool:zed";
+    paneStateMock.preferredExternalDiffTool = "tool:zed";
+    paneStateMock.terminalAppCommand = "/Applications/kitty.app";
+    paneStateMock.externalTools = [
+      { id: "tool:vscode", enabledForEditor: false, enabledForDiff: false },
+      { id: "tool:cursor", enabledForEditor: false, enabledForDiff: false },
+      { id: "tool:zed", enabledForEditor: true, enabledForDiff: true },
+      { id: "tool:neovim", enabledForEditor: true, enabledForDiff: true },
+      { id: "tool:sublime_text", enabledForEditor: true, enabledForDiff: false },
+      { id: "tool:text_edit", enabledForEditor: true, enabledForDiff: false },
+      { id: "custom:textedit2", enabledForEditor: true, enabledForDiff: false },
+      { id: "custom:ag", enabledForEditor: true, enabledForDiff: true },
+      { id: "custom:ag2", enabledForEditor: true, enabledForDiff: false },
+    ];
+    const allEditors = [
+      {
+        id: "tool:vscode",
+        kind: "known",
+        label: "VS Code",
+        appId: "vscode",
+        detected: true,
+        command: "/usr/local/bin/code",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: true,
+        },
+      },
+      {
+        id: "tool:cursor",
+        kind: "known",
+        label: "Cursor",
+        appId: "cursor",
+        detected: true,
+        command: "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: true,
+        },
+      },
+      {
+        id: "tool:zed",
+        kind: "known",
+        label: "Zed",
+        appId: "zed",
+        detected: true,
+        command: "/usr/local/bin/zed",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: true,
+        },
+      },
+      {
+        id: "tool:neovim",
+        kind: "known",
+        label: "Neovim",
+        appId: "neovim",
+        detected: true,
+        command: "/opt/homebrew/bin/nvim",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: true,
+        },
+      },
+      {
+        id: "tool:sublime_text",
+        kind: "known",
+        label: "Sublime Text",
+        appId: "sublime_text",
+        detected: true,
+        command: "/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: false,
+        },
+      },
+      {
+        id: "tool:text_edit",
+        kind: "known",
+        label: "Text Edit",
+        appId: "text_edit",
+        detected: true,
+        command: "/System/Applications/TextEdit.app",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: false,
+          openContent: true,
+          openDiff: false,
+        },
+      },
+      {
+        id: "custom:textedit2",
+        kind: "custom",
+        label: "Text Edit 2",
+        appId: null,
+        detected: true,
+        command: "/System/Applications/TextEdit.app",
+        args: ["{file}"],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: false,
+        },
+      },
+      {
+        id: "custom:ag",
+        kind: "custom",
+        label: "AG",
+        appId: null,
+        detected: true,
+        command: "/Applications/Antigravity.app",
+        args: ["{file}"],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: false,
+        },
+      },
+      {
+        id: "custom:ag2",
+        kind: "custom",
+        label: "AG 2",
+        appId: null,
+        detected: true,
+        command: "/Applications/Affinity.app",
+        args: ["{file}"],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: false,
+        },
+      },
+    ];
+    listAvailableEditorsMock.mockImplementation(
+      async (options?: {
+        externalTools?: Array<{ id: string; enabledForEditor?: boolean; enabledForDiff?: boolean }>;
+      }) => {
+        const allowedEditorIds = new Set(
+          options?.externalTools
+            ?.filter((tool) => tool.enabledForEditor !== false)
+            .map((tool) => tool.id) ?? [],
+        );
+        return {
+          editors: allEditors.filter((editor) => allowedEditorIds.has(editor.id)),
+          diffTools: [],
+        } as never;
+      },
+    );
+
+    render(<CodeBlock language="json" codeValue='{"value": 1}' />);
+
+    const menuButton = await screen.findByRole("button", { name: "Open With" });
+    fireEvent.mouseDown(menuButton);
+    fireEvent.click(menuButton);
+
+    const menu = await screen.findByRole("menu", { name: "Open With" });
+    const labels = within(menu)
+      .getAllByRole("menuitem")
+      .map((item: HTMLElement) => item.textContent?.trim());
+
+    expect(labels).toEqual([
+      "Zed",
+      "Neovim",
+      "Sublime Text",
+      "Text Edit",
+      "Text Edit 2",
+      "AG",
+      "AG 2",
+    ]);
+    expect(listAvailableEditorsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalTools: paneStateMock.externalTools,
+      }),
+    );
+  });
+
+  it("uses the app-provided compare-instance external tools for Open With menus", async () => {
+    resetContentViewerCachesForTests();
+    listAvailableEditorsMock.mockClear();
+    listAvailableEditorsMock.mockImplementation(async () => {
+      throw new Error("viewer fallback loader should not run when app state is provided");
+    });
+
+    render(
+      <ViewerExternalAppsProvider
+        value={{
+          editors: [
+            {
+              id: "tool:zed",
+              kind: "known",
+              label: "Zed",
+              appId: "zed",
+              detected: true,
+              command: "/usr/local/bin/zed",
+              args: [],
+              capabilities: {
+                openFile: true,
+                openAtLineColumn: true,
+                openContent: true,
+                openDiff: true,
+              },
+            },
+            {
+              id: "tool:neovim",
+              kind: "known",
+              label: "Neovim",
+              appId: "neovim",
+              detected: true,
+              command: "/opt/homebrew/bin/nvim",
+              args: [],
+              capabilities: {
+                openFile: true,
+                openAtLineColumn: true,
+                openContent: true,
+                openDiff: true,
+              },
+            },
+            {
+              id: "tool:sublime_text",
+              kind: "known",
+              label: "Sublime Text",
+              appId: "sublime_text",
+              detected: true,
+              command: "/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl",
+              args: [],
+              capabilities: {
+                openFile: true,
+                openAtLineColumn: true,
+                openContent: true,
+                openDiff: false,
+              },
+            },
+            {
+              id: "tool:text_edit",
+              kind: "known",
+              label: "Text Edit",
+              appId: "text_edit",
+              detected: true,
+              command: "/System/Applications/TextEdit.app",
+              args: [],
+              capabilities: {
+                openFile: true,
+                openAtLineColumn: false,
+                openContent: true,
+                openDiff: false,
+              },
+            },
+            {
+              id: "custom:mn23v6h7:5adef",
+              kind: "custom",
+              label: "Text Edit 2",
+              appId: null,
+              detected: true,
+              command: "/System/Applications/TextEdit.app",
+              args: ["{file}"],
+              capabilities: {
+                openFile: true,
+                openAtLineColumn: true,
+                openContent: true,
+                openDiff: false,
+              },
+            },
+            {
+              id: "custom:mn27y83n:g6zh5",
+              kind: "custom",
+              label: "AG",
+              appId: null,
+              detected: true,
+              command: "/Applications/Antigravity.app",
+              args: ["{file}"],
+              capabilities: {
+                openFile: true,
+                openAtLineColumn: true,
+                openContent: true,
+                openDiff: true,
+              },
+            },
+            {
+              id: "custom:mn27yqfa:69sjo",
+              kind: "custom",
+              label: "AG 2",
+              appId: null,
+              detected: true,
+              command: "/Applications/Affinity.app",
+              args: ["{file}"],
+              capabilities: {
+                openFile: true,
+                openAtLineColumn: true,
+                openContent: true,
+                openDiff: false,
+              },
+            },
+          ],
+          diffTools: [
+            {
+              id: "tool:zed",
+              kind: "known",
+              label: "Zed",
+              appId: "zed",
+              detected: true,
+              command: "/usr/local/bin/zed",
+              args: [],
+              capabilities: {
+                openFile: true,
+                openAtLineColumn: true,
+                openContent: true,
+                openDiff: true,
+              },
+            },
+            {
+              id: "tool:neovim",
+              kind: "known",
+              label: "Neovim",
+              appId: "neovim",
+              detected: true,
+              command: "/opt/homebrew/bin/nvim",
+              args: [],
+              capabilities: {
+                openFile: true,
+                openAtLineColumn: true,
+                openContent: true,
+                openDiff: true,
+              },
+            },
+            {
+              id: "custom:mn27y83n:g6zh5",
+              kind: "custom",
+              label: "AG",
+              appId: null,
+              detected: true,
+              command: "/Applications/Antigravity.app",
+              args: ["{left}", "{right}"],
+              capabilities: {
+                openFile: true,
+                openAtLineColumn: true,
+                openContent: true,
+                openDiff: true,
+              },
+            },
+          ],
+          preferences: {
+            preferredExternalEditor: "tool:zed",
+            preferredExternalDiffTool: "tool:zed",
+            terminalAppCommand: "/Applications/kitty.app",
+            orderedToolIds: [
+              "tool:vscode",
+              "tool:cursor",
+              "tool:text_edit",
+              "tool:zed",
+              "tool:neovim",
+              "tool:sublime_text",
+              "custom:mn23v6h7:5adef",
+              "custom:mn27y83n:g6zh5",
+              "custom:mn27yqfa:69sjo",
+            ],
+            externalTools: [
+              {
+                id: "tool:vscode",
+                kind: "known",
+                label: "VS Code",
+                appId: "vscode",
+                command: "",
+                editorArgs: [],
+                diffArgs: [],
+                enabledForEditor: false,
+                enabledForDiff: false,
+              },
+              {
+                id: "tool:cursor",
+                kind: "known",
+                label: "Cursor",
+                appId: "cursor",
+                command: "",
+                editorArgs: [],
+                diffArgs: [],
+                enabledForEditor: false,
+                enabledForDiff: false,
+              },
+              {
+                id: "tool:text_edit",
+                kind: "known",
+                label: "Text Edit",
+                appId: "text_edit",
+                command: "",
+                editorArgs: [],
+                diffArgs: [],
+                enabledForEditor: true,
+                enabledForDiff: false,
+              },
+              {
+                id: "tool:zed",
+                kind: "known",
+                label: "Zed",
+                appId: "zed",
+                command: "",
+                editorArgs: [],
+                diffArgs: [],
+                enabledForEditor: true,
+                enabledForDiff: true,
+              },
+              {
+                id: "tool:neovim",
+                kind: "known",
+                label: "Neovim",
+                appId: "neovim",
+                command: "",
+                editorArgs: [],
+                diffArgs: [],
+                enabledForEditor: true,
+                enabledForDiff: true,
+              },
+              {
+                id: "tool:sublime_text",
+                kind: "known",
+                label: "Sublime Text",
+                appId: "sublime_text",
+                command: "",
+                editorArgs: [],
+                diffArgs: [],
+                enabledForEditor: true,
+                enabledForDiff: false,
+              },
+              {
+                id: "custom:mn23v6h7:5adef",
+                kind: "custom",
+                label: "Text Edit 2",
+                appId: null,
+                command: "/System/Applications/TextEdit.app",
+                editorArgs: ["{file}"],
+                diffArgs: ["{left}"],
+                enabledForEditor: true,
+                enabledForDiff: false,
+              },
+              {
+                id: "custom:mn27y83n:g6zh5",
+                kind: "custom",
+                label: "AG",
+                appId: null,
+                command: "/Applications/Antigravity.app",
+                editorArgs: ["{file}"],
+                diffArgs: ["{left}", "{right}"],
+                enabledForEditor: true,
+                enabledForDiff: true,
+              },
+              {
+                id: "custom:mn27yqfa:69sjo",
+                kind: "custom",
+                label: "AG 2",
+                appId: null,
+                command: "/Applications/Affinity.app",
+                editorArgs: ["{file}"],
+                diffArgs: ["{left}", "{right}"],
+                enabledForEditor: true,
+                enabledForDiff: false,
+              },
+            ],
+          },
+        }}
+      >
+        <CodeBlock language="json" codeValue='{"value": 1}' />
+      </ViewerExternalAppsProvider>,
+    );
+
+    const menuButton = await screen.findByRole("button", { name: "Open With" });
+    fireEvent.mouseDown(menuButton);
+    fireEvent.click(menuButton);
+
+    const menu = await screen.findByRole("menu", { name: "Open With" });
+    const labels = within(menu)
+      .getAllByRole("menuitem")
+      .map((item: HTMLElement) => item.textContent?.trim());
+
+    expect(labels).toEqual([
+      "Text Edit",
+      "Zed",
+      "Neovim",
+      "Sublime Text",
+      "Text Edit 2",
+      "AG",
+      "AG 2",
+    ]);
+    expect(listAvailableEditorsMock).not.toHaveBeenCalled();
+  });
+
+  it("updates Open With menu items after adding a tool without restarting", async () => {
+    resetContentViewerCachesForTests();
+    paneStateMock.preferredExternalEditor = null;
+    paneStateMock.preferredExternalDiffTool = null;
+    paneStateMock.externalTools = [{ id: "editor:zed" }];
+    const allEditors = [
+      {
+        id: "editor:zed",
+        kind: "known",
+        label: "Zed",
+        appId: "zed",
+        detected: true,
+        command: "/usr/local/bin/zed",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: true,
+        },
+      },
+      {
+        id: "editor:textedit",
+        kind: "known",
+        label: "TextEdit",
+        appId: "text_edit",
+        detected: true,
+        command: "/System/Applications/TextEdit.app",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: false,
+          openContent: true,
+          openDiff: false,
+        },
+      },
+    ];
+    listAvailableEditorsMock.mockImplementation(
+      async (options?: { externalTools?: Array<{ id: string }> }) => {
+        const allowedIds = new Set(options?.externalTools?.map((tool) => tool.id) ?? []);
+        return {
+          editors: allEditors.filter(
+            (editor) => allowedIds.size === 0 || allowedIds.has(editor.id),
+          ),
+          diffTools: [],
+        } as never;
+      },
+    );
+
+    render(<CodeBlock language="json" codeValue='{"value": 1}' />);
+    expect(screen.queryByRole("button", { name: "Open With" })).not.toBeInTheDocument();
+
+    paneStateMock.externalTools = [{ id: "editor:zed" }, { id: "editor:textedit" }];
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(PANE_STATE_UPDATED_EVENT, {
+          detail: {
+            preferredExternalEditor: null,
+            preferredExternalDiffTool: null,
+            terminalAppCommand: "",
+            externalTools: paneStateMock.externalTools,
+          },
+        }),
+      );
+    });
+
+    const menuButton = await screen.findByRole("button", { name: "Open With" });
+    fireEvent.mouseDown(menuButton);
+    fireEvent.click(menuButton);
+
+    const menu = await screen.findByRole("menu", { name: "Open With" });
+    await waitFor(() => {
+      const labels = within(menu)
+        .getAllByRole("menuitem")
+        .map((item: HTMLElement) => item.textContent?.trim());
+      expect(labels).toEqual(["Zed", "TextEdit"]);
+    });
+  });
+
+  it("updates Open With menu items after removing a tool without restarting", async () => {
+    resetContentViewerCachesForTests();
+    paneStateMock.preferredExternalEditor = null;
+    paneStateMock.preferredExternalDiffTool = null;
+    paneStateMock.externalTools = [{ id: "editor:zed" }, { id: "editor:textedit" }];
+    const allEditors = [
+      {
+        id: "editor:zed",
+        kind: "known",
+        label: "Zed",
+        appId: "zed",
+        detected: true,
+        command: "/usr/local/bin/zed",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: true,
+          openContent: true,
+          openDiff: true,
+        },
+      },
+      {
+        id: "editor:textedit",
+        kind: "known",
+        label: "TextEdit",
+        appId: "text_edit",
+        detected: true,
+        command: "/System/Applications/TextEdit.app",
+        args: [],
+        capabilities: {
+          openFile: true,
+          openAtLineColumn: false,
+          openContent: true,
+          openDiff: false,
+        },
+      },
+    ];
+    listAvailableEditorsMock.mockImplementation(
+      async (options?: { externalTools?: Array<{ id: string }> }) => {
+        const allowedIds = new Set(options?.externalTools?.map((tool) => tool.id) ?? []);
+        return {
+          editors: allEditors.filter(
+            (editor) => allowedIds.size === 0 || allowedIds.has(editor.id),
+          ),
+          diffTools: [],
+        } as never;
+      },
+    );
+
+    render(<CodeBlock language="json" codeValue='{"value": 1}' />);
+    await screen.findByRole("button", { name: "Open With" });
+
+    paneStateMock.externalTools = [{ id: "editor:zed" }];
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(PANE_STATE_UPDATED_EVENT, {
+          detail: {
+            preferredExternalEditor: null,
+            preferredExternalDiffTool: null,
+            terminalAppCommand: "",
+            externalTools: paneStateMock.externalTools,
+          },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Open With" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Open" })).toBeInTheDocument();
+    });
+  });
+
+  it("uses live external tool preferences when opening viewer content", async () => {
+    resetContentViewerCachesForTests();
+    paneStateMock.preferredExternalEditor = "editor:textedit";
+    paneStateMock.preferredExternalDiffTool = null;
+    paneStateMock.terminalAppCommand = "/Applications/kitty.app";
+    paneStateMock.externalTools = [{ id: "editor:textedit" }];
+    listAvailableEditorsMock.mockResolvedValue({
+      editors: [
+        {
+          id: "editor:textedit",
+          kind: "known",
+          label: "TextEdit",
+          appId: "text_edit",
+          detected: true,
+          command: "/System/Applications/TextEdit.app",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: false,
+            openContent: true,
+            openDiff: false,
+          },
+        },
+      ],
+      diffTools: [],
+    } as never);
+    openContentInEditorMock.mockClear();
+
+    render(<CodeBlock language="json" codeValue='{"value": 1}' metaLabel="payload.json" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+
+    await waitFor(() => {
+      expect(openContentInEditorMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          preferredExternalEditor: "editor:textedit",
+          terminalAppCommand: "/Applications/kitty.app",
+          externalTools: [{ id: "editor:textedit" }],
+        }),
+      );
+    });
   });
 });

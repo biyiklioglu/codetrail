@@ -1,16 +1,28 @@
 import type { Dispatch, SetStateAction } from "react";
 
 import type {
+  DiffViewMode,
+  ExternalEditorId,
+  ExternalToolConfig,
+  MessagePageSize,
   MonoFontFamily,
   MonoFontSize,
   RegularFontFamily,
   RegularFontSize,
+  ShikiThemeId,
   ThemeMode,
+  ViewerWrapMode,
 } from "../../shared/uiPreferences";
 
 export type AppearanceState = {
   theme: ThemeMode;
   setTheme: Dispatch<SetStateAction<ThemeMode>>;
+  darkShikiTheme: ShikiThemeId;
+  setDarkShikiTheme: Dispatch<SetStateAction<ShikiThemeId>>;
+  lightShikiTheme: ShikiThemeId;
+  setLightShikiTheme: Dispatch<SetStateAction<ShikiThemeId>>;
+  shikiTheme: ShikiThemeId;
+  setShikiTheme: Dispatch<SetStateAction<ShikiThemeId>>;
   monoFontFamily: MonoFontFamily;
   setMonoFontFamily: Dispatch<SetStateAction<MonoFontFamily>>;
   regularFontFamily: RegularFontFamily;
@@ -19,8 +31,26 @@ export type AppearanceState = {
   setMonoFontSize: Dispatch<SetStateAction<MonoFontSize>>;
   regularFontSize: RegularFontSize;
   setRegularFontSize: Dispatch<SetStateAction<RegularFontSize>>;
+  messagePageSize: MessagePageSize;
+  setMessagePageSize: Dispatch<SetStateAction<MessagePageSize>>;
   useMonospaceForAllMessages: boolean;
   setUseMonospaceForAllMessages: Dispatch<SetStateAction<boolean>>;
+  autoHideMessageActions: boolean;
+  setAutoHideMessageActions: Dispatch<SetStateAction<boolean>>;
+  autoHideViewerHeaderActions: boolean;
+  setAutoHideViewerHeaderActions: Dispatch<SetStateAction<boolean>>;
+  defaultViewerWrapMode: ViewerWrapMode;
+  setDefaultViewerWrapMode: Dispatch<SetStateAction<ViewerWrapMode>>;
+  defaultDiffViewMode: DiffViewMode;
+  setDefaultDiffViewMode: Dispatch<SetStateAction<DiffViewMode>>;
+  preferredExternalEditor: ExternalEditorId;
+  setPreferredExternalEditor: Dispatch<SetStateAction<ExternalEditorId>>;
+  preferredExternalDiffTool: ExternalEditorId;
+  setPreferredExternalDiffTool: Dispatch<SetStateAction<ExternalEditorId>>;
+  terminalAppCommand: string;
+  setTerminalAppCommand: Dispatch<SetStateAction<string>>;
+  externalTools: ExternalToolConfig[];
+  setExternalTools: Dispatch<SetStateAction<ExternalToolConfig[]>>;
 };
 
 export function formatDuration(durationMs: number | null): string {
@@ -68,4 +98,10 @@ export function focusHistoryList(container: HTMLDivElement | null): void {
   window.setTimeout(() => {
     container?.focus({ preventScroll: true });
   }, 0);
+}
+
+export function getMessageListFingerprint(messages: Array<{ id: string }>): string {
+  const firstId = messages[0]?.id ?? "";
+  const lastId = messages[messages.length - 1]?.id ?? "";
+  return `${messages.length}:${firstId}:${lastId}`;
 }

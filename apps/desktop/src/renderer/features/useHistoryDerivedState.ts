@@ -9,7 +9,6 @@ import {
   EMPTY_CATEGORY_COUNTS,
   HISTORY_CATEGORY_EXPAND_SHORTCUTS,
   HISTORY_CATEGORY_SHORTCUTS,
-  PAGE_SIZE,
   PROJECT_ALL_NAV_ID,
 } from "../app/constants";
 import type {
@@ -48,6 +47,7 @@ export function useHistoryDerivedState({
   messageSortDirection,
   focusMessageId,
   sessionPage,
+  messagePageSize,
   expandedByDefaultCategories,
   bulkExpandScope,
   messageExpanded,
@@ -71,6 +71,7 @@ export function useHistoryDerivedState({
   messageSortDirection: SortDirection;
   focusMessageId: string;
   sessionPage: number;
+  messagePageSize: number;
   expandedByDefaultCategories: MessageCategory[];
   bulkExpandScope: BulkExpandScope;
   messageExpanded: Record<string, boolean>;
@@ -146,7 +147,11 @@ export function useHistoryDerivedState({
   }, [activeHistoryMessages, focusMessageId]);
 
   const loadedHistoryPage =
-    historyMode === "project_all" ? (projectCombinedDetail?.page ?? 0) : (sessionDetail?.page ?? 0);
+    historyMode === "project_all"
+      ? (projectCombinedDetail?.page ?? 0)
+      : historyMode === "bookmarks"
+        ? (bookmarksResponse.page ?? 0)
+        : (sessionDetail?.page ?? 0);
 
   const selectedProject = useMemo(
     () => sortedProjects.find((project) => project.id === selectedProjectId) ?? null,
@@ -209,16 +214,24 @@ export function useHistoryDerivedState({
 
   const totalPages = useMemo(() => {
     const totalCount =
-      historyMode === "project_all"
+      historyMode === "bookmarks"
+        ? bookmarksResponse.filteredCount
+        : historyMode === "project_all"
         ? (projectCombinedDetail?.totalCount ?? 0)
         : (sessionDetail?.totalCount ?? 0);
     if (totalCount === 0) {
       return 1;
     }
-    return Math.ceil(totalCount / PAGE_SIZE);
-  }, [historyMode, projectCombinedDetail?.totalCount, sessionDetail?.totalCount]);
+    return Math.ceil(totalCount / messagePageSize);
+  }, [
+    bookmarksResponse.filteredCount,
+    historyMode,
+    messagePageSize,
+    projectCombinedDetail?.totalCount,
+    sessionDetail?.totalCount,
+  ]);
 
-  const canNavigatePages = historyMode !== "bookmarks";
+  const canNavigatePages = totalPages > 1;
   const canGoToPreviousHistoryPage = canNavigatePages && sessionPage > 0;
   const canGoToNextHistoryPage = canNavigatePages && sessionPage + 1 < totalPages;
 

@@ -57,6 +57,8 @@ export const EMPTY_BOOKMARKS_RESPONSE: BookmarkListResponse = {
   projectId: "",
   totalCount: 0,
   filteredCount: 0,
+  page: 0,
+  pageSize: PAGE_SIZE,
   categoryCounts: EMPTY_CATEGORY_COUNTS,
   queryError: null,
   highlightPatterns: [],

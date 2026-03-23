@@ -6,14 +6,21 @@
   "main": "dist/main/main.js",
   "scripts": {
     "build": "bun run ./scripts/build.ts",
+    "bench:message-viewer": "bun ./scripts/measure-message-viewer-performance.tsx",
     "verify:native": "ELECTRON_RUN_AS_NODE=1 electron -e \"const Database=require('better-sqlite3'); const db=new Database(':memory:'); db.prepare('select 1').get(); db.close(); require('@parcel/watcher'); console.log('native modules ABI OK')\"",
     "rebuild:native": "HOME=./.home npm_config_devdir=./.electron-gyp electron-rebuild -f -w better-sqlite3,@parcel/watcher",
     "fix:native": "bun run verify:native || bun run rebuild:native",
     "prestart": "bun run build && bun run fix:native",
+    "prestart:compare": "bun run prestart",
+    "prestart:verbose:compare": "bun run prestart",
     "predev": "bun run prestart",
+    "predev:compare": "bun run prestart",
     "start": "electron .",
+    "start:compare": "electron . --instance=compare",
     "start:verbose": "electron . --verbose",
+    "start:verbose:compare": "electron . --instance=compare --verbose",
     "dev": "electron .",
+    "dev:compare": "electron . --instance=compare",
     "make:mac": "./scripts/make-macos-app.sh",
     "make:mac:x64": "./scripts/make-macos-app.sh x64",
     "make:mac:arm64": "./scripts/make-macos-app.sh arm64"
@@ -27,7 +34,8 @@
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "shiki": "^3.13.0"
   },
   "devDependencies": {
     "@codetrail/core": "workspace:*",

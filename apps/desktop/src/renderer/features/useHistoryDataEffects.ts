@@ -3,7 +3,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import type { MessageCategory, Provider, SearchMode } from "@codetrail/core/browser";
 
-import { CATEGORIES, EMPTY_BOOKMARKS_RESPONSE, PAGE_SIZE } from "../app/constants";
+import { CATEGORIES, EMPTY_BOOKMARKS_RESPONSE } from "../app/constants";
 import {
   createHistorySelection,
   setHistorySelectionProjectId,
@@ -66,6 +66,7 @@ export function useHistoryDataEffects({
   messageSortDirection,
   projectAllSortDirection,
   sessionPage,
+  messagePageSize,
   setSessionDetail,
   setProjectCombinedDetail,
   bookmarksLoadedProjectId,
@@ -115,6 +116,7 @@ export function useHistoryDataEffects({
   messageSortDirection: SortDirection;
   projectAllSortDirection: SortDirection;
   sessionPage: number;
+  messagePageSize: number;
   setSessionDetail: Dispatch<SetStateAction<SessionDetail | null>>;
   setProjectCombinedDetail: Dispatch<SetStateAction<ProjectCombinedDetail | null>>;
   bookmarksLoadedProjectId: string | null;
@@ -196,9 +198,6 @@ export function useHistoryDataEffects({
     const requestToken = bookmarksLoadTokenRef.current + 1;
     bookmarksLoadTokenRef.current = requestToken;
     if (!selectedProjectId) {
-      if (requestToken !== bookmarksLoadTokenRef.current) {
-        return;
-      }
       setBookmarksResponse(EMPTY_BOOKMARKS_RESPONSE);
       setBookmarksLoadedProjectId("");
       return;
@@ -207,6 +206,8 @@ export function useHistoryDataEffects({
     const isAllHistoryCategoriesSelected = historyCategories.length === CATEGORIES.length;
     const response = await codetrail.invoke("bookmarks:listProject", {
       projectId: selectedProjectId,
+      page: sessionPage,
+      pageSize: messagePageSize,
       query: effectiveBookmarkQuery,
       searchMode,
       categories: isAllHistoryCategoriesSelected ? undefined : historyCategories,
@@ -215,13 +216,18 @@ export function useHistoryDataEffects({
       return;
     }
     setBookmarksResponse(response);
+    if (typeof response.page === "number" && response.page !== sessionPage) {
+      setSessionPage(response.page);
+    }
     setBookmarksLoadedProjectId(selectedProjectId);
   }, [
     bookmarksLoadTokenRef,
     codetrail,
     effectiveBookmarkQuery,
     historyCategories,
+    messagePageSize,
     searchMode,
+    sessionPage,
     selectedProjectId,
     setBookmarksLoadedProjectId,
     setBookmarksResponse,
@@ -494,7 +500,7 @@ export function useHistoryDataEffects({
       .invoke("sessions:getDetail", {
         sessionId: sessionDetailRequest.selectedSessionId,
         page: sessionDetailRequest.sessionPage,
-        pageSize: PAGE_SIZE,
+        pageSize: messagePageSize,
         categories: effectiveCategories,
         query: effectiveQuery,
         searchMode: sessionDetailRequest.searchMode,
@@ -520,7 +526,7 @@ export function useHistoryDataEffects({
           const latestPage =
             sessionDetailRequest.messageSortDirection === "desc"
               ? 0
-              : Math.max(0, Math.ceil(response.totalCount / PAGE_SIZE) - 1);
+              : Math.max(0, Math.ceil(response.totalCount / messagePageSize) - 1);
           if (sessionDetailRequest.sessionPage !== latestPage) {
             setSessionPage(latestPage);
             return;
@@ -542,6 +548,7 @@ export function useHistoryDataEffects({
   }, [
     codetrail,
     logError,
+    messagePageSize,
     refreshContextRef,
     sessionDetailRequest,
     setPendingRevealTarget,
@@ -574,7 +581,7 @@ export function useHistoryDataEffects({
       .invoke("projects:getCombinedDetail", {
         projectId: projectCombinedDetailRequest.selectedProjectId,
         page: projectCombinedDetailRequest.sessionPage,
-        pageSize: PAGE_SIZE,
+        pageSize: messagePageSize,
         categories: effectiveCategories,
         query: effectiveQuery,
         searchMode: projectCombinedDetailRequest.searchMode,
@@ -597,7 +604,7 @@ export function useHistoryDataEffects({
           const latestPage =
             projectCombinedDetailRequest.projectAllSortDirection === "desc"
               ? 0
-              : Math.max(0, Math.ceil(response.totalCount / PAGE_SIZE) - 1);
+              : Math.max(0, Math.ceil(response.totalCount / messagePageSize) - 1);
           if (projectCombinedDetailRequest.sessionPage !== latestPage) {
             setSessionPage(latestPage);
             return;
@@ -619,6 +626,7 @@ export function useHistoryDataEffects({
   }, [
     codetrail,
     logError,
+    messagePageSize,
     projectCombinedDetailRequest,
     refreshContextRef,
     setPendingRevealTarget,

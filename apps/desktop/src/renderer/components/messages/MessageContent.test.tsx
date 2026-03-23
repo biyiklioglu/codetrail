@@ -25,9 +25,26 @@ describe("MessageContent", () => {
       />,
     );
 
-    expect(screen.getByText("Execute Command")).toBeInTheDocument();
+    expect(screen.queryByText("Execute Command")).not.toBeInTheDocument();
     expect(screen.getByText("src/app.ts")).toBeInTheDocument();
     expect(document.body.textContent).toContain("ls -la");
+  });
+
+  it("renders write-like tool_use payloads through the tool edit view", () => {
+    render(
+      <MessageContent
+        text={JSON.stringify({
+          tool_name: "write_file",
+          input: { path: "src/write.ts", content: "export const value = 1;" },
+        })}
+        category="tool_use"
+        query=""
+      />,
+    );
+
+    expect(screen.getByText("src/write.ts")).toBeInTheDocument();
+    expect(screen.getByText("Written Content")).toBeInTheDocument();
+    expect(document.body.textContent).toContain("export const value = 1;");
   });
 
   it("renders tool_edit diff and written content variants", () => {
@@ -45,7 +62,7 @@ describe("MessageContent", () => {
       />,
     );
 
-    expect(screen.getByText("src/file.ts")).toBeInTheDocument();
+    expect(screen.getAllByText("src/file.ts")).toHaveLength(1);
     expect(document.body.textContent).toContain("const a = 2;");
     expect(document.querySelector(".tool-edit-view .tool-edit-path")).toBeNull();
 

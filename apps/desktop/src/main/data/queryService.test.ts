@@ -189,8 +189,17 @@ function seedQueryDb() {
 
 function createBookmarkStoreMock(overrides: Partial<BookmarkStore> = {}): BookmarkStore {
   return {
-    listProjectBookmarks: vi.fn(() => []),
-    countProjectBookmarks: vi.fn(() => 0),
+    listProjectBookmarks: vi.fn((_projectId: string, _options?: unknown) => []),
+    countProjectBookmarks: vi.fn((_projectId: string, _options?: unknown) => 0),
+    countProjectBookmarkCategories: vi.fn(() => ({
+      user: 0,
+      assistant: 0,
+      tool_use: 0,
+      tool_edit: 0,
+      tool_result: 0,
+      thinking: 0,
+      system: 0,
+    })),
     countSessionBookmarks: vi.fn(() => 0),
     getBookmark: vi.fn(() => null),
     upsertBookmark: vi.fn(),
@@ -270,6 +279,8 @@ describe("queryService in-memory", () => {
 
     const bookmarks = service.listProjectBookmarks({
       projectId: "project_1",
+      page: 0,
+      pageSize: 100,
       query: "stable",
       categories: ["assistant"],
     });
@@ -279,6 +290,8 @@ describe("queryService in-memory", () => {
 
     const queryMiss = service.listProjectBookmarks({
       projectId: "project_1",
+      page: 0,
+      pageSize: 100,
       query: "not-present",
       categories: undefined,
     });
@@ -576,6 +589,94 @@ describe("queryService in-memory", () => {
     expect(sessions.sessions[0]?.bookmarkCount).toBe(2);
     expect(bookmarkStore.countProjectBookmarks).toHaveBeenCalledWith("project_1");
     expect(bookmarkStore.countSessionBookmarks).toHaveBeenCalledWith("project_1", "session_1");
+  });
+
+  it("pages bookmarks and clamps out-of-range bookmark pages", () => {
+    const db = seedQueryDb();
+    const bookmarkStore = createBookmarkStoreMock({
+      countProjectBookmarks: vi.fn((projectId: string, options?: { categories?: string[] }) => {
+        if (projectId !== "project_1") {
+          return 0;
+        }
+        return options?.categories?.includes("assistant") ? 1 : 2;
+      }),
+      countProjectBookmarkCategories: vi.fn(() => ({
+        user: 1,
+        assistant: 1,
+        tool_use: 0,
+        tool_edit: 0,
+        tool_result: 0,
+        thinking: 0,
+        system: 0,
+      })),
+      listProjectBookmarks: vi.fn((projectId: string, options?: { offset?: number }) => {
+        if (projectId !== "project_1") {
+          return [];
+        }
+        const rows = [
+          {
+            project_id: "project_1",
+            session_id: "session_1",
+            message_id: "message_2",
+            message_source_id: "source_2",
+            provider: "claude" as const,
+            session_title: "Session one",
+            message_category: "assistant" as const,
+            message_content: "Query behavior looks stable",
+            message_created_at: "2026-03-01T10:00:05.000Z",
+            bookmarked_at: "2026-03-01T10:01:00.000Z",
+            is_orphaned: 0,
+            orphaned_at: null,
+            snapshot_version: 1,
+            snapshot_json: "{}",
+          },
+          {
+            project_id: "project_1",
+            session_id: "session_1",
+            message_id: "message_1",
+            message_source_id: "source_1",
+            provider: "claude" as const,
+            session_title: "Session one",
+            message_category: "user" as const,
+            message_content: "Please inspect query behavior",
+            message_created_at: "2026-03-01T10:00:00.000Z",
+            bookmarked_at: "2026-03-01T10:00:30.000Z",
+            is_orphaned: 0,
+            orphaned_at: null,
+            snapshot_version: 1,
+            snapshot_json: "{}",
+          },
+        ];
+        return rows.slice(options?.offset ?? 0, (options?.offset ?? 0) + 1);
+      }),
+    });
+    const service = createQueryServiceFromDb(db, {
+      bookmarkStore,
+      ownsBookmarkStore: false,
+    });
+
+    const secondPage = service.listProjectBookmarks({
+      projectId: "project_1",
+      page: 1,
+      pageSize: 1,
+      query: "",
+      categories: undefined,
+    });
+    expect(secondPage.page).toBe(1);
+    expect(secondPage.totalCount).toBe(2);
+    expect(secondPage.filteredCount).toBe(2);
+    expect(secondPage.results[0]?.message.id).toBe("message_1");
+
+    const clampedPage = service.listProjectBookmarks({
+      projectId: "project_1",
+      page: 5,
+      pageSize: 1,
+      query: "",
+      categories: ["assistant"],
+    });
+    expect(clampedPage.page).toBe(0);
+    expect(clampedPage.filteredCount).toBe(1);
+    expect(clampedPage.categoryCounts.assistant).toBe(1);
   });
 
   it("supports injected openDatabase dependency in path-based helpers", () => {

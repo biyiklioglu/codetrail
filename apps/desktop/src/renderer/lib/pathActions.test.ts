@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
+import type { ExternalToolConfig } from "../../shared/uiPreferences";
 import { createMockCodetrailClient } from "../test/mockCodetrailClient";
-import { openInFileManager, openPath } from "./pathActions";
+import {
+  browseExternalToolCommand,
+  openContentInEditor,
+  openDiffInEditor,
+  openFileInEditor,
+  openInFileManager,
+  openPath,
+} from "./pathActions";
 
 describe("pathActions", () => {
   it("returns a clear error when no selected project exists", async () => {
@@ -48,5 +56,129 @@ describe("pathActions", () => {
 
     expect(result).toEqual({ ok: false, error: "Path is empty." });
     expect(client.invoke).not.toHaveBeenCalled();
+  });
+
+  it("opens files in the configured external editor", async () => {
+    const client = createMockCodetrailClient();
+    client.invoke.mockResolvedValue({ ok: true, error: null });
+
+    const result = await openFileInEditor("/workspace/file.ts", { line: 9, column: 2 }, client);
+
+    expect(result).toEqual({ ok: true, error: null });
+    expect(client.invoke).toHaveBeenCalledWith("editor:open", {
+      kind: "file",
+      filePath: "/workspace/file.ts",
+      line: 9,
+      column: 2,
+    });
+  });
+
+  it("opens materialized content in the configured external editor", async () => {
+    const client = createMockCodetrailClient();
+    client.invoke.mockResolvedValue({ ok: true, error: null });
+
+    const result = await openContentInEditor(
+      {
+        title: "Command",
+        language: "shell",
+        content: "bun run typecheck",
+        toolRole: "editor",
+      },
+      client,
+    );
+
+    expect(result).toEqual({ ok: true, error: null });
+    expect(client.invoke).toHaveBeenCalledWith("editor:open", {
+      kind: "content",
+      title: "Command",
+      content: "bun run typecheck",
+      language: "shell",
+      toolRole: "editor",
+    });
+  });
+
+  it("opens diffs in the configured external editor", async () => {
+    const client = createMockCodetrailClient();
+    client.invoke.mockResolvedValue({ ok: true, error: null });
+
+    const result = await openDiffInEditor(
+      {
+        filePath: "/workspace/file.ts",
+        leftContent: "old",
+        rightContent: "new",
+      },
+      client,
+    );
+
+    expect(result).toEqual({ ok: true, error: null });
+    expect(client.invoke).toHaveBeenCalledWith("editor:open", {
+      kind: "diff",
+      toolRole: "diff",
+      title: "Diff",
+      filePath: "/workspace/file.ts",
+      line: undefined,
+      column: undefined,
+      leftContent: "old",
+      rightContent: "new",
+    });
+  });
+
+  it("passes live external tool overrides when opening content", async () => {
+    const client = createMockCodetrailClient();
+    client.invoke.mockResolvedValue({ ok: true, error: null });
+
+    const externalTools: ExternalToolConfig[] = [
+      {
+        id: "custom:textedit",
+        kind: "custom",
+        label: "Text Edit",
+        appId: null,
+        command: "/System/Applications/TextEdit.app",
+        editorArgs: ["{file}"],
+        diffArgs: ["{left}", "{right}"],
+        enabledForEditor: true,
+        enabledForDiff: false,
+      },
+    ];
+
+    await openContentInEditor(
+      {
+        title: "Command",
+        language: "shell",
+        content: "bun run typecheck",
+        preferredExternalEditor: "custom:textedit",
+        terminalAppCommand: "/Applications/kitty.app",
+        externalTools,
+      },
+      client,
+    );
+
+    expect(client.invoke).toHaveBeenCalledWith("editor:open", {
+      kind: "content",
+      title: "Command",
+      content: "bun run typecheck",
+      language: "shell",
+      preferredExternalEditor: "custom:textedit",
+      terminalAppCommand: "/Applications/kitty.app",
+      externalTools,
+    });
+  });
+
+  it("opens the external tool command picker through the codetrail client", async () => {
+    const client = createMockCodetrailClient();
+    client.invoke.mockResolvedValue({
+      canceled: false,
+      path: "/System/Applications/TextEdit.app",
+      error: null,
+    });
+
+    const result = await browseExternalToolCommand(client);
+
+    expect(result).toEqual({
+      canceled: false,
+      path: "/System/Applications/TextEdit.app",
+      error: null,
+    });
+    expect(client.invoke).toHaveBeenCalledWith("dialog:pickExternalToolCommand", {});
   });
 });

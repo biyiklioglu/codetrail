@@ -9,12 +9,17 @@ import type {
 } from "@codetrail/core/browser";
 
 import type {
+  ExternalEditorId,
+  ExternalToolConfig,
+  MessagePageSize,
   MonoFontFamily,
   MonoFontSize,
   RegularFontFamily,
   RegularFontSize,
+  ShikiThemeId,
   ThemeMode,
 } from "../../shared/uiPreferences";
+import { isShikiThemeId } from "../../shared/uiPreferences";
 import type { NonOffRefreshStrategy } from "../app/autoRefresh";
 import { EMPTY_SYSTEM_MESSAGE_REGEX_RULES } from "../app/constants";
 import { createHistorySelection } from "../app/historySelection";
@@ -27,6 +32,7 @@ import type {
 } from "../app/types";
 import { shouldIgnoreAsyncEffectError } from "../lib/asyncEffectUtils";
 import { useCodetrailClient } from "../lib/codetrailClient";
+import { PANE_STATE_UPDATED_EVENT, type PaneStateUpdatedDetail } from "../lib/paneStateEvents";
 import { clamp } from "../lib/viewUtils";
 
 type RestoredScrollTarget = {
@@ -64,11 +70,22 @@ export function usePaneStateSync(args: {
   setSearchProviders: Dispatch<SetStateAction<Provider[]>>;
   setPreferredAutoRefreshStrategy: Dispatch<SetStateAction<NonOffRefreshStrategy>>;
   setTheme: Dispatch<SetStateAction<ThemeMode>>;
+  setDarkShikiTheme: Dispatch<SetStateAction<ShikiThemeId>>;
+  setLightShikiTheme: Dispatch<SetStateAction<ShikiThemeId>>;
   setMonoFontFamily: Dispatch<SetStateAction<MonoFontFamily>>;
   setRegularFontFamily: Dispatch<SetStateAction<RegularFontFamily>>;
   setMonoFontSize: Dispatch<SetStateAction<MonoFontSize>>;
   setRegularFontSize: Dispatch<SetStateAction<RegularFontSize>>;
+  setMessagePageSize: Dispatch<SetStateAction<MessagePageSize>>;
   setUseMonospaceForAllMessages: Dispatch<SetStateAction<boolean>>;
+  setAutoHideMessageActions: Dispatch<SetStateAction<boolean>>;
+  setAutoHideViewerHeaderActions: Dispatch<SetStateAction<boolean>>;
+  setDefaultViewerWrapMode: Dispatch<SetStateAction<"nowrap" | "wrap">>;
+  setDefaultDiffViewMode: Dispatch<SetStateAction<"unified" | "split">>;
+  setPreferredExternalEditor: Dispatch<SetStateAction<ExternalEditorId>>;
+  setPreferredExternalDiffTool: Dispatch<SetStateAction<ExternalEditorId>>;
+  setTerminalAppCommand: Dispatch<SetStateAction<string>>;
+  setExternalTools: Dispatch<SetStateAction<ExternalToolConfig[]>>;
   setHistorySelection?: Dispatch<SetStateAction<HistorySelection>>;
   setSelectedProjectId: Dispatch<SetStateAction<string>>;
   setSelectedSessionId: Dispatch<SetStateAction<string>>;
@@ -104,11 +121,22 @@ export function usePaneStateSync(args: {
     setSearchProviders,
     setPreferredAutoRefreshStrategy,
     setTheme,
+    setDarkShikiTheme,
+    setLightShikiTheme,
     setMonoFontFamily,
     setRegularFontFamily,
     setMonoFontSize,
     setRegularFontSize,
+    setMessagePageSize,
     setUseMonospaceForAllMessages,
+    setAutoHideMessageActions,
+    setAutoHideViewerHeaderActions,
+    setDefaultViewerWrapMode,
+    setDefaultDiffViewMode,
+    setPreferredExternalEditor,
+    setPreferredExternalDiffTool,
+    setTerminalAppCommand,
+    setExternalTools,
     setHistorySelection,
     setSelectedProjectId,
     setSelectedSessionId,
@@ -191,11 +219,30 @@ export function usePaneStateSync(args: {
           setPreferredAutoRefreshStrategy,
         );
         hydrateIfPresent(paneResponse.theme, setTheme);
+        hydrateIfPresent(paneResponse.darkShikiTheme, (value) => {
+          if (isShikiThemeId(value)) {
+            setDarkShikiTheme(value);
+          }
+        });
+        hydrateIfPresent(paneResponse.lightShikiTheme, (value) => {
+          if (isShikiThemeId(value)) {
+            setLightShikiTheme(value);
+          }
+        });
         hydrateIfPresent(paneResponse.monoFontFamily, setMonoFontFamily);
         hydrateIfPresent(paneResponse.regularFontFamily, setRegularFontFamily);
         hydrateIfPresent(paneResponse.monoFontSize, setMonoFontSize);
         hydrateIfPresent(paneResponse.regularFontSize, setRegularFontSize);
+        hydrateIfPresent(paneResponse.messagePageSize, setMessagePageSize);
         hydrateIfPresent(paneResponse.useMonospaceForAllMessages, setUseMonospaceForAllMessages);
+        hydrateIfPresent(paneResponse.autoHideMessageActions, setAutoHideMessageActions);
+        hydrateIfPresent(paneResponse.autoHideViewerHeaderActions, setAutoHideViewerHeaderActions);
+        hydrateIfPresent(paneResponse.defaultViewerWrapMode, setDefaultViewerWrapMode);
+        hydrateIfPresent(paneResponse.defaultDiffViewMode, setDefaultDiffViewMode);
+        hydrateIfPresent(paneResponse.preferredExternalEditor, setPreferredExternalEditor);
+        hydrateIfPresent(paneResponse.preferredExternalDiffTool, setPreferredExternalDiffTool);
+        hydrateIfPresent(paneResponse.terminalAppCommand, setTerminalAppCommand);
+        hydrateIfPresent(paneResponse.externalTools, setExternalTools);
         hydrateIfPresent(paneResponse.projectViewMode, setProjectViewMode);
         hydrateIfPresent(paneResponse.projectSortField, setProjectSortField);
         hydrateIfPresent(paneResponse.projectSortDirection, setProjectSortDirection);
@@ -291,11 +338,22 @@ export function usePaneStateSync(args: {
     setSessionScrollTop,
     setSystemMessageRegexRules,
     setTheme,
+    setDarkShikiTheme,
+    setLightShikiTheme,
     setMonoFontFamily,
     setRegularFontFamily,
     setMonoFontSize,
     setRegularFontSize,
+    setMessagePageSize,
     setUseMonospaceForAllMessages,
+    setAutoHideMessageActions,
+    setAutoHideViewerHeaderActions,
+    setDefaultViewerWrapMode,
+    setDefaultDiffViewMode,
+    setPreferredExternalEditor,
+    setPreferredExternalDiffTool,
+    setTerminalAppCommand,
+    setExternalTools,
     setHistorySelection,
   ]);
 
@@ -313,11 +371,22 @@ export function usePaneStateSync(args: {
       searchProviders: paneState.searchProviders,
       preferredAutoRefreshStrategy: paneState.preferredAutoRefreshStrategy,
       theme: paneState.theme,
+      darkShikiTheme: paneState.darkShikiTheme,
+      lightShikiTheme: paneState.lightShikiTheme,
       monoFontFamily: paneState.monoFontFamily,
       regularFontFamily: paneState.regularFontFamily,
       monoFontSize: paneState.monoFontSize,
       regularFontSize: paneState.regularFontSize,
+      messagePageSize: paneState.messagePageSize,
       useMonospaceForAllMessages: paneState.useMonospaceForAllMessages,
+      autoHideMessageActions: paneState.autoHideMessageActions,
+      autoHideViewerHeaderActions: paneState.autoHideViewerHeaderActions,
+      defaultViewerWrapMode: paneState.defaultViewerWrapMode,
+      defaultDiffViewMode: paneState.defaultDiffViewMode,
+      preferredExternalEditor: paneState.preferredExternalEditor,
+      preferredExternalDiffTool: paneState.preferredExternalDiffTool,
+      terminalAppCommand: paneState.terminalAppCommand,
+      externalTools: paneState.externalTools,
       selectedProjectId: paneState.selectedProjectId,
       selectedSessionId: paneState.selectedSessionId,
       historyMode: paneState.historyMode,
@@ -370,6 +439,28 @@ export function usePaneStateSync(args: {
       window.clearTimeout(timer);
     };
   }, [codetrail, indexingConfigToPersist, logError, paneStateHydrated]);
+
+  useEffect(() => {
+    if (!paneStateHydrated || typeof window === "undefined") {
+      return;
+    }
+
+    const detail: PaneStateUpdatedDetail = {
+      preferredExternalEditor: paneState.preferredExternalEditor,
+      preferredExternalDiffTool: paneState.preferredExternalDiffTool,
+      terminalAppCommand: paneState.terminalAppCommand,
+      externalTools: paneState.externalTools,
+    };
+    window.dispatchEvent(
+      new CustomEvent<PaneStateUpdatedDetail>(PANE_STATE_UPDATED_EVENT, { detail }),
+    );
+  }, [
+    paneStateHydrated,
+    paneState.preferredExternalEditor,
+    paneState.preferredExternalDiffTool,
+    paneState.terminalAppCommand,
+    paneState.externalTools,
+  ]);
 
   return { paneStateHydrated };
 }

@@ -11,6 +11,7 @@ describe("TopBar", () => {
     const user = userEvent.setup();
     const onToggleSearchView = vi.fn();
     const onThemeChange = vi.fn();
+    const onShikiThemeChange = vi.fn();
     const onIncrementalRefresh = vi.fn();
     const onToggleFocus = vi.fn();
     const onToggleHelp = vi.fn();
@@ -20,11 +21,13 @@ describe("TopBar", () => {
       <TopBar
         mainView="history"
         theme="light"
+        shikiTheme="github-light-default"
         indexing={false}
         focusMode={false}
         focusDisabled={false}
         onToggleSearchView={onToggleSearchView}
         onThemeChange={onThemeChange}
+        onShikiThemeChange={onShikiThemeChange}
         onIncrementalRefresh={onIncrementalRefresh}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
@@ -58,6 +61,10 @@ describe("TopBar", () => {
     await user.click(screen.getByRole("button", { name: "Open help" }));
     await user.click(screen.getByRole("button", { name: "Choose theme" }));
     await user.click(screen.getByRole("button", { name: "Tomorrow Night" }));
+    await user.click(screen.getByRole("button", { name: "Choose text viewer theme" }));
+    expect(screen.getByRole("button", { name: "Light Plus" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Night Owl" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Light Plus" }));
     await user.click(screen.getByRole("button", { name: "Open settings" }));
 
     expect(onToggleSearchView).toHaveBeenCalledTimes(1);
@@ -65,6 +72,7 @@ describe("TopBar", () => {
     expect(onToggleFocus).toHaveBeenCalledTimes(1);
     expect(onToggleHelp).toHaveBeenCalledTimes(1);
     expect(onThemeChange).toHaveBeenCalledWith("tomorrow-night");
+    expect(onShikiThemeChange).toHaveBeenCalledWith("light-plus");
     expect(onToggleSettings).toHaveBeenCalledTimes(1);
   });
 
@@ -73,11 +81,13 @@ describe("TopBar", () => {
       <TopBar
         mainView="search"
         theme="dark"
+        shikiTheme="github-dark-default"
         indexing={true}
         focusMode={true}
         focusDisabled={true}
         onToggleSearchView={vi.fn()}
         onThemeChange={vi.fn()}
+        onShikiThemeChange={vi.fn()}
         onIncrementalRefresh={vi.fn()}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
@@ -101,6 +111,7 @@ describe("TopBar", () => {
     expect(screen.getByRole("button", { name: "Indexing in progress" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Exit focus mode" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Choose theme" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose text viewer theme" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open settings" })).toHaveAttribute(
       "title",
       "Open Settings (Cmd/Ctrl+,).",
@@ -112,11 +123,13 @@ describe("TopBar", () => {
       <TopBar
         mainView="search"
         theme="dark"
+        shikiTheme="github-dark-default"
         indexing={false}
         focusMode={false}
         focusDisabled={false}
         onToggleSearchView={vi.fn()}
         onThemeChange={vi.fn()}
+        onShikiThemeChange={vi.fn()}
         onIncrementalRefresh={vi.fn()}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
@@ -136,11 +149,13 @@ describe("TopBar", () => {
       <TopBar
         mainView="settings"
         theme="dark"
+        shikiTheme="github-dark-default"
         indexing={false}
         focusMode={false}
         focusDisabled={false}
         onToggleSearchView={vi.fn()}
         onThemeChange={vi.fn()}
+        onShikiThemeChange={vi.fn()}
         onIncrementalRefresh={vi.fn()}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
@@ -159,11 +174,13 @@ describe("TopBar", () => {
       <TopBar
         mainView="help"
         theme="dark"
+        shikiTheme="github-dark-default"
         indexing={false}
         focusMode={false}
         focusDisabled={false}
         onToggleSearchView={vi.fn()}
         onThemeChange={vi.fn()}
+        onShikiThemeChange={vi.fn()}
         onIncrementalRefresh={vi.fn()}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
@@ -186,11 +203,13 @@ describe("TopBar", () => {
       <TopBar
         mainView="history"
         theme="light"
+        shikiTheme="github-light-default"
         indexing={false}
         focusMode={false}
         focusDisabled={false}
         onToggleSearchView={vi.fn()}
         onThemeChange={vi.fn()}
+        onShikiThemeChange={vi.fn()}
         onIncrementalRefresh={vi.fn()}
         refreshStrategy="watch-5s"
         onRefreshStrategyChange={vi.fn()}

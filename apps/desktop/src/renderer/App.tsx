@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type MessageCategory,
@@ -46,6 +46,7 @@ import { useReconcileProviderSelection } from "./hooks/useReconcileProviderSelec
 import { useCodetrailClient } from "./lib/codetrailClient";
 import { findSessionSummaryById } from "./lib/historySessionLookup";
 import { toErrorMessage, toggleValue } from "./lib/viewUtils";
+import { ViewerExternalAppsProvider } from "./lib/viewerExternalAppsContext";
 
 // Module-level override for tests — keeps the component API clean
 let _testStrategyIntervalOverrides: Partial<Record<ScanRefreshStrategy, number>> | null = null;
@@ -659,59 +660,68 @@ export function App({
         ? "Automatic scan refresh is currently running."
         : "Automatic scan refresh is enabled and waiting for the next interval."
       : null;
+  const viewerExternalAppsSnapshot = useMemo(
+    () => ({
+      editors: appearance.availableEditors,
+      diffTools: appearance.availableDiffTools,
+      preferences: {
+        preferredExternalEditor: appearance.preferredExternalEditor,
+        preferredExternalDiffTool: appearance.preferredExternalDiffTool,
+        terminalAppCommand: appearance.terminalAppCommand,
+        orderedToolIds: appearance.externalTools.map((tool) => tool.id),
+        externalTools: appearance.externalTools,
+      },
+    }),
+    [
+      appearance.availableDiffTools,
+      appearance.availableEditors,
+      appearance.externalTools,
+      appearance.preferredExternalDiffTool,
+      appearance.preferredExternalEditor,
+      appearance.terminalAppCommand,
+    ],
+  );
 
   return (
-    <main className="app-shell">
-      <TopBar
-        mainView={mainView}
-        theme={appearance.theme}
-        indexing={indexing}
-        focusMode={focusMode}
-        focusDisabled={mainView !== "history"}
-        onToggleSearchView={() =>
-          setMainView((value) => (value === "search" ? "history" : "search"))
-        }
-        onThemeChange={appearance.setTheme}
-        onIncrementalRefresh={() => void handleIncrementalRefresh()}
-        refreshStrategy={refreshStrategy}
-        onRefreshStrategyChange={updateRefreshStrategy}
-        autoRefreshStatusLabel={autoRefreshStatusLabel}
-        autoRefreshStatusTone={autoRefreshStatusTone}
-        autoRefreshStatusTooltip={autoRefreshStatusTooltip}
-        onToggleFocus={toggleFocusMode}
-        onToggleHelp={() => setMainView((value) => (value === "help" ? "history" : "help"))}
-        onToggleSettings={() =>
-          setMainView((value) => (value === "settings" ? "history" : "settings"))
-        }
-      />
+    <ViewerExternalAppsProvider value={viewerExternalAppsSnapshot}>
+      <main className="app-shell">
+        <TopBar
+          mainView={mainView}
+          theme={appearance.theme}
+          shikiTheme={appearance.shikiTheme}
+          indexing={indexing}
+          focusMode={focusMode}
+          focusDisabled={mainView !== "history"}
+          onToggleSearchView={() =>
+            setMainView((value) => (value === "search" ? "history" : "search"))
+          }
+          onThemeChange={appearance.setTheme}
+          onShikiThemeChange={appearance.setShikiTheme}
+          onIncrementalRefresh={() => void handleIncrementalRefresh()}
+          refreshStrategy={refreshStrategy}
+          onRefreshStrategyChange={updateRefreshStrategy}
+          autoRefreshStatusLabel={autoRefreshStatusLabel}
+          autoRefreshStatusTone={autoRefreshStatusTone}
+          autoRefreshStatusTooltip={autoRefreshStatusTooltip}
+          onToggleFocus={toggleFocusMode}
+          onToggleHelp={() => setMainView((value) => (value === "help" ? "history" : "help"))}
+          onToggleSettings={() =>
+            setMainView((value) => (value === "settings" ? "history" : "settings"))
+          }
+        />
 
-      <div
-        className={`workspace ${isHistoryLayout ? "history-layout" : "single-layout"} ${
-          mainView === "search" ? "search-layout" : ""
-        }${history.projectPaneCollapsed ? " projects-collapsed" : ""}${
-          history.sessionPaneCollapsed ? " sessions-collapsed" : ""
-        }${isHistoryLayout && !history.paneStateHydrated ? " pane-layout-hydrating" : ""}`}
-        style={history.workspaceStyle}
-        aria-busy={isHistoryLayout && !history.paneStateHydrated}
-      >
-        {mainView === "history" ? (
-          isHistoryLayout ? (
-            <HistoryLayout
-              history={history}
-              advancedSearchEnabled={advancedSearchEnabled}
-              setAdvancedSearchEnabled={setAdvancedSearchEnabled}
-              zoomPercent={appearance.zoomPercent}
-              canZoomIn={appearance.canZoomIn}
-              canZoomOut={appearance.canZoomOut}
-              applyZoomAction={appearance.applyZoomAction}
-              setZoomPercent={appearance.setZoomPercent}
-              logError={logError}
-              onDeleteProject={handleOpenProjectDelete}
-              onDeleteSession={handleOpenSessionDelete}
-            />
-          ) : (
-            <section className="pane content-pane history-focus-pane">
-              <HistoryDetailPane
+        <div
+          className={`workspace ${isHistoryLayout ? "history-layout" : "single-layout"} ${
+            mainView === "search" ? "search-layout" : ""
+          }${history.projectPaneCollapsed ? " projects-collapsed" : ""}${
+            history.sessionPaneCollapsed ? " sessions-collapsed" : ""
+          }${isHistoryLayout && !history.paneStateHydrated ? " pane-layout-hydrating" : ""}`}
+          style={history.workspaceStyle}
+          aria-busy={isHistoryLayout && !history.paneStateHydrated}
+        >
+          {mainView === "history" ? (
+            isHistoryLayout ? (
+              <HistoryLayout
                 history={history}
                 advancedSearchEnabled={advancedSearchEnabled}
                 setAdvancedSearchEnabled={setAdvancedSearchEnabled}
@@ -720,143 +730,184 @@ export function App({
                 canZoomOut={appearance.canZoomOut}
                 applyZoomAction={appearance.applyZoomAction}
                 setZoomPercent={appearance.setZoomPercent}
+                logError={logError}
+                onDeleteProject={handleOpenProjectDelete}
+                onDeleteSession={handleOpenSessionDelete}
+              />
+            ) : (
+              <section className="pane content-pane history-focus-pane">
+                <HistoryDetailPane
+                  history={history}
+                  advancedSearchEnabled={advancedSearchEnabled}
+                  setAdvancedSearchEnabled={setAdvancedSearchEnabled}
+                  zoomPercent={appearance.zoomPercent}
+                  canZoomIn={appearance.canZoomIn}
+                  canZoomOut={appearance.canZoomOut}
+                  applyZoomAction={appearance.applyZoomAction}
+                  setZoomPercent={appearance.setZoomPercent}
+                />
+              </section>
+            )
+          ) : mainView === "search" ? (
+            <SearchView
+              search={search}
+              enabledProviders={enabledProviders}
+              projects={history.sortedProjects}
+              advancedSearchEnabled={advancedSearchEnabled}
+              setAdvancedSearchEnabled={setAdvancedSearchEnabled}
+              onSelectResult={(result) => {
+                history.navigateFromSearchResult({
+                  projectId: result.projectId,
+                  sessionId: result.sessionId,
+                  messageId: result.messageId,
+                  sourceId: result.messageSourceId,
+                  historyCategories: [...history.historyCategories],
+                });
+                setMainView("history");
+              }}
+            />
+          ) : mainView === "help" ? (
+            <section className="pane content-pane">
+              <ShortcutsDialog
+                shortcutItems={[...SHORTCUT_ITEMS]}
+                commonSyntaxItems={[...COMMON_SYNTAX_ITEMS]}
+                advancedSyntaxItems={[...ADVANCED_SYNTAX_ITEMS]}
               />
             </section>
-          )
-        ) : mainView === "search" ? (
-          <SearchView
-            search={search}
-            enabledProviders={enabledProviders}
-            projects={history.sortedProjects}
-            advancedSearchEnabled={advancedSearchEnabled}
-            setAdvancedSearchEnabled={setAdvancedSearchEnabled}
-            onSelectResult={(result) => {
-              history.navigateFromSearchResult({
-                projectId: result.projectId,
-                sessionId: result.sessionId,
-                messageId: result.messageId,
-                sourceId: result.messageSourceId,
-                historyCategories: [...history.historyCategories],
-              });
-              setMainView("history");
-            }}
-          />
-        ) : mainView === "help" ? (
-          <section className="pane content-pane">
-            <ShortcutsDialog
-              shortcutItems={[...SHORTCUT_ITEMS]}
-              commonSyntaxItems={[...COMMON_SYNTAX_ITEMS]}
-              advancedSyntaxItems={[...ADVANCED_SYNTAX_ITEMS]}
-            />
-          </section>
-        ) : (
-          <section className="pane content-pane">
-            <SettingsView
-              info={appearance.settingsInfo}
-              loading={appearance.settingsLoading}
-              error={appearance.settingsError}
-              diagnostics={watchStats}
-              diagnosticsLoading={watchStatsLoading}
-              diagnosticsError={watchStatsError}
-              appearance={{
-                theme: appearance.theme,
-                zoomPercent: appearance.zoomPercent,
-                monoFontFamily: appearance.monoFontFamily,
-                regularFontFamily: appearance.regularFontFamily,
-                monoFontSize: appearance.monoFontSize,
-                regularFontSize: appearance.regularFontSize,
-                useMonospaceForAllMessages: appearance.useMonospaceForAllMessages,
-                onThemeChange: appearance.setTheme,
-                onZoomPercentChange: appearance.setZoomPercent,
-                onMonoFontFamilyChange: appearance.setMonoFontFamily,
-                onRegularFontFamilyChange: appearance.setRegularFontFamily,
-                onMonoFontSizeChange: appearance.setMonoFontSize,
-                onRegularFontSizeChange: appearance.setRegularFontSize,
-                onUseMonospaceForAllMessagesChange: appearance.setUseMonospaceForAllMessages,
-              }}
-              indexing={{
-                enabledProviders,
-                removeMissingSessionsDuringIncrementalIndexing:
-                  history.removeMissingSessionsDuringIncrementalIndexing,
-                canForceReindex: !indexing && refreshStrategy === "off",
-                onToggleProviderEnabled: handleProviderToggle,
-                onForceReindex: () => setShowReindexConfirm(true),
-                onRemoveMissingSessionsDuringIncrementalIndexingChange:
-                  handleMissingSessionCleanupToggle,
-              }}
-              messageRules={{
-                expandedByDefaultCategories: history.expandedByDefaultCategories,
-                onToggleExpandedByDefault: handleToggleExpandedByDefault,
-                systemMessageRegexRules: history.systemMessageRegexRules,
-                onAddSystemMessageRegexRule: handleAddSystemMessageRegexRule,
-                onUpdateSystemMessageRegexRule: handleUpdateSystemMessageRegexRule,
-                onRemoveSystemMessageRegexRule: handleRemoveSystemMessageRegexRule,
-              }}
-              onActionError={logError}
-            />
-          </section>
-        )}
-      </div>
-      <ConfirmDialog
-        open={showReindexConfirm}
-        title="Force Reindex"
-        message="This will re-read all enabled provider session files from scratch and rebuild indexed history from disk. If some old sessions only exist in the database because their raw transcript files were already cleaned up, they can disappear after this reindex. Continue?"
-        confirmLabel="Reindex"
-        cancelLabel="Cancel"
-        onConfirm={() => {
-          setShowReindexConfirm(false);
-          void handleForceRefresh();
-        }}
-        onCancel={() => setShowReindexConfirm(false)}
-      />
-      <ConfirmDialog
-        open={pendingProviderDisable !== null}
-        title={`Disable ${pendingProviderDisableLabel}?`}
-        message={`Disabling ${pendingProviderDisableLabel} will delete all indexed sessions and all bookmarks for that provider from Codetrail. Raw transcript files on disk will not be touched. Continue?`}
-        confirmLabel="Disable Provider"
-        cancelLabel="Cancel"
-        onConfirm={() => {
-          if (!pendingProviderDisable) {
-            return;
+          ) : (
+            <section className="pane content-pane">
+              <SettingsView
+                info={appearance.settingsInfo}
+                loading={appearance.settingsLoading}
+                error={appearance.settingsError}
+                diagnostics={watchStats}
+                diagnosticsLoading={watchStatsLoading}
+                diagnosticsError={watchStatsError}
+                appearance={{
+                  theme: appearance.theme,
+                  shikiTheme: appearance.shikiTheme,
+                  zoomPercent: appearance.zoomPercent,
+                  messagePageSize: appearance.messagePageSize,
+                  monoFontFamily: appearance.monoFontFamily,
+                  regularFontFamily: appearance.regularFontFamily,
+                  monoFontSize: appearance.monoFontSize,
+                  regularFontSize: appearance.regularFontSize,
+                  useMonospaceForAllMessages: appearance.useMonospaceForAllMessages,
+                  autoHideMessageActions: appearance.autoHideMessageActions,
+                  autoHideViewerHeaderActions: appearance.autoHideViewerHeaderActions,
+                  defaultViewerWrapMode: appearance.defaultViewerWrapMode,
+                  defaultDiffViewMode: appearance.defaultDiffViewMode,
+                  preferredExternalEditor: appearance.preferredExternalEditor,
+                  preferredExternalDiffTool: appearance.preferredExternalDiffTool,
+                  terminalAppCommand: appearance.terminalAppCommand,
+                  externalTools: appearance.externalTools,
+                  availableEditors: appearance.availableEditors,
+                  availableDiffTools: appearance.availableDiffTools,
+                  onThemeChange: appearance.setTheme,
+                  onShikiThemeChange: appearance.setShikiTheme,
+                  onZoomPercentChange: appearance.setZoomPercent,
+                  onMessagePageSizeChange: appearance.setMessagePageSize,
+                  onMonoFontFamilyChange: appearance.setMonoFontFamily,
+                  onRegularFontFamilyChange: appearance.setRegularFontFamily,
+                  onMonoFontSizeChange: appearance.setMonoFontSize,
+                  onRegularFontSizeChange: appearance.setRegularFontSize,
+                  onUseMonospaceForAllMessagesChange: appearance.setUseMonospaceForAllMessages,
+                  onAutoHideMessageActionsChange: appearance.setAutoHideMessageActions,
+                  onAutoHideViewerHeaderActionsChange: appearance.setAutoHideViewerHeaderActions,
+                  onDefaultViewerWrapModeChange: appearance.setDefaultViewerWrapMode,
+                  onDefaultDiffViewModeChange: appearance.setDefaultDiffViewMode,
+                  onPreferredExternalEditorChange: appearance.setPreferredExternalEditor,
+                  onPreferredExternalDiffToolChange: appearance.setPreferredExternalDiffTool,
+                  onTerminalAppCommandChange: appearance.setTerminalAppCommand,
+                  onExternalToolsChange: appearance.setExternalTools,
+                  onRescanExternalTools: appearance.loadAvailableExternalTools,
+                }}
+                indexing={{
+                  enabledProviders,
+                  removeMissingSessionsDuringIncrementalIndexing:
+                    history.removeMissingSessionsDuringIncrementalIndexing,
+                  canForceReindex: !indexing && refreshStrategy === "off",
+                  onToggleProviderEnabled: handleProviderToggle,
+                  onForceReindex: () => setShowReindexConfirm(true),
+                  onRemoveMissingSessionsDuringIncrementalIndexingChange:
+                    handleMissingSessionCleanupToggle,
+                }}
+                messageRules={{
+                  expandedByDefaultCategories: history.expandedByDefaultCategories,
+                  onToggleExpandedByDefault: handleToggleExpandedByDefault,
+                  systemMessageRegexRules: history.systemMessageRegexRules,
+                  onAddSystemMessageRegexRule: handleAddSystemMessageRegexRule,
+                  onUpdateSystemMessageRegexRule: handleUpdateSystemMessageRegexRule,
+                  onRemoveSystemMessageRegexRule: handleRemoveSystemMessageRegexRule,
+                }}
+                onActionError={logError}
+              />
+            </section>
+          )}
+        </div>
+        <ConfirmDialog
+          open={showReindexConfirm}
+          title="Force Reindex"
+          message="This will re-read all enabled provider session files from scratch and rebuild indexed history from disk. If some old sessions only exist in the database because their raw transcript files were already cleaned up, they can disappear after this reindex. Continue?"
+          confirmLabel="Reindex"
+          cancelLabel="Cancel"
+          onConfirm={() => {
+            setShowReindexConfirm(false);
+            void handleForceRefresh();
+          }}
+          onCancel={() => setShowReindexConfirm(false)}
+        />
+        <ConfirmDialog
+          open={pendingProviderDisable !== null}
+          title={`Disable ${pendingProviderDisableLabel}?`}
+          message={`Disabling ${pendingProviderDisableLabel} will delete all indexed sessions and all bookmarks for that provider from Codetrail. Raw transcript files on disk will not be touched. Continue?`}
+          confirmLabel="Disable Provider"
+          cancelLabel="Cancel"
+          onConfirm={() => {
+            if (!pendingProviderDisable) {
+              return;
+            }
+            setEnabledProviders((current) =>
+              current.filter((provider) => provider !== pendingProviderDisable),
+            );
+            setPendingProviderDisable(null);
+          }}
+          onCancel={() => setPendingProviderDisable(null)}
+        />
+        <ConfirmDialog
+          open={pendingMissingSessionCleanupEnable}
+          title="Enable Missing Session Cleanup?"
+          message="When this is enabled, incremental refreshes will delete indexed sessions whose raw transcript files can no longer be found on disk. This can also remove related bookmarks if their sessions disappear. Continue?"
+          confirmLabel="Enable Cleanup"
+          cancelLabel="Cancel"
+          onConfirm={() => {
+            history.setRemoveMissingSessionsDuringIncrementalIndexing(true);
+            setPendingMissingSessionCleanupEnable(false);
+          }}
+          onCancel={() => setPendingMissingSessionCleanupEnable(false)}
+        />
+        <DeleteIndexedHistoryDialog
+          open={pendingHistoryDelete !== null}
+          target={pendingHistoryDelete}
+          errorMessage={historyDeleteError}
+          busy={historyDeletePending}
+          onConfirm={() => {
+            void handleConfirmHistoryDelete();
+          }}
+          onCancel={() => {
+            setHistoryDeleteError(null);
+            setPendingHistoryDelete(null);
+          }}
+        />
+        <HistoryExportProgressDialog
+          open={history.historyExportState.open}
+          percent={history.historyExportState.percent}
+          message={history.historyExportState.message}
+          scopeLabel={
+            history.historyExportState.scope === "all_pages" ? "All pages" : "Current page"
           }
-          setEnabledProviders((current) =>
-            current.filter((provider) => provider !== pendingProviderDisable),
-          );
-          setPendingProviderDisable(null);
-        }}
-        onCancel={() => setPendingProviderDisable(null)}
-      />
-      <ConfirmDialog
-        open={pendingMissingSessionCleanupEnable}
-        title="Enable Missing Session Cleanup?"
-        message="When this is enabled, incremental refreshes will delete indexed sessions whose raw transcript files can no longer be found on disk. This can also remove related bookmarks if their sessions disappear. Continue?"
-        confirmLabel="Enable Cleanup"
-        cancelLabel="Cancel"
-        onConfirm={() => {
-          history.setRemoveMissingSessionsDuringIncrementalIndexing(true);
-          setPendingMissingSessionCleanupEnable(false);
-        }}
-        onCancel={() => setPendingMissingSessionCleanupEnable(false)}
-      />
-      <DeleteIndexedHistoryDialog
-        open={pendingHistoryDelete !== null}
-        target={pendingHistoryDelete}
-        errorMessage={historyDeleteError}
-        busy={historyDeletePending}
-        onConfirm={() => {
-          void handleConfirmHistoryDelete();
-        }}
-        onCancel={() => {
-          setHistoryDeleteError(null);
-          setPendingHistoryDelete(null);
-        }}
-      />
-      <HistoryExportProgressDialog
-        open={history.historyExportState.open}
-        percent={history.historyExportState.percent}
-        message={history.historyExportState.message}
-        scopeLabel={history.historyExportState.scope === "all_pages" ? "All pages" : "Current page"}
-      />
-    </main>
+        />
+      </main>
+    </ViewerExternalAppsProvider>
   );
 }

@@ -7,6 +7,7 @@ import {
   operationDurationSourceSchema,
   providerSchema,
 } from "./canonical";
+import { KNOWN_EXTERNAL_APP_VALUES } from "./externalApps";
 import { PROVIDER_LIST, createProviderRecord } from "./providerMetadata";
 
 const projectSummarySchema = z.object({
@@ -118,6 +119,28 @@ const regularFontSizeSchema = z.enum([
   "18px",
   "20px",
 ]);
+const messagePageSizeSchema = z.union([
+  z.literal(10),
+  z.literal(25),
+  z.literal(50),
+  z.literal(100),
+  z.literal(250),
+]);
+const viewerWrapModeSchema = z.enum(["nowrap", "wrap"]);
+const diffViewModeSchema = z.enum(["unified", "split"]);
+const knownExternalAppSchema = z.enum(KNOWN_EXTERNAL_APP_VALUES);
+const externalToolIdSchema = z.string().min(1).max(160);
+const externalToolConfigSchema = z.object({
+  id: externalToolIdSchema,
+  kind: z.enum(["known", "custom"]),
+  label: z.string().min(1).max(120),
+  appId: knownExternalAppSchema.nullable(),
+  command: z.string(),
+  editorArgs: z.array(z.string()),
+  diffArgs: z.array(z.string()),
+  enabledForEditor: z.boolean(),
+  enabledForDiff: z.boolean(),
+});
 const themeModeSchema = z.enum([
   "light",
   "dark",
@@ -133,6 +156,7 @@ const themeModeSchema = z.enum([
   "stone",
   "sand",
 ]);
+const shikiThemeSchema = z.string().min(1).max(80);
 const sortDirectionSchema = z.enum(["asc", "desc"]);
 const projectViewModeSchema = z.enum(["list", "tree"]);
 const projectSortFieldSchema = z.enum(["last_active", "name"]);
@@ -177,11 +201,22 @@ export const paneStateBaseSchema = z.object({
   expandedByDefaultCategories: z.array(messageCategorySchema),
   searchProviders: z.array(providerSchema),
   theme: themeModeSchema,
+  darkShikiTheme: shikiThemeSchema,
+  lightShikiTheme: shikiThemeSchema,
   monoFontFamily: z.enum(["current", "droid_sans_mono"]),
   regularFontFamily: z.enum(["current", "inter"]),
   monoFontSize: monoFontSizeSchema,
   regularFontSize: regularFontSizeSchema,
+  messagePageSize: messagePageSizeSchema,
   useMonospaceForAllMessages: z.boolean(),
+  autoHideMessageActions: z.boolean(),
+  autoHideViewerHeaderActions: z.boolean(),
+  defaultViewerWrapMode: viewerWrapModeSchema,
+  defaultDiffViewMode: diffViewModeSchema,
+  preferredExternalEditor: externalToolIdSchema,
+  preferredExternalDiffTool: externalToolIdSchema,
+  terminalAppCommand: z.string(),
+  externalTools: z.array(externalToolConfigSchema),
   selectedProjectId: z.string(),
   selectedSessionId: z.string(),
   historyMode: z.enum(["session", "bookmarks", "project_all"]),
@@ -215,6 +250,13 @@ const indexerConfigSchema = z.object(makeAllNullable(indexerConfigBaseSchema.sha
 
 const uiZoomResponseSchema = z.object({
   percent: z.number().int().positive(),
+});
+
+const editorPaneStateOverrideSchema = z.object({
+  preferredExternalEditor: externalToolIdSchema.optional(),
+  preferredExternalDiffTool: externalToolIdSchema.optional(),
+  terminalAppCommand: z.string().optional(),
+  externalTools: z.array(externalToolConfigSchema).optional(),
 });
 
 const discoveryProviderPathSchema = z.object({
@@ -414,6 +456,8 @@ export const ipcContractSchemas = {
   "bookmarks:listProject": {
     request: z.object({
       projectId: z.string().min(1),
+      page: z.number().int().nonnegative().default(0),
+      pageSize: z.number().int().positive().max(500).default(100),
       query: z.string().optional(),
       searchMode: searchModeSchema.optional(),
       categories: z.array(messageCategorySchema).optional(),
@@ -422,6 +466,8 @@ export const ipcContractSchemas = {
       projectId: z.string().min(1),
       totalCount: z.number().int().nonnegative(),
       filteredCount: z.number().int().nonnegative(),
+      page: z.number().int().nonnegative(),
+      pageSize: z.number().int().positive(),
       categoryCounts: categoryCountsSchema,
       queryError: z.string().nullable().optional(),
       highlightPatterns: z.array(z.string()).optional(),
@@ -495,6 +541,99 @@ export const ipcContractSchemas = {
     request: z.object({
       path: z.string().min(1),
     }),
+    response: z.object({
+      ok: z.boolean(),
+      error: z.string().nullable(),
+    }),
+  },
+  "dialog:pickExternalToolCommand": {
+    request: z.object({}),
+    response: z.object({
+      canceled: z.boolean(),
+      path: z.string().nullable(),
+      error: z.string().nullable(),
+    }),
+  },
+  "editor:listAvailable": {
+    request: z.object({
+      externalTools: z.array(externalToolConfigSchema).optional(),
+    }),
+    response: z.object({
+      editors: z.array(
+        z.object({
+          id: externalToolIdSchema,
+          kind: z.enum(["known", "custom"]),
+          label: z.string().min(1),
+          appId: knownExternalAppSchema.nullable(),
+          detected: z.boolean(),
+          command: z.string().nullable(),
+          args: z.array(z.string()),
+          capabilities: z.object({
+            openFile: z.boolean(),
+            openAtLineColumn: z.boolean(),
+            openContent: z.boolean(),
+            openDiff: z.boolean(),
+          }),
+        }),
+      ),
+      diffTools: z.array(
+        z.object({
+          id: externalToolIdSchema,
+          kind: z.enum(["known", "custom"]),
+          label: z.string().min(1),
+          appId: knownExternalAppSchema.nullable(),
+          detected: z.boolean(),
+          command: z.string().nullable(),
+          args: z.array(z.string()),
+          capabilities: z.object({
+            openFile: z.boolean(),
+            openAtLineColumn: z.boolean(),
+            openContent: z.boolean(),
+            openDiff: z.boolean(),
+          }),
+        }),
+      ),
+    }),
+  },
+  "editor:open": {
+    request: z.union([
+      z
+        .object({
+          kind: z.literal("file"),
+          toolRole: z.enum(["editor", "diff"]).optional(),
+          editorId: externalToolIdSchema.optional(),
+          filePath: z.string().min(1),
+          line: z.number().int().positive().optional(),
+          column: z.number().int().positive().optional(),
+        })
+        .merge(editorPaneStateOverrideSchema),
+      z
+        .object({
+          kind: z.literal("content"),
+          toolRole: z.enum(["editor", "diff"]).optional(),
+          editorId: externalToolIdSchema.optional(),
+          title: z.string().default("Untitled"),
+          content: z.string(),
+          filePath: z.string().optional(),
+          language: z.string().optional(),
+          line: z.number().int().positive().optional(),
+          column: z.number().int().positive().optional(),
+        })
+        .merge(editorPaneStateOverrideSchema),
+      z
+        .object({
+          kind: z.literal("diff"),
+          toolRole: z.literal("diff").optional(),
+          editorId: externalToolIdSchema.optional(),
+          title: z.string().default("Diff"),
+          leftContent: z.string(),
+          rightContent: z.string(),
+          filePath: z.string().optional(),
+          line: z.number().int().positive().optional(),
+          column: z.number().int().positive().optional(),
+        })
+        .merge(editorPaneStateOverrideSchema),
+    ]),
     response: z.object({
       ok: z.boolean(),
       error: z.string().nullable(),

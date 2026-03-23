@@ -271,6 +271,24 @@ type IndexingStatements = {
       "high" | "low" | null,
     ]
   >;
+  getMessageById: PreparedQuery<
+    [string],
+    | {
+        id: string;
+        source_id: string;
+        session_id: string;
+        provider: Provider;
+        category: MessageCategory;
+        content: string;
+        created_at: string;
+        token_input: number | null;
+        token_output: number | null;
+        operation_duration_ms: number | null;
+        operation_duration_source: "native" | "derived" | null;
+        operation_duration_confidence: "high" | "low" | null;
+      }
+    | undefined
+  >;
   insertMessageFts: PreparedStatement<[string, string, Provider, MessageCategory, string]>;
   insertToolCall: PreparedStatement<
     [string, string, string, string, string | null, string | null, string | null]
@@ -299,6 +317,10 @@ type IndexingStatements = {
 
 type PreparedStatement<TArgs extends unknown[]> = {
   run: (...args: TArgs) => unknown;
+};
+
+type PreparedQuery<TArgs extends unknown[], TResult> = {
+  get: (...args: TArgs) => TResult;
 };
 
 class IndexingFileProcessingError extends Error {
@@ -648,6 +670,23 @@ function createIndexingStatements(db: SqliteDatabase): IndexingStatements {
         operation_duration_source,
         operation_duration_confidence
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ),
+    getMessageById: db.prepare(
+      `SELECT
+         id,
+         source_id,
+         session_id,
+         provider,
+         category,
+         content,
+         created_at,
+         token_input,
+         token_output,
+         operation_duration_ms,
+         operation_duration_source,
+         operation_duration_confidence
+       FROM messages
+       WHERE id = ?`,
     ),
     insertMessageFts: db.prepare(
       `INSERT INTO message_fts (message_id, session_id, provider, category, content)
@@ -1007,20 +1046,13 @@ function indexMaterializedSessionFile(args: {
   const sourceMeta = adapter.extractSourceMetadata(source.payload);
   const normalizedMessages = reclassifySystemMessages(parsed.messages, args.systemMessageRules);
   const messagesWithDuration = deriveOperationDurations(normalizedMessages);
-  const messagesWithLimits = messagesWithDuration.map(applyIndexingContentLimits);
-  const messagesWithTimestamps = normalizeMessageTimestamps(
-    messagesWithLimits,
+  const preparedMessages = prepareMaterializedMessagesForPersistence(
+    messagesWithDuration,
     adapter,
     args.discovered.fileMtimeMs,
+    args.sessionDbId,
   );
-  const sessionTitle = deriveSessionTitle(messagesWithTimestamps);
   const modelNames = sourceMeta.models.join(",");
-  const aggregate = buildSessionAggregate(
-    messagesWithTimestamps.map((message) => ({
-      ...message,
-      id: makeMessageId(args.sessionDbId, message.id),
-    })),
-  );
 
   persistMaterializedMessages({
     db: args.db,
@@ -1030,12 +1062,12 @@ function indexMaterializedSessionFile(args: {
     statements: args.statements,
     onNotice: args.onNotice,
     projectId,
-    sessionTitle: sessionTitle || modelNames,
+    sessionTitle: preparedMessages.sessionTitle || modelNames,
     modelNames,
     gitBranch: sourceMeta.gitBranch ?? args.discovered.metadata.gitBranch,
     cwd: sourceMeta.cwd ?? args.discovered.metadata.cwd,
-    aggregate,
-    messages: messagesWithTimestamps,
+    aggregate: preparedMessages.aggregate,
+    messages: preparedMessages.messages,
   });
 
   return parsed.diagnostics;
@@ -1483,6 +1515,10 @@ function parseAndPersistStreamEvent(args: {
     });
   }
 
+  if (shouldSkipDuplicateClaudeCompactBoundaryEvent(args, parsedEvent.messages)) {
+    return parsedEvent.nextSequence;
+  }
+
   for (const message of parsedEvent.messages) {
     if (!message) {
       continue;
@@ -1508,9 +1544,55 @@ function persistStreamMessage(args: {
   onNotice: (notice: IndexingNotice) => void;
   message: IndexedMessage;
 }): void {
+  const stateSnapshot = snapshotMessageProcessingState(args.processingState);
   const normalizedMessage = normalizeIndexedMessage(args.processingState, args.message);
+  const duplicateResolution = resolveStreamDuplicateMessage({
+    statements: args.statements,
+    sessionDbId: args.sessionDbId,
+    message: normalizedMessage,
+  });
+
+  if (duplicateResolution.kind === "skip") {
+    restoreMessageProcessingState(args.processingState, stateSnapshot);
+    args.onNotice({
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      filePath: args.discovered.filePath,
+      stage: "persist",
+      severity: "warning",
+      code: "index.duplicate_message_skipped",
+      message: `Skipped duplicate streamed message ${args.message.id}.`,
+      details: {
+        messageId: args.message.id,
+        duplicateOf: duplicateResolution.existingSourceId,
+      },
+    });
+    return;
+  }
+
+  const messageToPersist =
+    duplicateResolution.sourceId === normalizedMessage.id
+      ? normalizedMessage
+      : normalizeDuplicateStreamMessage(args, stateSnapshot, duplicateResolution.sourceId);
+
+  if (duplicateResolution.sourceId !== normalizedMessage.id) {
+    args.onNotice({
+      provider: args.discovered.provider,
+      sessionId: args.discovered.sourceSessionId,
+      filePath: args.discovered.filePath,
+      stage: "persist",
+      severity: "warning",
+      code: "index.duplicate_message_rewritten",
+      message: `Rewrote duplicate streamed message ${args.message.id} to ${duplicateResolution.sourceId}.`,
+      details: {
+        messageId: args.message.id,
+        rewrittenMessageId: duplicateResolution.sourceId,
+      },
+    });
+  }
+
   try {
-    insertIndexedMessage(args.statements, args.sessionDbId, normalizedMessage, {
+    insertIndexedMessage(args.statements, args.sessionDbId, messageToPersist, {
       provider: args.discovered.provider,
       sessionId: args.discovered.sourceSessionId,
       filePath: args.discovered.filePath,
@@ -1694,6 +1776,29 @@ function createMessageProcessingState(
     assistantThinkingRunBaseline: checkpoint?.assistantThinkingRunBaseline ?? null,
     aggregate: checkpoint?.aggregate ?? { ...DEFAULT_SESSION_AGGREGATE_STATE },
   };
+}
+
+function snapshotMessageProcessingState(
+  state: MessageProcessingState,
+): SerializableMessageProcessingState {
+  return {
+    previousMessage: state.previousMessage,
+    previousTimestampMs: state.previousTimestampMs,
+    assistantThinkingRunRoot: state.assistantThinkingRunRoot,
+    assistantThinkingRunBaseline: state.assistantThinkingRunBaseline,
+    aggregate: { ...state.aggregate },
+  };
+}
+
+function restoreMessageProcessingState(
+  state: MessageProcessingState,
+  snapshot: SerializableMessageProcessingState,
+): void {
+  state.previousMessage = snapshot.previousMessage;
+  state.previousTimestampMs = snapshot.previousTimestampMs;
+  state.assistantThinkingRunRoot = snapshot.assistantThinkingRunRoot;
+  state.assistantThinkingRunBaseline = snapshot.assistantThinkingRunBaseline;
+  state.aggregate = { ...snapshot.aggregate };
 }
 
 function normalizeIndexedMessage(
@@ -1894,8 +1999,136 @@ function serializeProcessingState(
     previousTimestampMs: state.previousTimestampMs,
     assistantThinkingRunRoot: state.assistantThinkingRunRoot,
     assistantThinkingRunBaseline: state.assistantThinkingRunBaseline,
-    aggregate: state.aggregate,
+    aggregate: { ...state.aggregate },
   };
+}
+
+function normalizeDuplicateStreamMessage(
+  args: {
+    discovered: ReturnType<typeof discoverSessionFiles>[number];
+    processingState: MessageProcessingState;
+    message: IndexedMessage;
+  },
+  stateSnapshot: SerializableMessageProcessingState,
+  sourceId: string,
+): IndexedMessage {
+  restoreMessageProcessingState(args.processingState, stateSnapshot);
+  return normalizeIndexedMessage(args.processingState, {
+    ...args.message,
+    id: sourceId,
+  });
+}
+
+function resolveStreamDuplicateMessage(args: {
+  statements: IndexingStatements;
+  sessionDbId: string;
+  message: IndexedMessage;
+}):
+  | {
+      kind: "skip";
+      existingSourceId: string;
+    }
+  | {
+      kind: "insert";
+      sourceId: string;
+    } {
+  const MAX_DUPLICATE_MESSAGE_SUFFIX = 100;
+  let duplicateIndex = 1;
+  while (duplicateIndex <= MAX_DUPLICATE_MESSAGE_SUFFIX) {
+    const sourceId =
+      duplicateIndex === 1 ? args.message.id : `${args.message.id}~dup${duplicateIndex}`;
+    const existing = args.statements.getMessageById.get(makeMessageId(args.sessionDbId, sourceId));
+    if (!existing) {
+      return {
+        kind: "insert",
+        sourceId,
+      };
+    }
+    if (isEquivalentPersistedMessage(existing, args.message)) {
+      return {
+        kind: "skip",
+        existingSourceId: sourceId,
+      };
+    }
+    duplicateIndex += 1;
+  }
+  return {
+    kind: "insert",
+    sourceId: `${args.message.id}~dup${Date.now().toString(36)}`,
+  };
+}
+
+function isEquivalentPersistedMessage(
+  existing: {
+    provider: Provider;
+    category: MessageCategory;
+    content: string;
+    created_at: string;
+    token_input: number | null;
+    token_output: number | null;
+    operation_duration_ms: number | null;
+    operation_duration_source: "native" | "derived" | null;
+    operation_duration_confidence: "high" | "low" | null;
+  },
+  message: IndexedMessage,
+): boolean {
+  return (
+    existing.provider === message.provider &&
+    existing.category === message.category &&
+    existing.content === message.content &&
+    existing.created_at === message.createdAt &&
+    existing.token_input === message.tokenInput &&
+    existing.token_output === message.tokenOutput &&
+    existing.operation_duration_ms === message.operationDurationMs &&
+    existing.operation_duration_source === message.operationDurationSource &&
+    existing.operation_duration_confidence === message.operationDurationConfidence
+  );
+}
+
+function shouldSkipDuplicateClaudeCompactBoundaryEvent(
+  args: {
+    discovered: ReturnType<typeof discoverSessionFiles>[number];
+    event: unknown;
+    sessionDbId: string;
+    statements: IndexingStatements;
+    onNotice: (notice: IndexingNotice) => void;
+  },
+  messages: IndexedMessage[],
+): boolean {
+  if (args.discovered.provider !== "claude" || messages.length !== 1) {
+    return false;
+  }
+  const eventRecord = asRecord(args.event);
+  if (!eventRecord) {
+    return false;
+  }
+  if (
+    readString(eventRecord.type) !== "system" ||
+    readString(eventRecord.subtype) !== "compact_boundary"
+  ) {
+    return false;
+  }
+  const message = messages[0];
+  if (!message) {
+    return false;
+  }
+  const existing = args.statements.getMessageById.get(makeMessageId(args.sessionDbId, message.id));
+  if (!existing) {
+    return false;
+  }
+  args.onNotice({
+    provider: args.discovered.provider,
+    sessionId: args.discovered.sourceSessionId,
+    filePath: args.discovered.filePath,
+    stage: "parse",
+    severity: "warning",
+    code: "index.claude_compact_boundary_duplicate_skipped",
+    message: `Skipped duplicate Claude compact boundary event ${message.id}.`,
+    details: {
+      messageId: message.id,
+    },
+  });
+  return true;
 }
 
 function buildStreamCheckpointState(args: {
@@ -2869,6 +3102,53 @@ function normalizeMessageTimestamps(
     previousMs = normalized.previousTimestampMs;
     return normalized.message;
   });
+}
+
+function prepareMaterializedMessagesForPersistence(
+  messages: IndexedMessage[],
+  adapter: ReturnType<typeof getProviderAdapter>,
+  fileMtimeMs: number,
+  sessionDbId: string,
+): {
+  messages: IndexedMessage[];
+  sessionTitle: string;
+  aggregate: {
+    messageCount: number;
+    tokenInputTotal: number;
+    tokenOutputTotal: number;
+    startedAt: string | null;
+    endedAt: string | null;
+    durationMs: number | null;
+  };
+} {
+  let previousMs = Number.NEGATIVE_INFINITY;
+  const aggregateState: SessionAggregateState = { ...DEFAULT_SESSION_AGGREGATE_STATE };
+  const preparedMessages: IndexedMessage[] = [];
+
+  for (const message of messages) {
+    const limitedMessage = applyIndexingContentLimits(message);
+    const normalized = adapter.normalizeMessageTimestamp(limitedMessage, {
+      fileMtimeMs,
+      previousTimestampMs: previousMs,
+    });
+    previousMs = normalized.previousTimestampMs;
+    preparedMessages.push(normalized.message);
+    updateSessionAggregateState(aggregateState, {
+      ...normalized.message,
+      id: makeMessageId(sessionDbId, normalized.message.id),
+    });
+  }
+
+  return {
+    messages: preparedMessages,
+    sessionTitle: aggregateState.title,
+    aggregate: {
+      messageCount: aggregateState.messageCount,
+      tokenInputTotal: aggregateState.tokenInputTotal,
+      tokenOutputTotal: aggregateState.tokenOutputTotal,
+      ...finalizeSessionAggregate(aggregateState),
+    },
+  };
 }
 
 function isHighConfidenceDerivedPair(

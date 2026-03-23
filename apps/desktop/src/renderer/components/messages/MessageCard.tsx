@@ -1,18 +1,16 @@
 import type { MessageCategory } from "@codetrail/core/browser";
-import { type MouseEvent, type Ref, memo, useMemo } from "react";
+import { type KeyboardEvent, type MouseEvent, type Ref, memo, useMemo } from "react";
 
 import { copyTextToClipboard } from "../../lib/clipboard";
 import { compactPath, formatDate, prettyCategory } from "../../lib/viewUtils";
 
 import { MessageContent } from "./MessageContent";
+import { parseMessageToolPayload } from "./messageToolPayload";
 import {
   asNonEmptyString,
   asObject,
   asString,
   buildUnifiedDiffFromTextPair,
-  parseToolEditPayload,
-  parseToolInvocationPayload,
-  tryParseJsonRecord,
 } from "./toolParsing";
 import type { SessionMessage } from "./types";
 
@@ -45,13 +43,17 @@ function MessageCardComponent({
   onRevealInSession,
   cardRef,
 }: MessageCardProps) {
-  const typeLabel = useMemo(
-    () => formatMessageTypeLabel(message.category, message.content),
+  const parsedToolPayload = useMemo(
+    () => parseMessageToolPayload(message.category, message.content),
     [message.category, message.content],
   );
+  const typeLabel = useMemo(
+    () => formatMessageTypeLabel(message.category, parsedToolPayload),
+    [message.category, parsedToolPayload],
+  );
   const previewLabel = useMemo(
-    () => formatMessagePreview(message.category, message.content),
-    [message.category, message.content],
+    () => formatMessagePreview(message.category, message.content, parsedToolPayload),
+    [message.category, message.content, parsedToolPayload],
   );
   const operationDurationLabel = useMemo(
     () =>
@@ -63,6 +65,17 @@ function MessageCardComponent({
   );
   const toggleExpanded = () => onToggleExpanded(message.id, message.category);
 
+  const handleHeaderClick = (event: MouseEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest(".message-header-actions")) {
+      return;
+    }
+    if (target?.closest(".message-toggle-button")) {
+      return;
+    }
+    toggleExpanded();
+  };
+
   const handleCopyRawButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     void copyTextToClipboard(JSON.stringify(message, null, 2));
@@ -70,7 +83,7 @@ function MessageCardComponent({
 
   const handleCopyBodyButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    void copyTextToClipboard(formatMessageBodyForClipboard(message));
+    void copyTextToClipboard(formatMessageBodyForClipboard(message, parsedToolPayload));
   };
 
   const handleRevealButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
@@ -83,6 +96,17 @@ function MessageCardComponent({
     onToggleBookmark?.(message);
   };
 
+  const handleHeaderKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    toggleExpanded();
+  };
+
   return (
     <article
       className={`message category-${message.category}${isFocused ? " focused" : ""}${
@@ -91,11 +115,18 @@ function MessageCardComponent({
       data-history-message-id={message.id}
       ref={cardRef ?? null}
     >
-      <header className="message-header">
+      <header
+        className="message-header"
+        onClick={handleHeaderClick}
+        onKeyDown={handleHeaderKeyDown}
+      >
         <button
           type="button"
           className="message-toggle-button"
-          onClick={toggleExpanded}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleExpanded();
+          }}
           aria-expanded={isExpanded}
           aria-label={isExpanded ? "Collapse message" : "Expand message"}
           title={isExpanded ? "Collapse message" : "Expand message"}
@@ -183,6 +214,7 @@ function MessageCardComponent({
               query={query}
               highlightPatterns={highlightPatterns}
               pathRoots={pathRoots}
+              parsedToolPayload={parsedToolPayload}
             />
           </div>
         </div>
@@ -207,21 +239,28 @@ function BookmarkIcon({ filled }: { filled: boolean }) {
   );
 }
 
-function formatMessageTypeLabel(category: MessageCategory, content: string): string {
+function formatMessageTypeLabel(
+  category: MessageCategory,
+  parsedToolPayload: ReturnType<typeof parseMessageToolPayload>,
+): string {
   if (category !== "tool_use" && category !== "tool_edit") {
     return prettyCategory(category);
   }
 
-  const parsed = parseToolInvocationPayload(content);
+  const parsed = parsedToolPayload.toolInvocation;
   if (!parsed?.prettyName) {
     return prettyCategory(category);
   }
   return `${prettyCategory(category)}: ${parsed.prettyName}`;
 }
 
-function formatMessagePreview(category: MessageCategory, content: string): string {
+function formatMessagePreview(
+  category: MessageCategory,
+  content: string,
+  parsedToolPayload: ReturnType<typeof parseMessageToolPayload>,
+): string {
   if (category === "tool_use") {
-    const parsed = parseToolInvocationPayload(content);
+    const parsed = parsedToolPayload.toolInvocation;
     if (parsed) {
       const targetPath = asNonEmptyString(
         parsed.inputRecord?.file_path ?? parsed.inputRecord?.path ?? parsed.inputRecord?.file,
@@ -240,7 +279,7 @@ function formatMessagePreview(category: MessageCategory, content: string): strin
   }
 
   if (category === "tool_edit") {
-    const parsed = parseToolEditPayload(content);
+    const parsed = parsedToolPayload.toolEdit;
     if (parsed?.filePath) {
       return `${prettyCategory(category)} ${compactPath(parsed.filePath)}`;
     }
@@ -250,7 +289,7 @@ function formatMessagePreview(category: MessageCategory, content: string): strin
   }
 
   if (category === "tool_result") {
-    const parsed = tryParseJsonRecord(content);
+    const parsed = parsedToolPayload.toolResult;
     const output = asString(parsed?.output);
     if (output) {
       return compactInlineText(output);
@@ -300,21 +339,27 @@ function formatOperationDurationLabel(
   return `~${days}d`;
 }
 
-function formatMessageBodyForClipboard(message: SessionMessage): string {
+function formatMessageBodyForClipboard(
+  message: SessionMessage,
+  parsedToolPayload: ReturnType<typeof parseMessageToolPayload>,
+): string {
   if (message.category === "tool_use") {
-    return formatToolUseBodyForClipboard(message.content);
+    return formatToolUseBodyForClipboard(message.content, parsedToolPayload);
   }
   if (message.category === "tool_edit") {
-    return formatToolEditBodyForClipboard(message.content);
+    return formatToolEditBodyForClipboard(message.content, parsedToolPayload);
   }
   if (message.category === "tool_result") {
-    return formatToolResultBodyForClipboard(message.content);
+    return formatToolResultBodyForClipboard(message.content, parsedToolPayload);
   }
   return message.content;
 }
 
-function formatToolUseBodyForClipboard(content: string): string {
-  const parsed = parseToolInvocationPayload(content);
+function formatToolUseBodyForClipboard(
+  content: string,
+  parsedToolPayload: ReturnType<typeof parseMessageToolPayload>,
+): string {
+  const parsed = parsedToolPayload.toolInvocation;
   if (!parsed) {
     return formatJsonIfParsable(content);
   }
@@ -345,8 +390,11 @@ function formatToolUseBodyForClipboard(content: string): string {
   return sections.join("\n\n");
 }
 
-function formatToolEditBodyForClipboard(content: string): string {
-  const parsed = parseToolEditPayload(content);
+function formatToolEditBodyForClipboard(
+  content: string,
+  parsedToolPayload: ReturnType<typeof parseMessageToolPayload>,
+): string {
+  const parsed = parsedToolPayload.toolEdit;
   if (!parsed) {
     return formatJsonIfParsable(content);
   }
@@ -370,8 +418,11 @@ function formatToolEditBodyForClipboard(content: string): string {
   return formatJsonIfParsable(content);
 }
 
-function formatToolResultBodyForClipboard(content: string): string {
-  const parsed = tryParseJsonRecord(content);
+function formatToolResultBodyForClipboard(
+  content: string,
+  parsedToolPayload: ReturnType<typeof parseMessageToolPayload>,
+): string {
+  const parsed = parsedToolPayload.toolResult;
   if (!parsed) {
     return formatJsonIfParsable(content);
   }

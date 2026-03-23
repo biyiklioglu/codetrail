@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { openDatabase } from "../db/bootstrap";
 import { runIncrementalIndexing } from "../indexing";
@@ -277,6 +277,20 @@ describe("searchMessages", () => {
     expect(result.totalCount).toBe(0);
     expect(result.results).toEqual([]);
     expect(Object.values(result.categoryCounts).every((count) => count === 0)).toBe(true);
+
+    db.close();
+    cleanup();
+  });
+
+  it("keeps search on the reduced summary-plus-results query path", () => {
+    const { dbPath, cleanup } = setupIndexedDb();
+    const db = openDatabase(dbPath);
+    const prepareSpy = vi.spyOn(db, "prepare");
+
+    const result = searchMessages(db, { query: "bug", categories: ["user"] });
+
+    expect(result.totalCount).toBeGreaterThanOrEqual(1);
+    expect(prepareSpy).toHaveBeenCalledTimes(2);
 
     db.close();
     cleanup();

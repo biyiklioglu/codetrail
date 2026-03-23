@@ -1415,16 +1415,16 @@ describe("runIncrementalIndexing", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("surfaces streamed event persistence failures instead of reporting them as invalid JSONL", () => {
-    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-streamed-persist-failure-"));
+  it("skips identical streamed duplicate message ids instead of failing the file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-streamed-duplicate-skip-"));
     const dbPath = join(dir, "index.db");
-    const claudeFile = join(dir, ".claude", "projects", "persist-failure", "session.jsonl");
+    const claudeFile = join(dir, ".claude", "projects", "duplicate-skip", "session.jsonl");
     mkdirSync(dirname(claudeFile), { recursive: true });
     writeFileSync(
       claudeFile,
       `${[
         JSON.stringify({
-          sessionId: "claude-session-persist-failure",
+          sessionId: "claude-session-duplicate-skip",
           type: "assistant",
           id: "duplicate-message",
           cwd: "/workspace/claude",
@@ -1436,7 +1436,93 @@ describe("runIncrementalIndexing", () => {
           },
         }),
         JSON.stringify({
-          sessionId: "claude-session-persist-failure",
+          sessionId: "claude-session-duplicate-skip",
+          type: "assistant",
+          id: "duplicate-message",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-03-19T10:00:00Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "First version" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const notices: string[] = [];
+    const issues: Array<{ stage: string; error: unknown }> = [];
+    const result = runIncrementalIndexing(
+      {
+        dbPath,
+        discoveryConfig: {
+          claudeRoot: join(dir, ".claude", "projects"),
+          enabledProviders: ["claude"],
+        },
+      },
+      {
+        onNotice: (notice) => {
+          notices.push(notice.code);
+        },
+        onFileIssue: (issue) => {
+          issues.push({ stage: issue.stage, error: issue.error });
+        },
+      },
+    );
+
+    expect(result.indexedFiles).toBe(1);
+    expect(result.diagnostics.errors).toBe(0);
+    expect(notices).not.toContain("parser.invalid_jsonl_line");
+    expect(notices).toContain("index.duplicate_message_skipped");
+    expect(issues).toHaveLength(0);
+
+    const db = openDatabase(dbPath);
+    const rows = db
+      .prepare("SELECT source_id, content FROM messages ORDER BY created_at, source_id")
+      .all() as Array<{
+      source_id: string;
+      content: string;
+    }>;
+    expect(rows).toEqual([{ source_id: "duplicate-message", content: "First version" }]);
+    db.close();
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("rewrites conflicting streamed duplicate message ids instead of failing the file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-streamed-duplicate-rewrite-"));
+    const dbPath = join(dir, "index.db");
+    const claudeFile = join(dir, ".claude", "projects", "duplicate-rewrite", "session.jsonl");
+    mkdirSync(dirname(claudeFile), { recursive: true });
+    writeFileSync(
+      claudeFile,
+      `${[
+        JSON.stringify({
+          sessionId: "claude-session-duplicate-rewrite",
+          type: "assistant",
+          id: "duplicate-message",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-03-19T10:00:00Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "First version" }],
+          },
+        }),
+        JSON.stringify({
+          sessionId: "claude-session-duplicate-rewrite",
+          type: "assistant",
+          id: "duplicate-message",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-03-19T10:00:01Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Second version" }],
+          },
+        }),
+        JSON.stringify({
+          sessionId: "claude-session-duplicate-rewrite",
           type: "assistant",
           id: "duplicate-message",
           cwd: "/workspace/claude",
@@ -1470,11 +1556,117 @@ describe("runIncrementalIndexing", () => {
       },
     );
 
-    expect(result.indexedFiles).toBe(0);
-    expect(result.diagnostics.errors).toBe(1);
-    expect(notices).not.toContain("parser.invalid_jsonl_line");
-    expect(issues).toHaveLength(1);
-    expect(issues[0]?.stage).toBe("persist");
+    expect(result.indexedFiles).toBe(1);
+    expect(result.diagnostics.errors).toBe(0);
+    expect(notices).toContain("index.duplicate_message_rewritten");
+    expect(notices).toContain("index.duplicate_message_skipped");
+    expect(issues).toHaveLength(0);
+
+    const db = openDatabase(dbPath);
+    const rows = db
+      .prepare("SELECT source_id, content FROM messages ORDER BY created_at, source_id")
+      .all() as Array<{
+      source_id: string;
+      content: string;
+    }>;
+    expect(rows).toEqual([
+      { source_id: "duplicate-message", content: "First version" },
+      { source_id: "duplicate-message~dup2", content: "Second version" },
+    ]);
+    db.close();
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("skips repeated Claude compact boundary events with the same uuid", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-claude-compact-boundary-"));
+    const dbPath = join(dir, "index.db");
+    const claudeFile = join(dir, ".claude", "projects", "compact-boundary", "session.jsonl");
+    mkdirSync(dirname(claudeFile), { recursive: true });
+    writeFileSync(
+      claudeFile,
+      `${[
+        JSON.stringify({
+          sessionId: "claude-session-compact-boundary",
+          type: "system",
+          subtype: "compact_boundary",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-03-19T10:00:00Z",
+          uuid: "compact-boundary-1",
+          content: "Conversation compacted",
+        }),
+        JSON.stringify({
+          sessionId: "claude-session-compact-boundary",
+          type: "system",
+          subtype: "compact_boundary",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-03-19T10:00:00Z",
+          uuid: "compact-boundary-1",
+          content: "Conversation compacted",
+        }),
+        JSON.stringify({
+          sessionId: "claude-session-compact-boundary",
+          type: "assistant",
+          id: "assistant-1",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-03-19T10:00:01Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Still indexing" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const notices: string[] = [];
+    const issues: Array<{ stage: string; error: unknown }> = [];
+    const result = runIncrementalIndexing(
+      {
+        dbPath,
+        discoveryConfig: {
+          claudeRoot: join(dir, ".claude", "projects"),
+          enabledProviders: ["claude"],
+        },
+      },
+      {
+        onNotice: (notice) => {
+          notices.push(notice.code);
+        },
+        onFileIssue: (issue) => {
+          issues.push({ stage: issue.stage, error: issue.error });
+        },
+      },
+    );
+
+    expect(result.indexedFiles).toBe(1);
+    expect(result.diagnostics.errors).toBe(0);
+    expect(notices).toContain("index.claude_compact_boundary_duplicate_skipped");
+    expect(issues).toHaveLength(0);
+
+    const db = openDatabase(dbPath);
+    const rows = db
+      .prepare("SELECT source_id, category, content FROM messages ORDER BY created_at")
+      .all() as Array<{
+      source_id: string;
+      category: string;
+      content: string;
+    }>;
+    expect(rows).toEqual([
+      {
+        source_id: "compact-boundary-1",
+        category: "system",
+        content: "Conversation compacted",
+      },
+      {
+        source_id: "assistant-1",
+        category: "assistant",
+        content: "Still indexing",
+      },
+    ]);
+    db.close();
 
     rmSync(dir, { recursive: true, force: true });
   });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
 import type {
@@ -14,11 +14,9 @@ import {
   DEFAULT_MESSAGE_CATEGORIES,
   EMPTY_BOOKMARKS_RESPONSE,
   EMPTY_SYSTEM_MESSAGE_REGEX_RULES,
-  PAGE_SIZE,
 } from "../app/constants";
 import {
   createHistorySelection,
-  createHistorySelectionFromPaneState,
   setHistorySelectionProjectId,
   setHistorySelectionSessionId,
 } from "../app/historySelection";
@@ -45,17 +43,19 @@ import { usePaneStateSync } from "../hooks/usePaneStateSync";
 import { useReconcileProviderSelection } from "../hooks/useReconcileProviderSelection";
 import { useResizablePanes } from "../hooks/useResizablePanes";
 import { useCodetrailClient } from "../lib/codetrailClient";
-import { getEdgeItemId } from "../lib/historyNavigation";
 import { mergeStableProjectOrder } from "../lib/projectUpdates";
 import { clamp, compareRecent, sessionActivityOf } from "../lib/viewUtils";
 import {
   type AppearanceState,
   focusHistoryList,
-  scrollFocusedHistoryMessageIntoView,
+  getMessageListFingerprint,
 } from "./historyControllerShared";
 import { useHistoryDataEffects } from "./useHistoryDataEffects";
 import { useHistoryDerivedState } from "./useHistoryDerivedState";
 import { useHistoryInteractions } from "./useHistoryInteractions";
+import { useHistorySelectionState } from "./useHistorySelectionState";
+import { useHistoryViewportEffects } from "./useHistoryViewportEffects";
+export { setTestHistorySelectionDebounceOverrides } from "./useHistorySelectionState";
 
 export type RefreshContext = {
   refreshId: number;
@@ -83,54 +83,12 @@ type ProjectUpdateState = {
   updatedAt: number;
 };
 
-type PendingSelectionCommit =
-  | {
-      kind: "selection";
-      selection: HistorySelection;
-      delayMs: number;
-    }
-  | {
-      kind: "noop";
-      delayMs: number;
-    };
-
 const MESSAGE_PAGE_SCROLL_OVERLAP_PX = 20;
 const PROJECT_UPDATE_HIGHLIGHT_MS = 8_000;
-const PROJECT_SELECTION_COMMIT_DEBOUNCE_MS = 140;
-const SESSION_SELECTION_COMMIT_DEBOUNCE_MS = 140;
 const PROJECT_NAME_COLLATOR = new Intl.Collator(undefined, {
   sensitivity: "base",
   numeric: true,
 });
-
-let _testHistorySelectionDebounceOverrides: { project: number; session: number } | null = null;
-
-function getHistorySelectionCommitDebounceMs(kind: "project" | "session"): number {
-  if (_testHistorySelectionDebounceOverrides) {
-    return kind === "project"
-      ? _testHistorySelectionDebounceOverrides.project
-      : _testHistorySelectionDebounceOverrides.session;
-  }
-  return kind === "project"
-    ? PROJECT_SELECTION_COMMIT_DEBOUNCE_MS
-    : SESSION_SELECTION_COMMIT_DEBOUNCE_MS;
-}
-
-export function setTestHistorySelectionDebounceOverrides(
-  overrides: { project: number; session: number } | null,
-): void {
-  _testHistorySelectionDebounceOverrides = overrides;
-}
-
-function historySelectionsEqual(left: HistorySelection, right: HistorySelection): boolean {
-  if (left.mode !== right.mode || left.projectId !== right.projectId) {
-    return false;
-  }
-  if (left.mode !== "session" && right.mode !== "session") {
-    return true;
-  }
-  return left.mode === "session" && right.mode === "session" && left.sessionId === right.sessionId;
-}
 
 function getProjectSortLabel(project: ProjectSummary): string {
   return project.name.trim() || project.path.trim() || project.id;
@@ -173,6 +131,38 @@ function sortSessionSummaries(
     return sortDirection === "asc" ? byRecent : -byRecent;
   });
   return next;
+}
+
+function getVisibleMessageAnchor(container: HTMLElement): {
+  referenceMessageId: string;
+  referenceOffsetTop: number;
+} | null {
+  const rect = container.getBoundingClientRect();
+  const probeX = rect.left + Math.min(24, Math.max(1, rect.width / 2));
+  const probeY = rect.top + Math.min(24, Math.max(1, rect.height / 4));
+  const elementAtPoint =
+    typeof document.elementFromPoint === "function"
+      ? document.elementFromPoint(probeX, probeY)
+      : null;
+  const anchor =
+    elementAtPoint instanceof HTMLElement
+      ? elementAtPoint.closest<HTMLElement>("[data-history-message-id]")
+      : null;
+  if (anchor && container.contains(anchor)) {
+    return {
+      referenceMessageId: anchor.getAttribute("data-history-message-id") ?? "",
+      referenceOffsetTop: anchor.offsetTop,
+    };
+  }
+
+  const firstMessage = container.querySelector<HTMLElement>("[data-history-message-id]");
+  if (!firstMessage) {
+    return null;
+  }
+  return {
+    referenceMessageId: firstMessage.getAttribute("data-history-message-id") ?? "",
+    referenceOffsetTop: firstMessage.offsetTop,
+  };
 }
 
 // ── Periodic-refresh scroll policy ──────────────────────────────────────────
@@ -249,12 +239,6 @@ export function useHistoryController({
   const [projectOrderIds, setProjectOrderIds] = useState<string[]>([]);
   const [projectUpdates, setProjectUpdates] = useState<Record<string, ProjectUpdateState>>({});
   const [projectsLoaded, setProjectsLoaded] = useState(false);
-  const [selection, setHistorySelection] = useState<HistorySelection>(() =>
-    createHistorySelectionFromPaneState(initialPaneState),
-  );
-  const [committedSelection, setCommittedSelection] = useState<HistorySelection>(() =>
-    createHistorySelectionFromPaneState(initialPaneState),
-  );
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [treeProjectSessionsByProjectId, setTreeProjectSessionsByProjectId] = useState<
     Record<string, SessionSummary[]>
@@ -383,12 +367,6 @@ export function useHistoryController({
   const prevMessageIdsRef = useRef("");
   const refreshContextRef = useRef<RefreshContext | null>(null);
   const refreshIdCounterRef = useRef(0);
-  const selectionRef = useRef(selection);
-  const committedSelectionRef = useRef(committedSelection);
-  const selectionCommitTimerRef = useRef<number | null>(null);
-  const pendingDebouncedSelectionRef = useRef<PendingSelectionCommit | null>(null);
-  const pendingProjectPaneFocusCommitModeRef = useRef<HistorySelectionCommitMode>("immediate");
-  const pendingProjectPaneFocusWaitForKeyboardIdleRef = useRef(false);
   const treeProjectSessionsLoadTokenRef = useRef<Record<string, number>>({});
   const treeProjectSessionsByProjectIdRef = useRef<Record<string, SessionSummary[]>>({});
   const treeProjectSessionsLoadingByProjectIdRef = useRef<Record<string, boolean>>({});
@@ -402,6 +380,17 @@ export function useHistoryController({
   const bookmarksLoadTokenRef = useRef(0);
   const sessionScrollTopRef = useRef(initialSessionScrollTop);
   const sessionScrollSyncTimerRef = useRef<number | null>(null);
+  const {
+    selection,
+    committedSelection,
+    pendingProjectPaneFocusCommitModeRef,
+    pendingProjectPaneFocusWaitForKeyboardIdleRef,
+    clearSelectionCommitTimer,
+    queueSelectionNoopCommit,
+    setHistorySelectionImmediate,
+    setHistorySelectionWithCommitMode,
+    consumeProjectPaneFocusSelectionBehavior,
+  } = useHistorySelectionState(initialPaneState);
 
   const {
     projectPaneWidth,
@@ -504,73 +493,6 @@ export function useHistoryController({
   useEffect(() => {
     treeProjectSessionsLoadingByProjectIdRef.current = treeProjectSessionsLoadingByProjectId;
   }, [treeProjectSessionsLoadingByProjectId]);
-
-  useEffect(() => {
-    selectionRef.current = selection;
-  }, [selection]);
-
-  useEffect(() => {
-    committedSelectionRef.current = committedSelection;
-  }, [committedSelection]);
-
-  const clearSelectionCommitTimer = useCallback(() => {
-    if (selectionCommitTimerRef.current === null) {
-      return;
-    }
-    window.clearTimeout(selectionCommitTimerRef.current);
-    selectionCommitTimerRef.current = null;
-  }, []);
-
-  const commitHistorySelection = useCallback(
-    (nextSelection: HistorySelection) => {
-      clearSelectionCommitTimer();
-      selectionRef.current = nextSelection;
-      setHistorySelection((current) =>
-        historySelectionsEqual(current, nextSelection) ? current : nextSelection,
-      );
-      committedSelectionRef.current = nextSelection;
-      setCommittedSelection((current) =>
-        historySelectionsEqual(current, nextSelection) ? current : nextSelection,
-      );
-    },
-    [clearSelectionCommitTimer],
-  );
-
-  const scheduleCommittedSelection = useCallback(
-    (nextSelection: HistorySelection, delayMs: number) => {
-      pendingDebouncedSelectionRef.current = null;
-      clearSelectionCommitTimer();
-      selectionCommitTimerRef.current = window.setTimeout(() => {
-        selectionCommitTimerRef.current = null;
-        commitHistorySelection(nextSelection);
-      }, delayMs);
-    },
-    [clearSelectionCommitTimer, commitHistorySelection],
-  );
-
-  const scheduleNoopCommit = useCallback(
-    (delayMs: number) => {
-      pendingDebouncedSelectionRef.current = null;
-      clearSelectionCommitTimer();
-      selectionCommitTimerRef.current = window.setTimeout(() => {
-        selectionCommitTimerRef.current = null;
-      }, delayMs);
-    },
-    [clearSelectionCommitTimer],
-  );
-
-  const flushPendingDebouncedSelection = useCallback(() => {
-    const pendingCommit = pendingDebouncedSelectionRef.current;
-    if (!pendingCommit) {
-      return;
-    }
-    if (pendingCommit.kind === "selection") {
-      scheduleCommittedSelection(pendingCommit.selection, pendingCommit.delayMs);
-      return;
-    }
-    scheduleNoopCommit(pendingCommit.delayMs);
-  }, [scheduleCommittedSelection, scheduleNoopCommit]);
-
   const queueProjectTreeNoopCommit = useCallback(
     ({
       commitMode = "immediate",
@@ -581,99 +503,10 @@ export function useHistoryController({
     } = {}) => {
       pendingProjectPaneFocusCommitModeRef.current = "immediate";
       pendingProjectPaneFocusWaitForKeyboardIdleRef.current = false;
-
-      if (commitMode === "immediate") {
-        pendingDebouncedSelectionRef.current = null;
-        clearSelectionCommitTimer();
-        return;
-      }
-
-      const delayMs = getHistorySelectionCommitDebounceMs(
-        commitMode === "debounced_project" ? "project" : "session",
-      );
-      if (waitForKeyboardIdle) {
-        pendingDebouncedSelectionRef.current = {
-          kind: "noop",
-          delayMs,
-        };
-        clearSelectionCommitTimer();
-        return;
-      }
-      scheduleNoopCommit(delayMs);
+      queueSelectionNoopCommit(commitMode, waitForKeyboardIdle);
     },
-    [clearSelectionCommitTimer, scheduleNoopCommit],
+    [queueSelectionNoopCommit],
   );
-
-  const setHistorySelectionWithCommitMode = useCallback(
-    (
-      value: SetStateAction<HistorySelection>,
-      commitMode: HistorySelectionCommitMode = "immediate",
-      waitForKeyboardIdle = false,
-    ) => {
-      const nextSelection = typeof value === "function" ? value(selectionRef.current) : value;
-      selectionRef.current = nextSelection;
-      setHistorySelection((current) =>
-        historySelectionsEqual(current, nextSelection) ? current : nextSelection,
-      );
-
-      if (commitMode === "immediate") {
-        pendingDebouncedSelectionRef.current = null;
-        commitHistorySelection(nextSelection);
-        return;
-      }
-
-      const delayMs = getHistorySelectionCommitDebounceMs(
-        commitMode === "debounced_project" ? "project" : "session",
-      );
-      if (waitForKeyboardIdle) {
-        pendingDebouncedSelectionRef.current = {
-          kind: "selection",
-          selection: nextSelection,
-          delayMs,
-        };
-        clearSelectionCommitTimer();
-        return;
-      }
-      scheduleCommittedSelection(nextSelection, delayMs);
-    },
-    [clearSelectionCommitTimer, commitHistorySelection, scheduleCommittedSelection],
-  );
-
-  const setHistorySelectionImmediate = useCallback(
-    (value: SetStateAction<HistorySelection>) => {
-      setHistorySelectionWithCommitMode(value, "immediate");
-    },
-    [setHistorySelectionWithCommitMode],
-  );
-
-  const consumeProjectPaneFocusSelectionBehavior = useCallback(() => {
-    const nextCommitMode = pendingProjectPaneFocusCommitModeRef.current;
-    const waitForKeyboardIdle = pendingProjectPaneFocusWaitForKeyboardIdleRef.current;
-    pendingProjectPaneFocusCommitModeRef.current = "immediate";
-    pendingProjectPaneFocusWaitForKeyboardIdleRef.current = false;
-    return {
-      commitMode: nextCommitMode,
-      waitForKeyboardIdle,
-    };
-  }, []);
-
-  useEffect(() => {
-    const flushOnArrowRelease = (event: KeyboardEvent) => {
-      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
-        return;
-      }
-      flushPendingDebouncedSelection();
-    };
-    const flushOnBlur = () => {
-      flushPendingDebouncedSelection();
-    };
-    window.addEventListener("keyup", flushOnArrowRelease);
-    window.addEventListener("blur", flushOnBlur);
-    return () => {
-      window.removeEventListener("keyup", flushOnArrowRelease);
-      window.removeEventListener("blur", flushOnBlur);
-    };
-  }, [flushPendingDebouncedSelection]);
 
   useEffect(() => {
     const visibleProjectIds = new Set(sortedProjects.map((project) => project.id));
@@ -762,19 +595,41 @@ export function useHistoryController({
   const paneAppearanceState = useMemo(
     () => ({
       theme: appearance.theme,
+      darkShikiTheme: appearance.darkShikiTheme,
+      lightShikiTheme: appearance.lightShikiTheme,
       monoFontFamily: appearance.monoFontFamily,
       regularFontFamily: appearance.regularFontFamily,
       monoFontSize: appearance.monoFontSize,
       regularFontSize: appearance.regularFontSize,
+      messagePageSize: appearance.messagePageSize,
       useMonospaceForAllMessages: appearance.useMonospaceForAllMessages,
+      autoHideMessageActions: appearance.autoHideMessageActions,
+      autoHideViewerHeaderActions: appearance.autoHideViewerHeaderActions,
+      defaultViewerWrapMode: appearance.defaultViewerWrapMode,
+      defaultDiffViewMode: appearance.defaultDiffViewMode,
+      preferredExternalEditor: appearance.preferredExternalEditor,
+      preferredExternalDiffTool: appearance.preferredExternalDiffTool,
+      terminalAppCommand: appearance.terminalAppCommand,
+      externalTools: appearance.externalTools,
     }),
     [
+      appearance.darkShikiTheme,
+      appearance.externalTools,
+      appearance.lightShikiTheme,
       appearance.monoFontFamily,
       appearance.monoFontSize,
+      appearance.messagePageSize,
+      appearance.preferredExternalDiffTool,
+      appearance.preferredExternalEditor,
+      appearance.terminalAppCommand,
       appearance.regularFontFamily,
       appearance.regularFontSize,
       appearance.theme,
       appearance.useMonospaceForAllMessages,
+      appearance.autoHideMessageActions,
+      appearance.autoHideViewerHeaderActions,
+      appearance.defaultViewerWrapMode,
+      appearance.defaultDiffViewMode,
     ],
   );
 
@@ -922,11 +777,22 @@ export function useHistoryController({
     setPreferredAutoRefreshStrategy,
     setRemoveMissingSessionsDuringIncrementalIndexing,
     setTheme: appearance.setTheme,
+    setDarkShikiTheme: appearance.setDarkShikiTheme,
+    setLightShikiTheme: appearance.setLightShikiTheme,
     setMonoFontFamily: appearance.setMonoFontFamily,
     setRegularFontFamily: appearance.setRegularFontFamily,
     setMonoFontSize: appearance.setMonoFontSize,
     setRegularFontSize: appearance.setRegularFontSize,
+    setMessagePageSize: appearance.setMessagePageSize,
     setUseMonospaceForAllMessages: appearance.setUseMonospaceForAllMessages,
+    setAutoHideMessageActions: appearance.setAutoHideMessageActions,
+    setAutoHideViewerHeaderActions: appearance.setAutoHideViewerHeaderActions,
+    setDefaultViewerWrapMode: appearance.setDefaultViewerWrapMode,
+    setDefaultDiffViewMode: appearance.setDefaultDiffViewMode,
+    setPreferredExternalEditor: appearance.setPreferredExternalEditor,
+    setPreferredExternalDiffTool: appearance.setPreferredExternalDiffTool,
+    setTerminalAppCommand: appearance.setTerminalAppCommand,
+    setExternalTools: appearance.setExternalTools,
     setHistorySelection: setHistorySelectionImmediate,
     setSelectedProjectId: setSelectedProjectIdForPaneStateSync,
     setSelectedSessionId: setSelectedSessionIdForPaneStateSync,
@@ -1024,6 +890,7 @@ export function useHistoryController({
     messageSortDirection,
     projectAllSortDirection,
     sessionPage,
+    messagePageSize: appearance.messagePageSize,
     setSessionDetail,
     setProjectCombinedDetail,
     bookmarksLoadedProjectId,
@@ -1112,6 +979,7 @@ export function useHistoryController({
     messageSortDirection,
     focusMessageId,
     sessionPage,
+    messagePageSize: appearance.messagePageSize,
     expandedByDefaultCategories,
     bulkExpandScope,
     messageExpanded,
@@ -1122,176 +990,32 @@ export function useHistoryController({
     sessionPaneWidth,
   });
 
-  useEffect(() => {
-    if (!messageListRef.current) {
-      return;
-    }
-    if (historyMode === "bookmarks") {
-      messageListRef.current.scrollTop = 0;
-      sessionScrollTopRef.current = 0;
-      setSessionScrollTop(0);
-      return;
-    }
-    const scrollScopeId = historyMode === "project_all" ? selectedProjectId : selectedSessionId;
-    if (!scrollScopeId || sessionPage < 0) {
-      messageListRef.current.scrollTop = 0;
-      sessionScrollTopRef.current = 0;
-      setSessionScrollTop(0);
-      return;
-    }
-
-    // Refresh-triggered page change (auto-scroll only): transfer auto-scroll data to the refs
-    // the layout effect consumes, then skip the scroll reset. Scroll-preservation mode never
-    // changes pages — it always re-fetches the same sessionPage — so no cross-page handling needed.
-    const refreshCtx = refreshContextRef.current;
-    if (refreshCtx?.autoScroll) {
-      pendingAutoScrollRef.current = true;
-      prevMessageIdsRef.current = refreshCtx.prevMessageIds;
-      refreshContextRef.current = null;
-      return;
-    }
-
-    const pendingRestore = pendingRestoredSessionScrollRef.current;
-    if (
-      pendingRestore &&
-      pendingRestore.sessionId === scrollScopeId &&
-      pendingRestore.sessionPage === sessionPage
-    ) {
-      // Restore once for the exact saved view, then fall back to normal top-of-list behavior on
-      // any later navigation.
-      messageListRef.current.scrollTop = pendingRestore.scrollTop;
-      sessionScrollTopRef.current = pendingRestore.scrollTop;
-      setSessionScrollTop(pendingRestore.scrollTop);
-      pendingRestoredSessionScrollRef.current = null;
-      return;
-    }
-
-    if (pendingRestore) {
-      pendingRestoredSessionScrollRef.current = null;
-    }
-    messageListRef.current.scrollTop = 0;
-    sessionScrollTopRef.current = 0;
-    setSessionScrollTop(0);
-  }, [historyMode, selectedProjectId, selectedSessionId, sessionPage]);
-
-  useEffect(() => {
-    if (
-      !focusMessageId ||
-      !visibleFocusedMessageId ||
-      focusedMessagePosition < 0 ||
-      !focusedMessageRef.current ||
-      !messageListRef.current
-    ) {
-      return;
-    }
-
-    const rafId = window.requestAnimationFrame(() => {
-      if (!focusedMessageRef.current || !messageListRef.current) {
-        return;
-      }
-      scrollFocusedHistoryMessageIntoView(messageListRef.current, focusedMessageRef.current);
-    });
-    return () => {
-      window.cancelAnimationFrame(rafId);
-    };
-  }, [focusMessageId, focusedMessagePosition, visibleFocusedMessageId]);
-
-  useEffect(() => {
-    if (!pendingMessageAreaFocus || !visibleFocusedMessageId || !messageListRef.current) {
-      return;
-    }
-
-    messageListRef.current.focus({ preventScroll: true });
-    setPendingMessageAreaFocus(false);
-  }, [pendingMessageAreaFocus, visibleFocusedMessageId]);
-
-  useEffect(() => {
-    if (!pendingMessagePageNavigation) {
-      return;
-    }
-    if (loadedHistoryPage !== pendingMessagePageNavigation.targetPage) {
-      return;
-    }
-
-    const targetMessageId = getEdgeItemId(
-      activeHistoryMessages,
-      pendingMessagePageNavigation.direction,
-    );
-    setPendingMessagePageNavigation(null);
-    if (!targetMessageId) {
-      return;
-    }
-    setFocusMessageId(targetMessageId);
-  }, [activeHistoryMessages, loadedHistoryPage, pendingMessagePageNavigation]);
-
-  // Scroll preservation after refresh: restore the scroll position so the same messages stay
-  // visible. Auto-scroll: scroll to the edge when new messages arrive during periodic refresh.
-  useLayoutEffect(() => {
-    const container = messageListRef.current;
-    if (!container) return;
-
-    // Same-page refresh: the scroll-reset effect did not fire (page unchanged), so
-    // refreshContextRef is still populated. Consume it here directly.
-    const refreshCtx = refreshContextRef.current;
-    if (refreshCtx !== null) {
-      refreshContextRef.current = null;
-      if (refreshCtx.autoScroll) {
-        const currentIds = activeHistoryMessages.map((m) => m.id).join(",");
-        if (currentIds !== refreshCtx.prevMessageIds) {
-          window.requestAnimationFrame(() => {
-            container.scrollTop = activeMessageSortDirection === "asc" ? container.scrollHeight : 0;
-          });
-        }
-        return;
-      }
-      if (refreshCtx.scrollPreservation) {
-        const saved = refreshCtx.scrollPreservation;
-        const refEl = container.querySelector<HTMLElement>(
-          `[data-history-message-id="${CSS.escape(saved.referenceMessageId)}"]`,
-        );
-        if (refEl) {
-          container.scrollTop = saved.scrollTop + (refEl.offsetTop - saved.referenceOffsetTop);
-          return;
-        }
-        container.scrollTop = saved.scrollTop;
-        return;
-      }
-    }
-
-    // Cross-page auto-scroll: populated by the scroll-reset effect when page changed.
-    if (pendingAutoScrollRef.current) {
-      pendingAutoScrollRef.current = false;
-      const currentIds = activeHistoryMessages.map((m) => m.id).join(",");
-      if (currentIds !== prevMessageIdsRef.current) {
-        prevMessageIdsRef.current = currentIds;
-        window.requestAnimationFrame(() => {
-          if (activeMessageSortDirection === "asc") {
-            container.scrollTop = container.scrollHeight;
-          } else {
-            container.scrollTop = 0;
-          }
-        });
-      }
-      return;
-    }
-
-    // Same-page scroll preservation via scrollPreservationRef (drift compensation).
-    const saved = scrollPreservationRef.current;
-    if (!saved) return;
-    scrollPreservationRef.current = null;
-
-    if (saved.referenceMessageId) {
-      const refEl = container.querySelector<HTMLElement>(
-        `[data-history-message-id="${CSS.escape(saved.referenceMessageId)}"]`,
-      );
-      if (refEl) {
-        container.scrollTop = saved.scrollTop + (refEl.offsetTop - saved.referenceOffsetTop);
-        return;
-      }
-    }
-    // Fallback: preserve raw scrollTop
-    container.scrollTop = saved.scrollTop;
-  }, [activeHistoryMessages, activeMessageSortDirection]);
+  useHistoryViewportEffects({
+    messageListRef,
+    historyMode,
+    selectedProjectId,
+    selectedSessionId,
+    sessionPage,
+    setSessionScrollTop,
+    sessionScrollTopRef,
+    pendingRestoredSessionScrollRef,
+    refreshContextRef,
+    pendingAutoScrollRef,
+    prevMessageIdsRef,
+    activeHistoryMessages,
+    activeMessageSortDirection,
+    focusMessageId,
+    visibleFocusedMessageId,
+    focusedMessagePosition,
+    focusedMessageRef,
+    pendingMessageAreaFocus,
+    setPendingMessageAreaFocus,
+    pendingMessagePageNavigation,
+    loadedHistoryPage,
+    setPendingMessagePageNavigation,
+    setFocusMessageId,
+    scrollPreservationRef,
+  });
 
   const {
     handleToggleScopedMessagesExpanded,
@@ -1363,6 +1087,7 @@ export function useHistoryController({
     canGoToPreviousHistoryPage,
     visibleFocusedMessageId,
     sessionPage,
+    messagePageSize: appearance.messagePageSize,
     selectedSession,
     selectedProject,
     sessionDetailTotalCount: sessionDetail?.totalCount,
@@ -1452,8 +1177,8 @@ export function useHistoryController({
           mode: historyMode,
           projectId: selectedProjectId,
           ...(selectedSessionId ? { sessionId: selectedSessionId } : {}),
-          page: historyMode === "bookmarks" ? 0 : loadedHistoryPage,
-          pageSize: PAGE_SIZE,
+          page: loadedHistoryPage,
+          pageSize: appearance.messagePageSize,
           categories: historyCategories,
           query: historyMode === "bookmarks" ? effectiveBookmarkQuery : effectiveSessionQuery,
           searchMode,
@@ -1478,6 +1203,7 @@ export function useHistoryController({
     },
     [
       activeMessageSortDirection,
+      appearance.messagePageSize,
       codetrail,
       effectiveBookmarkQuery,
       effectiveSessionQuery,
@@ -1669,26 +1395,16 @@ export function useHistoryController({
         let prevMessageIds = "";
 
         if (isAtNewestEdge) {
-          prevMessageIds = container
-            ? Array.from(
-                container.querySelectorAll<HTMLElement>("[data-history-message-id]"),
-                (el) => el.getAttribute("data-history-message-id"),
-              ).join(",")
-            : "";
+          prevMessageIds = getMessageListFingerprint(activeHistoryMessages);
         } else if (container) {
-          const elements = Array.from(
-            container.querySelectorAll<HTMLElement>("[data-history-message-id]"),
-          );
-          for (const el of elements) {
-            if (el.offsetTop + el.offsetHeight > container.scrollTop) {
-              scrollPreservation = {
+          const anchor = getVisibleMessageAnchor(container);
+          scrollPreservation = anchor
+            ? {
                 scrollTop: container.scrollTop,
-                referenceMessageId: el.getAttribute("data-history-message-id") ?? "",
-                referenceOffsetTop: el.offsetTop,
-              };
-              break;
-            }
-          }
+                referenceMessageId: anchor.referenceMessageId,
+                referenceOffsetTop: anchor.referenceOffsetTop,
+              }
+            : null;
         }
 
         refreshContextRef.current = {
@@ -1703,6 +1419,7 @@ export function useHistoryController({
         setRefreshCounter((c) => c + 1);
       },
       [
+        activeHistoryMessages,
         bookmarkSortDirection,
         handleRefresh,
         historyMode,

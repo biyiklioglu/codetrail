@@ -81,6 +81,27 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
     if (channel === "watcher:getStatus") {
       return { running: false, processing: false, pendingPathCount: 0 };
     }
+    if (channel === "editor:listAvailable") {
+      return {
+        editors: [
+          {
+            id: "vscode",
+            label: "VS Code",
+            detected: true,
+            command: "/usr/bin/code",
+            capabilities: {
+              openFile: true,
+              openAtLineColumn: true,
+              openContent: true,
+              openDiff: true,
+            },
+          },
+        ],
+      };
+    }
+    if (channel === "editor:open") {
+      return { ok: true, error: null };
+    }
     if (channel === "watcher:getStats") {
       return {
         startedAt: "2026-03-16T10:00:00.000Z",
@@ -332,6 +353,8 @@ export function createAppClient(overrides: Record<string, ChannelHandler> = {}) 
       projectId: String(request.projectId),
       totalCount: 0,
       filteredCount: 0,
+      page: Number(request.page ?? 0),
+      pageSize: Number(request.pageSize ?? 100),
       categoryCounts: {
         user: 0,
         assistant: 0,
@@ -577,6 +600,8 @@ export function createBookmarksSearchClient() {
         projectId: "project_1",
         totalCount: 1,
         filteredCount: matches ? 1 : 0,
+        page: Number(request.page ?? 0),
+        pageSize: Number(request.pageSize ?? 100),
         categoryCounts: {
           user: 0,
           assistant: matches ? 1 : 0,
@@ -890,6 +915,8 @@ export function createHistoryNavigationClient() {
       projectId: String(request.projectId),
       totalCount: 1,
       filteredCount: 1,
+      page: Number(request.page ?? 0),
+      pageSize: Number(request.pageSize ?? 100),
       categoryCounts: {
         user: 1,
         assistant: 0,
@@ -954,6 +981,8 @@ export function createProjectSwitchBookmarksDelayClient() {
     projectId: string;
     totalCount: number;
     filteredCount: number;
+    page: number;
+    pageSize: number;
     categoryCounts: {
       user: number;
       assistant: number;
@@ -1063,6 +1092,8 @@ export function createProjectSwitchBookmarksDelayClient() {
         projectId: String(request.projectId),
         totalCount: 0,
         filteredCount: 0,
+        page: Number(request.page ?? 0),
+        pageSize: Number(request.pageSize ?? 100),
         categoryCounts: {
           user: 0,
           assistant: 0,
@@ -1197,6 +1228,8 @@ export function createBookmarkSearchDelayClient() {
     projectId: string;
     totalCount: number;
     filteredCount: number;
+    page: number;
+    pageSize: number;
     categoryCounts: {
       user: number;
       assistant: number;
@@ -1388,6 +1421,8 @@ export function createBookmarkSearchDelayClient() {
         projectId: "project_1",
         totalCount: 1,
         filteredCount: matches ? 1 : 0,
+        page: Number(request.page ?? 0),
+        pageSize: Number(request.pageSize ?? 100),
         categoryCounts: {
           user: 0,
           assistant: matches ? 1 : 0,

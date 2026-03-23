@@ -8,11 +8,21 @@ import { describe, expect, it, vi } from "vitest";
 import type { IpcResponse, MessageCategory, Provider } from "@codetrail/core/browser";
 
 import type {
+  ExternalEditorId,
+  ExternalToolConfig,
+  MessagePageSize,
   MonoFontFamily,
   MonoFontSize,
   RegularFontFamily,
   RegularFontSize,
+  ShikiThemeId,
   ThemeMode,
+} from "../../shared/uiPreferences";
+import {
+  createCustomExternalTool,
+  createDefaultExternalTools,
+  createKnownExternalTool,
+  createKnownToolId,
 } from "../../shared/uiPreferences";
 import type { NonOffRefreshStrategy } from "../app/autoRefresh";
 import { createMockCodetrailClient } from "../test/mockCodetrailClient";
@@ -81,11 +91,28 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
   const [preferredAutoRefreshStrategy, setPreferredAutoRefreshStrategy] =
     useState<NonOffRefreshStrategy>("watch-1s");
   const [theme, setTheme] = useState<ThemeMode>("light");
+  const [darkShikiTheme, setDarkShikiTheme] = useState<ShikiThemeId>("github-dark-default");
+  const [lightShikiTheme, setLightShikiTheme] = useState<ShikiThemeId>("github-light-default");
   const [monoFontFamily, setMonoFontFamily] = useState<MonoFontFamily>("droid_sans_mono");
   const [regularFontFamily, setRegularFontFamily] = useState<RegularFontFamily>("current");
   const [monoFontSize, setMonoFontSize] = useState<MonoFontSize>("12px");
   const [regularFontSize, setRegularFontSize] = useState<RegularFontSize>("13.5px");
+  const [messagePageSize, setMessagePageSize] = useState<MessagePageSize>(50);
   const [useMonospaceForAllMessages, setUseMonospaceForAllMessages] = useState(false);
+  const [autoHideMessageActions, setAutoHideMessageActions] = useState(true);
+  const [autoHideViewerHeaderActions, setAutoHideViewerHeaderActions] = useState(false);
+  const [defaultViewerWrapMode, setDefaultViewerWrapMode] = useState<"nowrap" | "wrap">("nowrap");
+  const [defaultDiffViewMode, setDefaultDiffViewMode] = useState<"unified" | "split">("unified");
+  const [preferredExternalEditor, setPreferredExternalEditor] = useState<ExternalEditorId>(
+    createKnownToolId("vscode"),
+  );
+  const [preferredExternalDiffTool, setPreferredExternalDiffTool] = useState<ExternalEditorId>(
+    createKnownToolId("vscode"),
+  );
+  const [terminalAppCommand, setTerminalAppCommand] = useState("");
+  const [externalTools, setExternalTools] = useState<ExternalToolConfig[]>(
+    createDefaultExternalTools(),
+  );
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedSessionId, setSelectedSessionId] = useState("");
   const [historyMode, setHistoryMode] = useState<"session" | "bookmarks" | "project_all">(
@@ -133,11 +160,22 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       searchProviders,
       preferredAutoRefreshStrategy,
       theme,
+      darkShikiTheme,
+      lightShikiTheme,
       monoFontFamily,
       regularFontFamily,
       monoFontSize,
       regularFontSize,
+      messagePageSize,
       useMonospaceForAllMessages,
+      autoHideMessageActions,
+      autoHideViewerHeaderActions,
+      defaultViewerWrapMode,
+      defaultDiffViewMode,
+      preferredExternalEditor,
+      preferredExternalDiffTool,
+      terminalAppCommand,
+      externalTools,
       selectedProjectId,
       selectedSessionId,
       historyMode,
@@ -166,11 +204,22 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     setSearchProviders,
     setPreferredAutoRefreshStrategy,
     setTheme,
+    setDarkShikiTheme,
+    setLightShikiTheme,
     setMonoFontFamily,
     setRegularFontFamily,
     setMonoFontSize,
     setRegularFontSize,
+    setMessagePageSize,
     setUseMonospaceForAllMessages,
+    setAutoHideMessageActions,
+    setAutoHideViewerHeaderActions,
+    setDefaultViewerWrapMode,
+    setDefaultDiffViewMode,
+    setPreferredExternalEditor,
+    setPreferredExternalDiffTool,
+    setTerminalAppCommand,
+    setExternalTools,
     setSelectedProjectId,
     setSelectedSessionId,
     setHistoryMode,
@@ -202,6 +251,19 @@ describe("usePaneStateSync", () => {
   it("hydrates state from pane/indexer IPC and persists updates through split channels", async () => {
     const client = createMockCodetrailClient();
     const animationFrameMocks = installAnimationFrameTimerMocks();
+    const hydratedTools = [
+      createKnownExternalTool("zed"),
+      {
+        ...createCustomExternalTool("editor", 1),
+        id: "custom:test",
+        label: "My Tool",
+        command: "my-editor",
+        editorArgs: ["{file}"],
+        diffArgs: ["{left}", "{right}"],
+        enabledForEditor: true,
+        enabledForDiff: true,
+      },
+    ] satisfies ExternalToolConfig[];
 
     try {
       client.invoke.mockImplementation(async (channel) => {
@@ -219,11 +281,22 @@ describe("usePaneStateSync", () => {
             searchProviders: ["claude"],
             preferredAutoRefreshStrategy: "scan-10s",
             theme: "dark",
+            darkShikiTheme: "vesper",
+            lightShikiTheme: "github-light-default",
             monoFontFamily: "droid_sans_mono",
             regularFontFamily: "inter",
             monoFontSize: "13px",
             regularFontSize: "14px",
+            messagePageSize: 25,
             useMonospaceForAllMessages: true,
+            autoHideMessageActions: false,
+            autoHideViewerHeaderActions: true,
+            defaultViewerWrapMode: "wrap",
+            defaultDiffViewMode: "split",
+            preferredExternalEditor: createKnownToolId("zed"),
+            preferredExternalDiffTool: createKnownToolId("cursor"),
+            terminalAppCommand: "/Applications/iTerm.app",
+            externalTools: hydratedTools,
             selectedProjectId: "project_1",
             selectedSessionId: "session_1",
             historyMode: "bookmarks",
@@ -276,6 +349,17 @@ describe("usePaneStateSync", () => {
         singleClickFoldersExpand: false,
         singleClickProjectsExpand: true,
         preferredAutoRefreshStrategy: "scan-10s",
+        darkShikiTheme: "vesper",
+        lightShikiTheme: "github-light-default",
+        messagePageSize: 25,
+        preferredExternalEditor: createKnownToolId("zed"),
+        preferredExternalDiffTool: createKnownToolId("cursor"),
+        autoHideMessageActions: false,
+        autoHideViewerHeaderActions: true,
+        defaultViewerWrapMode: "wrap",
+        defaultDiffViewMode: "split",
+        terminalAppCommand: "/Applications/iTerm.app",
+        externalTools: hydratedTools,
         systemMessageRegexRules: {
           claude: ["^<command-name>"],
           codex: ["^<environment_context>"],
@@ -340,11 +424,21 @@ describe("usePaneStateSync", () => {
             searchProviders: null,
             preferredAutoRefreshStrategy: null,
             theme: null,
+            darkShikiTheme: null,
+            lightShikiTheme: null,
             monoFontFamily: null,
             regularFontFamily: null,
             monoFontSize: null,
             regularFontSize: null,
             useMonospaceForAllMessages: null,
+            autoHideMessageActions: null,
+            autoHideViewerHeaderActions: null,
+            defaultViewerWrapMode: null,
+            defaultDiffViewMode: null,
+            preferredExternalEditor: null,
+            preferredExternalDiffTool: null,
+            terminalAppCommand: null,
+            externalTools: null,
             selectedProjectId: null,
             selectedSessionId: null,
             historyMode: null,

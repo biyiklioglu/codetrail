@@ -1,5 +1,7 @@
 import type { MessageCategory } from "@codetrail/core/browser";
 
+import type { ParsedMessageToolPayload } from "./messageToolPayload";
+import { parseMessageToolPayload } from "./messageToolPayload";
 import {
   CodeBlock,
   DiffBlock,
@@ -17,8 +19,6 @@ import {
   asObject,
   asString,
   buildUnifiedDiffFromTextPair,
-  parseToolEditPayload,
-  parseToolInvocationPayload,
   tryParseJsonRecord,
 } from "./toolParsing";
 
@@ -28,13 +28,16 @@ export function MessageContent({
   query,
   highlightPatterns = [],
   pathRoots = [],
+  parsedToolPayload,
 }: {
   text: string;
   category: MessageCategory;
   query: string;
   highlightPatterns?: string[];
   pathRoots?: string[];
+  parsedToolPayload?: ParsedMessageToolPayload;
 }) {
+  const resolvedParsedToolPayload = parsedToolPayload ?? parseMessageToolPayload(category, text);
   if (category === "thinking") {
     return (
       <pre className="thinking-block">
@@ -50,6 +53,7 @@ export function MessageContent({
         query={query}
         highlightPatterns={highlightPatterns}
         pathRoots={pathRoots}
+        parsedToolPayload={resolvedParsedToolPayload}
       />
     );
   }
@@ -61,12 +65,20 @@ export function MessageContent({
         query={query}
         highlightPatterns={highlightPatterns}
         pathRoots={pathRoots}
+        parsedToolPayload={resolvedParsedToolPayload}
       />
     );
   }
 
   if (category === "tool_result") {
-    return <ToolResultContent text={text} query={query} highlightPatterns={highlightPatterns} />;
+    return (
+      <ToolResultContent
+        text={text}
+        query={query}
+        highlightPatterns={highlightPatterns}
+        parsedToolPayload={resolvedParsedToolPayload}
+      />
+    );
   }
 
   if (category === "assistant") {
@@ -87,13 +99,15 @@ function ToolUseContent({
   query,
   highlightPatterns,
   pathRoots,
+  parsedToolPayload,
 }: {
   text: string;
   query: string;
   highlightPatterns: string[];
   pathRoots: string[];
+  parsedToolPayload: ParsedMessageToolPayload;
 }) {
-  const parsed = parseToolInvocationPayload(text);
+  const parsed = parsedToolPayload.toolInvocation;
   if (!parsed) {
     const formatted = tryFormatJson(text);
     return (
@@ -110,6 +124,7 @@ function ToolUseContent({
         query={query}
         highlightPatterns={highlightPatterns}
         pathRoots={pathRoots}
+        parsedToolPayload={parsedToolPayload}
       />
     );
   }
@@ -121,7 +136,6 @@ function ToolUseContent({
 
   return (
     <div className="tool-use-view">
-      {parsed.prettyName ? <div className="tool-use-name">{parsed.prettyName}</div> : null}
       {targetPath ? <div className="tool-edit-path">{targetPath}</div> : null}
       {command ? (
         <div className="tool-use-section">
@@ -129,6 +143,7 @@ function ToolUseContent({
           <CodeBlock
             language="shell"
             codeValue={command}
+            pathRoots={pathRoots}
             query={query}
             highlightPatterns={highlightPatterns}
           />
@@ -140,6 +155,7 @@ function ToolUseContent({
           <CodeBlock
             language="json"
             codeValue={JSON.stringify(parsed.inputRecord, null, 2)}
+            pathRoots={pathRoots}
             query={query}
             highlightPatterns={highlightPatterns}
           />
@@ -148,6 +164,7 @@ function ToolUseContent({
         <CodeBlock
           language="json"
           codeValue={JSON.stringify(parsed.record, null, 2)}
+          pathRoots={pathRoots}
           query={query}
           highlightPatterns={highlightPatterns}
         />
@@ -160,12 +177,14 @@ function ToolResultContent({
   text,
   query,
   highlightPatterns,
+  parsedToolPayload,
 }: {
   text: string;
   query: string;
   highlightPatterns: string[];
+  parsedToolPayload: ParsedMessageToolPayload;
 }) {
-  const parsed = tryParseJsonRecord(text);
+  const parsed = parsedToolPayload.toolResult;
   if (!parsed) {
     const language = detectLanguageFromContent(text);
     return (
@@ -173,6 +192,7 @@ function ToolResultContent({
         <CodeBlock
           language={language}
           codeValue={text}
+          pathRoots={[]}
           query={query}
           highlightPatterns={highlightPatterns}
         />
@@ -194,6 +214,7 @@ function ToolResultContent({
           <CodeBlock
             language="json"
             codeValue={JSON.stringify(metadata, null, 2)}
+            pathRoots={[]}
             query={query}
             highlightPatterns={highlightPatterns}
           />
@@ -205,6 +226,7 @@ function ToolResultContent({
           <CodeBlock
             language={inner ? "json" : outputLanguage}
             codeValue={inner ? JSON.stringify(inner, null, 2) : normalizedOutput}
+            pathRoots={[]}
             query={query}
             highlightPatterns={highlightPatterns}
           />
@@ -213,6 +235,7 @@ function ToolResultContent({
         <CodeBlock
           language="json"
           codeValue={JSON.stringify(parsed, null, 2)}
+          pathRoots={[]}
           query={query}
           highlightPatterns={highlightPatterns}
         />
@@ -226,13 +249,15 @@ function ToolEditContent({
   query,
   highlightPatterns,
   pathRoots,
+  parsedToolPayload,
 }: {
   text: string;
   query: string;
   highlightPatterns: string[];
   pathRoots: string[];
+  parsedToolPayload: ParsedMessageToolPayload;
 }) {
-  const parsed = parseToolEditPayload(text);
+  const parsed = parsedToolPayload.toolEdit;
   if (!parsed) {
     const formatted = tryFormatJson(text);
     return (
@@ -284,6 +309,8 @@ function ToolEditContent({
           <CodeBlock
             language={detectLanguageFromFilePath(parsed.filePath)}
             codeValue={parsed.newText}
+            filePath={parsed.filePath}
+            pathRoots={pathRoots}
             query={query}
             highlightPatterns={highlightPatterns}
           />

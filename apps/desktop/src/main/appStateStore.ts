@@ -9,18 +9,34 @@ import {
 } from "@codetrail/core";
 
 import {
+  type DiffViewMode,
+  type ExternalEditorId,
+  type ExternalToolConfig,
+  KNOWN_EXTERNAL_APP_VALUES,
+  type MessagePageSize,
   type MonoFontFamily,
   type MonoFontSize,
   type RegularFontFamily,
   type RegularFontSize,
+  type ShikiThemeId,
   type ThemeMode,
+  UI_DIFF_VIEW_MODE_VALUES,
   UI_MESSAGE_CATEGORY_VALUES,
+  UI_MESSAGE_PAGE_SIZE_VALUES,
   UI_MONO_FONT_SIZE_VALUES,
   UI_MONO_FONT_VALUES,
   UI_PROVIDER_VALUES,
   UI_REGULAR_FONT_SIZE_VALUES,
   UI_REGULAR_FONT_VALUES,
   UI_THEME_VALUES,
+  UI_VIEWER_WRAP_MODE_VALUES,
+  type ViewerWrapMode,
+  createDefaultExternalTools,
+  getDefaultShikiThemeForFamily,
+  getEnabledExternalTools,
+  getShikiThemeFamily,
+  isShikiThemeId,
+  normalizeExternalTools,
 } from "../shared/uiPreferences";
 
 type PaneStateFull = IpcRequest<"ui:setPaneState">;
@@ -77,6 +93,9 @@ const MONO_FONT_VALUES: MonoFontFamily[] = [...UI_MONO_FONT_VALUES];
 const REGULAR_FONT_VALUES: RegularFontFamily[] = [...UI_REGULAR_FONT_VALUES];
 const MONO_FONT_SIZE_VALUES: MonoFontSize[] = [...UI_MONO_FONT_SIZE_VALUES];
 const REGULAR_FONT_SIZE_VALUES: RegularFontSize[] = [...UI_REGULAR_FONT_SIZE_VALUES];
+const MESSAGE_PAGE_SIZE_VALUES: MessagePageSize[] = [...UI_MESSAGE_PAGE_SIZE_VALUES];
+const VIEWER_WRAP_MODE_VALUES: ViewerWrapMode[] = [...UI_VIEWER_WRAP_MODE_VALUES];
+const DIFF_VIEW_MODE_VALUES: DiffViewMode[] = [...UI_DIFF_VIEW_MODE_VALUES];
 const HISTORY_MODE_VALUES = ["session", "bookmarks", "project_all"] as const;
 const PROJECT_VIEW_MODE_VALUES = ["list", "tree"] as const;
 const PROJECT_SORT_FIELD_VALUES = ["last_active", "name"] as const;
@@ -218,7 +237,7 @@ function readState(filePath: string, fileSystem: AppStateStoreFileSystem): AppSt
 
     const record = parsed as Record<string, unknown>;
     // Sanitize each subtree independently so one malformed section does not discard the other.
-    const indexing = sanitizeIndexingState(record.indexing ?? record.pane);
+    const indexing = sanitizeIndexingState(record.indexing);
     const pane = sanitizePaneState(record.pane, indexing?.enabledProviders);
     const window = sanitizeWindowState(record.window);
     return {
@@ -280,11 +299,34 @@ function sanitizePaneState(
     enabledProviders,
   );
   const theme = sanitizeStringValue(record.theme, THEME_VALUES);
+  const darkShikiTheme = sanitizeFamilyShikiTheme(record.darkShikiTheme, "dark");
+  const lightShikiTheme = sanitizeFamilyShikiTheme(record.lightShikiTheme, "light");
   const monoFontFamily = sanitizeStringValue(record.monoFontFamily, MONO_FONT_VALUES);
   const regularFontFamily = sanitizeStringValue(record.regularFontFamily, REGULAR_FONT_VALUES);
   const monoFontSize = sanitizeStringValue(record.monoFontSize, MONO_FONT_SIZE_VALUES);
   const regularFontSize = sanitizeStringValue(record.regularFontSize, REGULAR_FONT_SIZE_VALUES);
+  const messagePageSize =
+    sanitizeNumericValue(record.messagePageSize, MESSAGE_PAGE_SIZE_VALUES) ?? 50;
   const useMonospaceForAllMessages = sanitizeOptionalBoolean(record.useMonospaceForAllMessages);
+  const autoHideMessageActions = sanitizeOptionalBoolean(record.autoHideMessageActions);
+  const autoHideViewerHeaderActions = sanitizeOptionalBoolean(record.autoHideViewerHeaderActions);
+  const defaultViewerWrapMode =
+    sanitizeStringValue(record.defaultViewerWrapMode, VIEWER_WRAP_MODE_VALUES) ?? "nowrap";
+  const defaultDiffViewMode =
+    sanitizeStringValue(record.defaultDiffViewMode, DIFF_VIEW_MODE_VALUES) ?? "unified";
+  const externalTools =
+    sanitizeExternalToolConfigs(record.externalTools) ?? createDefaultExternalTools();
+  const preferredExternalEditor = sanitizePreferredExternalToolId(
+    record.preferredExternalEditor,
+    externalTools,
+    "editor",
+  );
+  const preferredExternalDiffTool = sanitizePreferredExternalToolId(
+    record.preferredExternalDiffTool,
+    externalTools,
+    "diff",
+  );
+  const terminalAppCommand = sanitizeOptionalString(record.terminalAppCommand);
   const selectedProjectId = sanitizeOptionalNonEmptyString(record.selectedProjectId);
   const selectedSessionId = sanitizeOptionalNonEmptyString(record.selectedSessionId);
   const historyMode = sanitizeStringValue(record.historyMode, HISTORY_MODE_VALUES);
@@ -334,11 +376,22 @@ function sanitizePaneState(
     ...(expandedByDefaultCategories ? { expandedByDefaultCategories } : {}),
     ...(searchProviders ? { searchProviders } : {}),
     ...(theme ? { theme } : {}),
+    darkShikiTheme,
+    lightShikiTheme,
     ...(monoFontFamily ? { monoFontFamily } : {}),
     ...(regularFontFamily ? { regularFontFamily } : {}),
     ...(monoFontSize ? { monoFontSize } : {}),
     ...(regularFontSize ? { regularFontSize } : {}),
+    messagePageSize,
     ...(useMonospaceForAllMessages === null ? {} : { useMonospaceForAllMessages }),
+    ...(autoHideMessageActions === null ? {} : { autoHideMessageActions }),
+    ...(autoHideViewerHeaderActions === null ? {} : { autoHideViewerHeaderActions }),
+    defaultViewerWrapMode,
+    defaultDiffViewMode,
+    ...(preferredExternalEditor ? { preferredExternalEditor } : {}),
+    ...(preferredExternalDiffTool ? { preferredExternalDiffTool } : {}),
+    ...(terminalAppCommand ? { terminalAppCommand } : {}),
+    ...(externalTools ? { externalTools } : {}),
     ...(selectedProjectId ? { selectedProjectId } : {}),
     ...(selectedSessionId ? { selectedSessionId } : {}),
     ...(historyMode ? { historyMode } : {}),
@@ -354,6 +407,16 @@ function sanitizePaneState(
     ...(preferredAutoRefreshStrategy ? { preferredAutoRefreshStrategy } : {}),
     ...(systemMessageRegexRules ? { systemMessageRegexRules } : {}),
   };
+}
+
+function sanitizeFamilyShikiTheme(value: unknown, family: "dark" | "light"): ShikiThemeId {
+  if (typeof value === "string" && value.trim().length > 0) {
+    const trimmed = value.trim();
+    if (isShikiThemeId(trimmed) && getShikiThemeFamily(trimmed) === family) {
+      return trimmed;
+    }
+  }
+  return getDefaultShikiThemeForFamily(family);
 }
 
 function sanitizeIndexingState(value: unknown): IndexingConfigState | null {
@@ -414,6 +477,13 @@ function sanitizeInt(value: unknown, min: number, max: number): number | null {
   return rounded;
 }
 
+function sanitizeNumericValue<T extends number>(value: unknown, allowed: readonly T[]): T | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return allowed.includes(value as T) ? (value as T) : null;
+}
+
 function sanitizeOptionalInt(value: unknown, min: number, max: number): number | null {
   if (value === undefined || value === null) {
     return null;
@@ -471,6 +541,88 @@ function sanitizeOptionalNonEmptyString(value: unknown): string | null {
     return null;
   }
   return value;
+}
+
+function sanitizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  return value.length <= 4096 ? value : null;
+}
+
+function sanitizeOptionalStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const result: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.length > 4096) {
+      continue;
+    }
+    result.push(entry);
+  }
+  return result;
+}
+
+function sanitizeExternalToolConfigs(value: unknown): ExternalToolConfig[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const result: ExternalToolConfig[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const id = sanitizeOptionalNonEmptyString(record.id);
+    const kind = record.kind === "known" || record.kind === "custom" ? record.kind : null;
+    const label = sanitizeOptionalNonEmptyString(record.label);
+    const appId =
+      typeof record.appId === "string" &&
+      KNOWN_EXTERNAL_APP_VALUES.includes(record.appId as (typeof KNOWN_EXTERNAL_APP_VALUES)[number])
+        ? (record.appId as (typeof KNOWN_EXTERNAL_APP_VALUES)[number])
+        : null;
+    const command = sanitizeOptionalString(record.command) ?? "";
+    const editorArgs = sanitizeOptionalStringArray(record.editorArgs) ?? [];
+    const diffArgs = sanitizeOptionalStringArray(record.diffArgs) ?? [];
+    const enabledForEditor = sanitizeOptionalBoolean(record.enabledForEditor);
+    const enabledForDiff = sanitizeOptionalBoolean(record.enabledForDiff);
+    if (!id || !kind || !label) {
+      continue;
+    }
+    if (kind === "known" && appId === null) {
+      continue;
+    }
+    result.push({
+      id,
+      kind,
+      label,
+      appId,
+      command,
+      editorArgs,
+      diffArgs,
+      enabledForEditor: enabledForEditor ?? kind === "known",
+      enabledForDiff: enabledForDiff ?? false,
+    });
+  }
+
+  return normalizeExternalTools(result);
+}
+
+function sanitizePreferredExternalToolId(
+  value: unknown,
+  tools: ExternalToolConfig[] | null,
+  role: "editor" | "diff",
+): string | null {
+  if (!tools || tools.length === 0 || typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+  const enabledTools = getEnabledExternalTools(role, tools);
+  if (enabledTools.some((tool) => tool.id === value)) {
+    return value;
+  }
+  return null;
 }
 
 function sanitizeOptionalBoolean(value: unknown): boolean | null {

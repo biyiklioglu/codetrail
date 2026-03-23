@@ -1,6 +1,13 @@
 import { type Dispatch, Fragment, type SetStateAction, useCallback, useRef, useState } from "react";
 
-import { THEME_GROUPS, type ThemeMode, getThemeLabel } from "../../shared/uiPreferences";
+import {
+  type ShikiThemeId,
+  THEME_GROUPS,
+  type ThemeMode,
+  getShikiThemeGroupForUiTheme,
+  getShikiThemeLabel,
+  getThemeLabel,
+} from "../../shared/uiPreferences";
 import { REFRESH_STRATEGY_OPTIONS, type RefreshStrategy } from "../app/autoRefresh";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { ToolbarIcon } from "./ToolbarIcon";
@@ -135,14 +142,75 @@ function ThemeDropdown({
   );
 }
 
+function ShikiThemeDropdown({
+  value,
+  theme,
+  onChange,
+}: {
+  value: ShikiThemeId;
+  theme: ThemeMode;
+  onChange: (theme: ShikiThemeId) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const closeDropdown = useCallback(() => {
+    setOpen(false);
+  }, []);
+  const shikiThemeGroup = getShikiThemeGroupForUiTheme(theme);
+  useClickOutside(containerRef, open, closeDropdown);
+
+  return (
+    <div className="tb-dropdown" ref={containerRef}>
+      <button
+        type="button"
+        className={open ? "tb-btn tb-btn-icon active" : "tb-btn tb-btn-icon"}
+        onClick={() => setOpen((current) => !current)}
+        aria-label="Choose text viewer theme"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={`Text viewer theme: ${getShikiThemeLabel(value)}. Click to choose a different code theme.`}
+      >
+        <ToolbarIcon name="codeTheme" />
+      </button>
+      {open ? (
+        <div
+          className="tb-dropdown-menu tb-dropdown-menu-wide tb-dropdown-menu-right tb-dropdown-menu-scrollable"
+          aria-label="Text viewer theme"
+        >
+          <div className="tb-dropdown-group-label">{shikiThemeGroup.label}</div>
+          {shikiThemeGroup.options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={option.value === value}
+              className={`tb-dropdown-item tb-dropdown-item-checkable${
+                option.value === value ? " selected" : ""
+              }`}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              <span>{option.label}</span>
+              {option.value === value ? <span className="tb-dropdown-check">✓</span> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function TopBar({
   mainView,
   theme,
+  shikiTheme,
   indexing,
   focusMode,
   focusDisabled,
   onToggleSearchView,
   onThemeChange,
+  onShikiThemeChange,
   onIncrementalRefresh,
   refreshStrategy,
   onRefreshStrategyChange,
@@ -155,11 +223,13 @@ export function TopBar({
 }: {
   mainView: "history" | "search" | "settings" | "help";
   theme: ThemeMode;
+  shikiTheme: ShikiThemeId;
   indexing: boolean;
   focusMode: boolean;
   focusDisabled: boolean;
   onToggleSearchView: () => void;
   onThemeChange: (theme: ThemeMode) => void;
+  onShikiThemeChange: (theme: ShikiThemeId) => void;
   onIncrementalRefresh: () => void;
   refreshStrategy: RefreshStrategy;
   onRefreshStrategyChange: Dispatch<SetStateAction<RefreshStrategy>>;
@@ -258,6 +328,7 @@ export function TopBar({
           Help
         </button>
         <ThemeDropdown value={theme} onChange={onThemeChange} />
+        <ShikiThemeDropdown value={shikiTheme} theme={theme} onChange={onShikiThemeChange} />
         <span className="titlebar-divider" aria-hidden />
         <button
           type="button"

@@ -14,7 +14,7 @@ import "@fontsource/plus-jakarta-sans/500.css";
 import "@fontsource/plus-jakarta-sans/600.css";
 import "@fontsource/plus-jakarta-sans/700.css";
 
-import type { ThemeMode } from "../shared/uiPreferences";
+import { type ThemeMode, resolveShikiThemeForUiTheme } from "../shared/uiPreferences";
 import "./styles.css";
 import { getCodetrailClient, isMissingCodetrailClient } from "./lib/codetrailClient";
 import { applyTheme } from "./lib/theme";
@@ -62,8 +62,17 @@ function showBootFailure(title: string, details: unknown): void {
   body.appendChild(container);
 }
 
-function applyInitialTheme(theme: ThemeMode): void {
+function applyInitialTheme(
+  theme: ThemeMode,
+  darkShikiTheme?: string | null,
+  lightShikiTheme?: string | null,
+): void {
   applyTheme(theme);
+  document.documentElement.dataset.shikiTheme = resolveShikiThemeForUiTheme(
+    theme,
+    darkShikiTheme,
+    lightShikiTheme,
+  );
   try {
     window.localStorage.setItem("codetrail-theme", theme);
   } catch {
@@ -110,7 +119,11 @@ async function bootRenderer(): Promise<void> {
       import("./AppErrorBoundary"),
       initialPaneStatePromise,
     ]);
-    applyInitialTheme(initialPaneState?.theme ?? "light");
+    applyInitialTheme(
+      initialPaneState?.theme ?? "light",
+      initialPaneState?.darkShikiTheme ?? null,
+      initialPaneState?.lightShikiTheme ?? null,
+    );
     createRoot(rootElement).render(
       <StrictMode>
         <AppErrorBoundary>

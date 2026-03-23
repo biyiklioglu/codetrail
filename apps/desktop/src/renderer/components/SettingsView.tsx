@@ -8,18 +8,30 @@ import {
 } from "@codetrail/core/browser";
 
 import {
+  type DiffViewMode,
+  type ExternalEditorId,
+  type ExternalToolConfig,
+  type KnownExternalAppId,
+  type MessagePageSize,
   type MonoFontFamily,
   type MonoFontSize,
   type RegularFontFamily,
   type RegularFontSize,
+  type ShikiThemeId,
   THEME_GROUPS,
   type ThemeMode,
+  UI_DIFF_VIEW_MODE_VALUES,
   UI_MESSAGE_CATEGORY_VALUES,
+  UI_MESSAGE_PAGE_SIZE_VALUES,
   UI_MONO_FONT_SIZE_VALUES,
   UI_MONO_FONT_VALUES,
   UI_REGULAR_FONT_SIZE_VALUES,
   UI_REGULAR_FONT_VALUES,
   UI_THEME_VALUES,
+  UI_VIEWER_WRAP_MODE_VALUES,
+  type ViewerWrapMode,
+  getShikiThemeGroupForUiTheme,
+  isShikiThemeId,
 } from "../../shared/uiPreferences";
 import type { SettingsInfoResponse, WatchStatsResponse } from "../app/types";
 import { copyTextToClipboard } from "../lib/clipboard";
@@ -27,22 +39,74 @@ import { openPath } from "../lib/pathActions";
 import { compactPath, prettyCategory, toErrorMessage } from "../lib/viewUtils";
 import { ToolbarIcon } from "./ToolbarIcon";
 import { ZoomPercentInput } from "./ZoomPercentInput";
+import { ExternalToolsSection } from "./settings/ExternalToolsSection";
 
 type SettingsAppearanceProps = {
   theme: ThemeMode;
+  shikiTheme: ShikiThemeId;
   zoomPercent: number;
+  messagePageSize: MessagePageSize;
   monoFontFamily: MonoFontFamily;
   regularFontFamily: RegularFontFamily;
   monoFontSize: MonoFontSize;
   regularFontSize: RegularFontSize;
   useMonospaceForAllMessages: boolean;
+  autoHideMessageActions: boolean;
+  autoHideViewerHeaderActions: boolean;
+  defaultViewerWrapMode: ViewerWrapMode;
+  defaultDiffViewMode: DiffViewMode;
+  preferredExternalEditor: ExternalEditorId;
+  preferredExternalDiffTool: ExternalEditorId;
+  terminalAppCommand: string;
+  externalTools: ExternalToolConfig[];
+  availableEditors: Array<{
+    id: ExternalEditorId;
+    kind: "known" | "custom";
+    label: string;
+    appId: KnownExternalAppId | null;
+    detected: boolean;
+    command: string | null;
+    args: string[];
+    capabilities: {
+      openFile: boolean;
+      openAtLineColumn: boolean;
+      openContent: boolean;
+      openDiff: boolean;
+    };
+  }>;
+  availableDiffTools: Array<{
+    id: ExternalEditorId;
+    kind: "known" | "custom";
+    label: string;
+    appId: KnownExternalAppId | null;
+    detected: boolean;
+    command: string | null;
+    args: string[];
+    capabilities: {
+      openFile: boolean;
+      openAtLineColumn: boolean;
+      openContent: boolean;
+      openDiff: boolean;
+    };
+  }>;
   onThemeChange: (theme: ThemeMode) => void;
+  onShikiThemeChange: (theme: ShikiThemeId) => void;
   onZoomPercentChange: (zoomPercent: number) => void;
+  onMessagePageSizeChange: (pageSize: MessagePageSize) => void;
   onMonoFontFamilyChange: (fontFamily: MonoFontFamily) => void;
   onRegularFontFamilyChange: (fontFamily: RegularFontFamily) => void;
   onMonoFontSizeChange: (fontSize: MonoFontSize) => void;
   onRegularFontSizeChange: (fontSize: RegularFontSize) => void;
   onUseMonospaceForAllMessagesChange: (enabled: boolean) => void;
+  onAutoHideMessageActionsChange: (enabled: boolean) => void;
+  onAutoHideViewerHeaderActionsChange: (enabled: boolean) => void;
+  onDefaultViewerWrapModeChange: (mode: ViewerWrapMode) => void;
+  onDefaultDiffViewModeChange: (mode: DiffViewMode) => void;
+  onPreferredExternalEditorChange: (editor: ExternalEditorId) => void;
+  onPreferredExternalDiffToolChange: (editor: ExternalEditorId) => void;
+  onTerminalAppCommandChange: (value: string) => void;
+  onExternalToolsChange: (tools: ExternalToolConfig[]) => void;
+  onRescanExternalTools?: () => Promise<void> | void;
 };
 
 type SettingsIndexingProps = {
@@ -81,6 +145,17 @@ const MONO_FONT_SIZE_OPTIONS: Array<{ value: MonoFontSize; label: string }> =
 
 const REGULAR_FONT_SIZE_OPTIONS: Array<{ value: RegularFontSize; label: string }> =
   UI_REGULAR_FONT_SIZE_VALUES.map((value) => ({ value, label: value }));
+const MESSAGE_PAGE_SIZE_OPTIONS: Array<{ value: MessagePageSize; label: string }> =
+  UI_MESSAGE_PAGE_SIZE_VALUES.map((value) => ({ value, label: `${value}` }));
+const VIEWER_WRAP_MODE_OPTIONS: Array<{ value: ViewerWrapMode; label: string }> = [
+  { value: "nowrap", label: "Not Wrapped" },
+  { value: "wrap", label: "Wrapped" },
+];
+const DIFF_VIEW_MODE_OPTIONS: Array<{ value: DiffViewMode; label: string }> =
+  UI_DIFF_VIEW_MODE_VALUES.map((value) => ({
+    value,
+    label: value === "unified" ? "Unified" : "Split",
+  }));
 
 const PROVIDER_ICONS: Record<Provider, string> = {
   claude: "C",
@@ -142,6 +217,7 @@ export function SettingsView({
         })),
       )
     : [];
+  const shikiThemeGroup = getShikiThemeGroupForUiTheme(appearance.theme);
 
   return (
     <div className="settings-view">
@@ -213,6 +289,68 @@ export function SettingsView({
                     </div>
                   </SettingsField>
 
+                  <SettingsField label="Text viewer theme">
+                    <div className="settings-select-wrap">
+                      <select
+                        className="settings-select"
+                        aria-label="Text viewer theme"
+                        value={appearance.shikiTheme}
+                        onChange={(event) =>
+                          appearance.onShikiThemeChange(
+                            isShikiThemeId(event.target.value)
+                              ? event.target.value
+                              : appearance.shikiTheme,
+                          )
+                        }
+                      >
+                        <optgroup label={shikiThemeGroup.label}>
+                          {shikiThemeGroup.options.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      </select>
+                      <span className="settings-select-chevron" aria-hidden>
+                        <svg viewBox="0 0 12 12">
+                          <title>Open menu</title>
+                          <path d="M3 4.5L6 7.5L9 4.5" />
+                        </svg>
+                      </span>
+                    </div>
+                  </SettingsField>
+
+                  <SettingsField label="Messages per page">
+                    <div className="settings-select-wrap">
+                      <select
+                        className="settings-select"
+                        aria-label="Messages per page"
+                        value={appearance.messagePageSize}
+                        onChange={(event) =>
+                          appearance.onMessagePageSizeChange(
+                            selectNumericValueOrFallback(
+                              event.target.value,
+                              UI_MESSAGE_PAGE_SIZE_VALUES,
+                              appearance.messagePageSize,
+                            ),
+                          )
+                        }
+                      >
+                        {MESSAGE_PAGE_SIZE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="settings-select-chevron" aria-hidden>
+                        <svg viewBox="0 0 12 12">
+                          <title>Open menu</title>
+                          <path d="M3 4.5L6 7.5L9 4.5" />
+                        </svg>
+                      </span>
+                    </div>
+                  </SettingsField>
+
                   <SettingsField label="Zoom">
                     <ZoomPercentInput
                       value={appearance.zoomPercent}
@@ -223,7 +361,83 @@ export function SettingsView({
                       inputClassName="settings-zoom-input"
                     />
                   </SettingsField>
+
+                  <SettingsField label="Default text viewer wrap">
+                    <div className="settings-select-wrap">
+                      <select
+                        className="settings-select"
+                        aria-label="Default text viewer wrap"
+                        value={appearance.defaultViewerWrapMode}
+                        onChange={(event) =>
+                          appearance.onDefaultViewerWrapModeChange(
+                            selectValueOrFallback(
+                              event.target.value,
+                              UI_VIEWER_WRAP_MODE_VALUES,
+                              appearance.defaultViewerWrapMode,
+                            ),
+                          )
+                        }
+                      >
+                        {VIEWER_WRAP_MODE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="settings-select-chevron" aria-hidden>
+                        <svg viewBox="0 0 12 12">
+                          <title>Open menu</title>
+                          <path d="M3 4.5L6 7.5L9 4.5" />
+                        </svg>
+                      </span>
+                    </div>
+                  </SettingsField>
+
+                  <SettingsField label="Default diff view">
+                    <div className="settings-select-wrap">
+                      <select
+                        className="settings-select"
+                        aria-label="Default diff view"
+                        value={appearance.defaultDiffViewMode}
+                        onChange={(event) =>
+                          appearance.onDefaultDiffViewModeChange(
+                            selectValueOrFallback(
+                              event.target.value,
+                              UI_DIFF_VIEW_MODE_VALUES,
+                              appearance.defaultDiffViewMode,
+                            ),
+                          )
+                        }
+                      >
+                        {DIFF_VIEW_MODE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="settings-select-chevron" aria-hidden>
+                        <svg viewBox="0 0 12 12">
+                          <title>Open menu</title>
+                          <path d="M3 4.5L6 7.5L9 4.5" />
+                        </svg>
+                      </span>
+                    </div>
+                  </SettingsField>
                 </div>
+                <InlineSwitchRow label="Auto-hide message actions">
+                  <SettingsSwitch
+                    checked={appearance.autoHideMessageActions}
+                    onChange={appearance.onAutoHideMessageActionsChange}
+                    ariaLabel="Auto-hide message actions"
+                  />
+                </InlineSwitchRow>
+                <InlineSwitchRow label="Auto-hide text viewer header actions">
+                  <SettingsSwitch
+                    checked={appearance.autoHideViewerHeaderActions}
+                    onChange={appearance.onAutoHideViewerHeaderActionsChange}
+                    ariaLabel="Auto-hide text viewer header actions"
+                  />
+                </InlineSwitchRow>
               </SectionCard>
 
               <SectionCard>
@@ -238,6 +452,7 @@ export function SettingsView({
                     <div className="settings-select-wrap">
                       <select
                         className="settings-select"
+                        aria-label="Monospaced font"
                         value={appearance.monoFontFamily}
                         onChange={(event) =>
                           appearance.onMonoFontFamilyChange(
@@ -268,6 +483,7 @@ export function SettingsView({
                     <div className="settings-select-wrap">
                       <select
                         className="settings-select"
+                        aria-label="Monospaced size"
                         value={appearance.monoFontSize}
                         onChange={(event) =>
                           appearance.onMonoFontSizeChange(
@@ -298,6 +514,7 @@ export function SettingsView({
                     <div className="settings-select-wrap">
                       <select
                         className="settings-select"
+                        aria-label="Regular font"
                         value={appearance.regularFontFamily}
                         onChange={(event) =>
                           appearance.onRegularFontFamilyChange(
@@ -328,6 +545,7 @@ export function SettingsView({
                     <div className="settings-select-wrap">
                       <select
                         className="settings-select"
+                        aria-label="Regular size"
                         value={appearance.regularFontSize}
                         onChange={(event) =>
                           appearance.onRegularFontSizeChange(
@@ -469,6 +687,31 @@ export function SettingsView({
                   Turning a provider off removes its indexed history and bookmarks on the next
                   refresh, but never touches the raw transcript files on disk.
                 </div>
+              </SectionCard>
+
+              <SectionCard>
+                <SectionHeader
+                  tone="theme"
+                  icon="↗"
+                  title="External Tools"
+                  subtitle="Manage editors and diff tools in one place. Preset tools stay available, custom tools can be added freely, and Editor or Diff roles are toggled directly on each tool."
+                />
+                <ExternalToolsSection
+                  preferredExternalEditor={appearance.preferredExternalEditor}
+                  preferredExternalDiffTool={appearance.preferredExternalDiffTool}
+                  terminalAppCommand={appearance.terminalAppCommand}
+                  externalTools={appearance.externalTools}
+                  availableEditors={appearance.availableEditors}
+                  availableDiffTools={appearance.availableDiffTools}
+                  onPreferredExternalEditorChange={appearance.onPreferredExternalEditorChange}
+                  onPreferredExternalDiffToolChange={appearance.onPreferredExternalDiffToolChange}
+                  onTerminalAppCommandChange={appearance.onTerminalAppCommandChange}
+                  onExternalToolsChange={appearance.onExternalToolsChange}
+                  {...(onActionError ? { onActionError } : {})}
+                  {...(appearance.onRescanExternalTools
+                    ? { onRescanExternalTools: appearance.onRescanExternalTools }
+                    : {})}
+                />
               </SectionCard>
 
               <SectionCard>
@@ -847,6 +1090,15 @@ function selectValueOrFallback<T extends string>(
   fallback: T,
 ): T {
   return allowedValues.includes(value as T) ? (value as T) : fallback;
+}
+
+function selectNumericValueOrFallback<T extends number>(
+  value: string,
+  allowedValues: readonly T[],
+  fallback: T,
+): T {
+  const parsed = Number.parseInt(value, 10);
+  return allowedValues.includes(parsed as T) ? (parsed as T) : fallback;
 }
 
 function reportSettingsActionError(

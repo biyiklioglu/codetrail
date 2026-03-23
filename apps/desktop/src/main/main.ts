@@ -13,14 +13,25 @@ import {
 import { type AppStateStore, createAppStateStore } from "./appStateStore";
 import { bootstrapMainProcess, shutdownMainProcess } from "./bootstrap";
 import { appendDebugLog } from "./debugLog";
+import { resolveSideBySideInstance } from "./instanceMode";
 import { createBeforeQuitHandler } from "./quitLifecycle";
 import { serializeError } from "./serializeError";
 
 let mainWindowRef: BrowserWindow | null = null;
 let debugLogPathCache: string | null = null;
+const sideBySideInstance = resolveSideBySideInstance(
+  process.argv,
+  process.env,
+  app.getPath("userData"),
+);
+if (sideBySideInstance) {
+  app.setPath("userData", sideBySideInstance.userDataPath);
+  app.setPath("sessionData", sideBySideInstance.sessionDataPath);
+}
 const verboseLoggingEnabled =
   process.argv.includes("--verbose") || app.commandLine.hasSwitch("verbose");
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const singleInstanceModeEnabled = sideBySideInstance === null;
+const hasSingleInstanceLock = singleInstanceModeEnabled ? app.requestSingleInstanceLock() : true;
 if (!hasSingleInstanceLock) {
   app.quit();
 }
@@ -92,7 +103,7 @@ function createWindow(appStateStore: AppStateStore): BrowserWindow {
     height: persistedWindowState?.height ?? 900,
     minWidth: 1120,
     minHeight: 680,
-    title: "Code Trail",
+    title: `Code Trail${sideBySideInstance?.titleSuffix ?? ""}`,
     ...(isMac
       ? {
           titleBarStyle: "hiddenInset" as const,
@@ -243,6 +254,9 @@ if (hasSingleInstanceLock) {
       console.log(`[codetrail] verbose logging enabled: ${getDebugLogPath()}`);
     }
     writeDebugLog("app whenReady");
+    if (sideBySideInstance) {
+      writeDebugLog("side-by-side instance enabled", sideBySideInstance, { force: true });
+    }
     const appStateStore = createAppStateStore(join(app.getPath("userData"), "ui-state.json"));
     const iconPath = resolveAppIconPath();
     if (iconPath && process.platform === "darwin") {
@@ -312,17 +326,19 @@ if (hasSingleInstanceLock) {
     });
   });
 
-  app.on("second-instance", () => {
-    writeDebugLog("second-instance");
-    const window = mainWindowRef ?? BrowserWindow.getAllWindows()[0] ?? null;
-    if (!window) {
-      return;
-    }
-    if (window.isMinimized()) {
-      window.restore();
-    }
-    window.focus();
-  });
+  if (singleInstanceModeEnabled) {
+    app.on("second-instance", () => {
+      writeDebugLog("second-instance");
+      const window = mainWindowRef ?? BrowserWindow.getAllWindows()[0] ?? null;
+      if (!window) {
+        return;
+      }
+      if (window.isMinimized()) {
+        window.restore();
+      }
+      window.focus();
+    });
+  }
 
   app.on("window-all-closed", () => {
     writeDebugLog("window-all-closed", { platform: process.platform });

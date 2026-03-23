@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import type {
   Dispatch,
   MutableRefObject,
@@ -12,7 +12,7 @@ import type { RefreshContext } from "./useHistoryController";
 
 import type { MessageCategory, Provider } from "@codetrail/core/browser";
 
-import { BOOKMARKS_NAV_ID, PAGE_SIZE, PROJECT_ALL_NAV_ID, PROVIDERS } from "../app/constants";
+import { BOOKMARKS_NAV_ID, PROJECT_ALL_NAV_ID, PROVIDERS } from "../app/constants";
 import { createHistorySelection, setHistorySelectionProjectId } from "../app/historySelection";
 import type {
   HistoryMessage,
@@ -97,6 +97,7 @@ export function useHistoryInteractions({
   canGoToPreviousHistoryPage,
   visibleFocusedMessageId,
   sessionPage,
+  messagePageSize,
   selectedSession,
   selectedProject,
   sessionDetailTotalCount,
@@ -158,6 +159,7 @@ export function useHistoryInteractions({
   canGoToPreviousHistoryPage: boolean;
   visibleFocusedMessageId: string;
   sessionPage: number;
+  messagePageSize: number;
   selectedSession: SessionSummary | null;
   selectedProject: ProjectSummary | null;
   sessionDetailTotalCount: number | null | undefined;
@@ -172,6 +174,29 @@ export function useHistoryInteractions({
   pendingProjectPaneFocusCommitModeRef: MutableRefObject<HistorySelectionCommitMode>;
   pendingProjectPaneFocusWaitForKeyboardIdleRef: MutableRefObject<boolean>;
 }) {
+  const messagesByCategory = useMemo(() => {
+    const map = new Map<MessageCategory, HistoryMessage[]>();
+    for (const message of activeHistoryMessages) {
+      const existing = map.get(message.category);
+      if (existing) {
+        existing.push(message);
+      } else {
+        map.set(message.category, [message]);
+      }
+    }
+    return map;
+  }, [activeHistoryMessages]);
+
+  const projectMessagesById = useMemo(
+    () => new Map(activeHistoryMessages.map((message) => [message.id, message])),
+    [activeHistoryMessages],
+  );
+
+  const bookmarksByMessageId = useMemo(
+    () => new Map(bookmarksResponse.results.map((entry) => [entry.message.id, entry])),
+    [bookmarksResponse.results],
+  );
+
   const handleToggleScopedMessagesExpanded = useCallback(() => {
     if (scopedMessages.length === 0) {
       return;
@@ -196,9 +221,7 @@ export function useHistoryInteractions({
 
   const handleToggleCategoryMessagesExpanded = useCallback(
     (category: MessageCategory) => {
-      const categoryMessages = activeHistoryMessages.filter(
-        (message) => message.category === category,
-      );
+      const categoryMessages = messagesByCategory.get(category) ?? [];
       if (categoryMessages.length === 0) {
         return;
       }
@@ -213,7 +236,7 @@ export function useHistoryInteractions({
         return next;
       });
     },
-    [activeHistoryMessages, isExpandedByDefault, setMessageExpanded],
+    [isExpandedByDefault, messagesByCategory, setMessageExpanded],
   );
 
   const handleToggleMessageExpanded = useCallback(
@@ -231,9 +254,7 @@ export function useHistoryInteractions({
       // Bookmarks/project-wide views route through pending search navigation because the controller
       // may need to switch projects or sessions before the message can be focused.
       if (historyMode === "bookmarks") {
-        const bookmarked = bookmarksResponse.results.find(
-          (entry) => entry.message.id === messageId,
-        );
+        const bookmarked = bookmarksByMessageId.get(messageId);
         if (!bookmarked) {
           return;
         }
@@ -248,7 +269,7 @@ export function useHistoryInteractions({
       }
 
       if (historyMode === "project_all") {
-        const projectMessage = activeHistoryMessages.find((entry) => entry.id === messageId);
+        const projectMessage = projectMessagesById.get(messageId);
         if (!projectMessage || !selectedProjectId) {
           return;
         }
@@ -267,10 +288,10 @@ export function useHistoryInteractions({
       setPendingRevealTarget({ messageId, sourceId });
     },
     [
-      activeHistoryMessages,
-      bookmarksResponse.results,
+      bookmarksByMessageId,
       historyCategories,
       historyMode,
+      projectMessagesById,
       selectedProjectId,
       setFocusMessageId,
       setPendingRevealTarget,
@@ -291,12 +312,25 @@ export function useHistoryInteractions({
           messageId: message.id,
           messageSourceId: message.sourceId,
         });
-        await loadBookmarks();
+        await Promise.all([
+          loadBookmarks(),
+          loadProjects("resort"),
+          loadSessions(),
+          refreshTreeProjectSessions(),
+        ]);
       } catch (error) {
         logError("Failed toggling bookmark", error);
       }
     },
-    [codetrail, loadBookmarks, logError, selectedProjectId],
+    [
+      codetrail,
+      loadBookmarks,
+      loadProjects,
+      loadSessions,
+      logError,
+      refreshTreeProjectSessions,
+      selectedProjectId,
+    ],
   );
 
   const handleMessageListScroll = useCallback(
@@ -759,7 +793,7 @@ export function useHistoryInteractions({
       return;
     }
     const messageCount = sessionDetailTotalCount ?? selectedSession.messageCount;
-    const pageCount = Math.max(1, Math.ceil(messageCount / PAGE_SIZE));
+    const pageCount = Math.max(1, Math.ceil(messageCount / messagePageSize));
     const copied = await copyTextToClipboard(
       formatSessionDetails(selectedSession, {
         projectLabel: selectedProject?.name || selectedProject?.path || "(unknown project)",
@@ -770,7 +804,14 @@ export function useHistoryInteractions({
     if (!copied) {
       logError("Failed copying session details", "Clipboard API unavailable");
     }
-  }, [logError, selectedProject, selectedSession, sessionDetailTotalCount, sessionPage]);
+  }, [
+    logError,
+    messagePageSize,
+    selectedProject,
+    selectedSession,
+    sessionDetailTotalCount,
+    sessionPage,
+  ]);
 
   const handleCopyProjectDetails = useCallback(async () => {
     if (!selectedProject) {

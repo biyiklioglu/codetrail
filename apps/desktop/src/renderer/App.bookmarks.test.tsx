@@ -5,8 +5,10 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { App } from "./App";
+import type { PaneStateSnapshot } from "./app/types";
 import { SEARCH_PLACEHOLDERS } from "./lib/searchLabels";
 import {
+  createAppClient,
   createBookmarkSearchDelayClient,
   createBookmarksSearchClient,
 } from "./test/appTestFixtures";
@@ -86,6 +88,8 @@ describe("App bookmarks", () => {
       projectId: "project_1",
       totalCount: 1,
       filteredCount: 0,
+      page: 0,
+      pageSize: 100,
       categoryCounts: {
         user: 0,
         assistant: 0,
@@ -136,5 +140,121 @@ describe("App bookmarks", () => {
     });
     expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.globalMessages)).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDERS.historySession)).toBeNull();
+  });
+
+  it("updates bookmark counts in the tree and header immediately after toggling", async () => {
+    const user = userEvent.setup();
+    let isBookmarked = false;
+    const client = createAppClient({
+      "projects:list": () => ({
+        projects: [
+          {
+            id: "project_1",
+            provider: "claude",
+            name: "Project One",
+            path: "/workspace/project-one",
+            sessionCount: 1,
+            messageCount: 2,
+            bookmarkCount: isBookmarked ? 1 : 0,
+            lastActivity: "2026-03-01T10:00:05.000Z",
+          },
+        ],
+      }),
+      "sessions:list": () => ({
+        sessions: [
+          {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Investigate markdown rendering",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 2,
+            bookmarkCount: isBookmarked ? 1 : 0,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+        ],
+      }),
+      "bookmarks:listProject": () => ({
+        projectId: "project_1",
+        totalCount: isBookmarked ? 1 : 0,
+        filteredCount: isBookmarked ? 1 : 0,
+        page: 0,
+        pageSize: 100,
+        categoryCounts: {
+          user: isBookmarked ? 1 : 0,
+          assistant: 0,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        results: isBookmarked
+          ? [
+              {
+                projectId: "project_1",
+                sessionId: "session_1",
+                sessionTitle: "Investigate markdown rendering",
+                bookmarkedAt: "2026-03-01T10:01:00.000Z",
+                isOrphaned: false,
+                orphanedAt: null,
+                message: {
+                  id: "m1",
+                  sourceId: "src1",
+                  sessionId: "session_1",
+                  provider: "claude",
+                  category: "user",
+                  content: "Please review markdown table rendering",
+                  createdAt: "2026-03-01T10:00:00.000Z",
+                  tokenInput: null,
+                  tokenOutput: null,
+                  operationDurationMs: null,
+                  operationDurationSource: null,
+                  operationDurationConfidence: null,
+                },
+              },
+            ]
+          : [],
+      }),
+      "bookmarks:toggle": () => {
+        isBookmarked = !isBookmarked;
+        return { bookmarked: isBookmarked };
+      },
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "1 bookmark" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open 1 bookmarked messages" })).toBeNull();
+
+    await user.click(screen.getAllByRole("button", { name: "Bookmark this message" })[0]!);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "1 bookmark" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Open 1 bookmarked messages" }),
+      ).toBeInTheDocument();
+    });
   });
 });

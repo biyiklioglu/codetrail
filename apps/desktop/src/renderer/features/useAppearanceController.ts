@@ -1,11 +1,26 @@
-import { useCallback, useEffect, useState } from "react";
+import { type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import type { IpcResponse } from "@codetrail/core/browser";
 
 import type {
+  DiffViewMode,
+  ExternalEditorId,
+  ExternalToolConfig,
+  MessagePageSize,
   MonoFontFamily,
   MonoFontSize,
   RegularFontFamily,
   RegularFontSize,
+  ShikiThemeId,
   ThemeMode,
+  ViewerWrapMode,
+} from "../../shared/uiPreferences";
+import {
+  createDefaultExternalTools,
+  getPreferredExternalToolId,
+  getThemeFamily,
+  resolveShikiThemeForFamily,
+  resolveShikiThemeForUiTheme,
 } from "../../shared/uiPreferences";
 import { MONO_FONT_STACKS, REGULAR_FONT_STACKS } from "../app/constants";
 import type { PaneStateSnapshot, SettingsInfoResponse } from "../app/types";
@@ -18,6 +33,28 @@ import {
   MIN_ZOOM_PERCENT,
   clampZoomPercent,
 } from "../lib/zoom";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
+
+function pickPreferredExternalApp(
+  apps:
+    | Array<
+        | IpcResponse<"editor:listAvailable">["editors"][number]
+        | IpcResponse<"editor:listAvailable">["diffTools"][number]
+      >
+    | null
+    | undefined,
+  role: "editor" | "diff",
+): ExternalEditorId | null {
+  if (!Array.isArray(apps) || apps.length === 0) {
+    return null;
+  }
+  return (
+    apps.find(
+      (app) =>
+        app.detected && (role === "diff" ? app.capabilities.openDiff : app.capabilities.openFile),
+    )?.id ?? null
+  );
+}
 
 export function useAppearanceController({
   initialPaneState,
@@ -27,7 +64,14 @@ export function useAppearanceController({
   logError: (context: string, error: unknown) => void;
 }) {
   const codetrail = useCodetrailClient();
-  const [theme, setTheme] = useState<ThemeMode>(initialPaneState?.theme ?? "light");
+  const initialTheme = initialPaneState?.theme ?? "light";
+  const [theme, setThemeState] = useState<ThemeMode>(initialTheme);
+  const [darkShikiTheme, setDarkShikiTheme] = useState<ShikiThemeId>(
+    resolveShikiThemeForFamily("dark", initialPaneState?.darkShikiTheme),
+  );
+  const [lightShikiTheme, setLightShikiTheme] = useState<ShikiThemeId>(
+    resolveShikiThemeForFamily("light", initialPaneState?.lightShikiTheme),
+  );
   const [monoFontFamily, setMonoFontFamily] = useState<MonoFontFamily>(
     initialPaneState?.monoFontFamily ?? "droid_sans_mono",
   );
@@ -40,13 +84,138 @@ export function useAppearanceController({
   const [regularFontSize, setRegularFontSize] = useState<RegularFontSize>(
     initialPaneState?.regularFontSize ?? "14px",
   );
+  const [messagePageSize, setMessagePageSize] = useState<MessagePageSize>(
+    initialPaneState?.messagePageSize ?? 50,
+  );
   const [useMonospaceForAllMessages, setUseMonospaceForAllMessages] = useState(
     initialPaneState?.useMonospaceForAllMessages ?? false,
   );
+  const [autoHideMessageActions, setAutoHideMessageActions] = useState(
+    initialPaneState?.autoHideMessageActions ?? true,
+  );
+  const [autoHideViewerHeaderActions, setAutoHideViewerHeaderActions] = useState(
+    initialPaneState?.autoHideViewerHeaderActions ?? false,
+  );
+  const [defaultViewerWrapMode, setDefaultViewerWrapMode] = useState<ViewerWrapMode>(
+    initialPaneState?.defaultViewerWrapMode ?? "nowrap",
+  );
+  const [defaultDiffViewMode, setDefaultDiffViewMode] = useState<DiffViewMode>(
+    initialPaneState?.defaultDiffViewMode ?? "unified",
+  );
+  const defaultExternalTools = useMemo(() => createDefaultExternalTools(), []);
+  const [externalTools, setExternalTools] = useState<ExternalToolConfig[]>(
+    initialPaneState?.externalTools ?? defaultExternalTools,
+  );
+  const [preferredExternalEditor, setPreferredExternalEditor] = useState<ExternalEditorId>(
+    initialPaneState?.preferredExternalEditor ??
+      getPreferredExternalToolId(
+        initialPaneState?.externalTools ?? defaultExternalTools,
+        null,
+        "editor",
+      ),
+  );
+  const [preferredExternalDiffTool, setPreferredExternalDiffTool] = useState<ExternalEditorId>(
+    initialPaneState?.preferredExternalDiffTool ??
+      getPreferredExternalToolId(
+        initialPaneState?.externalTools ?? defaultExternalTools,
+        null,
+        "diff",
+      ),
+  );
+  const debouncedExternalTools = useDebouncedValue(externalTools, 200);
+  const [terminalAppCommand, setTerminalAppCommand] = useState(
+    initialPaneState?.terminalAppCommand ?? "",
+  );
+  const [availableEditors, setAvailableEditors] = useState<
+    Array<IpcResponse<"editor:listAvailable">["editors"][number]>
+  >([]);
+  const [availableDiffTools, setAvailableDiffTools] = useState<
+    Array<IpcResponse<"editor:listAvailable">["diffTools"][number]>
+  >([]);
   const [zoomPercent, setZoomPercent] = useState(100);
   const [settingsInfo, setSettingsInfo] = useState<SettingsInfoResponse | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const hasAutoSelectedPreferredEditorRef = useRef(false);
+  const hasAutoSelectedPreferredDiffToolRef = useRef(false);
+
+  const shikiTheme = resolveShikiThemeForUiTheme(theme, darkShikiTheme, lightShikiTheme);
+
+  const setTheme = useCallback((value: SetStateAction<ThemeMode>) => {
+    setThemeState((currentTheme) => (typeof value === "function" ? value(currentTheme) : value));
+  }, []);
+
+  const setShikiTheme = useCallback(
+    (value: SetStateAction<ShikiThemeId>) => {
+      const family = getThemeFamily(theme);
+      if (family === "dark") {
+        setDarkShikiTheme((current) => (typeof value === "function" ? value(current) : value));
+        return;
+      }
+      setLightShikiTheme((current) => (typeof value === "function" ? value(current) : value));
+    },
+    [theme],
+  );
+
+  const loadAvailableExternalTools = useCallback(async () => {
+    const response = await codetrail.invoke("editor:listAvailable", {
+      externalTools: debouncedExternalTools,
+    });
+    setAvailableEditors(Array.isArray(response.editors) ? response.editors : []);
+    setAvailableDiffTools(Array.isArray(response.diffTools) ? response.diffTools : []);
+  }, [codetrail, debouncedExternalTools]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadAvailableExternalTools().catch((error: unknown) => {
+      if (!cancelled) {
+        logError("Failed loading available editors", error);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAvailableExternalTools, logError]);
+
+  useEffect(() => {
+    if (availableEditors.length === 0) {
+      return;
+    }
+
+    if (initialPaneState?.preferredExternalEditor == null) {
+      const preferred = pickPreferredExternalApp(availableEditors, "editor");
+      if (
+        preferred &&
+        !hasAutoSelectedPreferredEditorRef.current &&
+        preferred !== preferredExternalEditor
+      ) {
+        hasAutoSelectedPreferredEditorRef.current = true;
+        setPreferredExternalEditor(preferred);
+      }
+    }
+
+    if (initialPaneState?.preferredExternalDiffTool == null) {
+      const preferred = pickPreferredExternalApp(availableDiffTools, "diff");
+      if (
+        preferred &&
+        !hasAutoSelectedPreferredDiffToolRef.current &&
+        preferred !== preferredExternalDiffTool
+      ) {
+        hasAutoSelectedPreferredDiffToolRef.current = true;
+        setPreferredExternalDiffTool(preferred);
+      }
+    }
+  }, [
+    availableEditors,
+    availableDiffTools,
+    initialPaneState?.preferredExternalDiffTool,
+    initialPaneState?.preferredExternalEditor,
+    hasAutoSelectedPreferredDiffToolRef,
+    hasAutoSelectedPreferredEditorRef,
+    preferredExternalDiffTool,
+    preferredExternalEditor,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,6 +271,30 @@ export function useAppearanceController({
       : "false";
   }, [useMonospaceForAllMessages]);
 
+  useEffect(() => {
+    document.documentElement.dataset.autoHideMessageActions = autoHideMessageActions
+      ? "true"
+      : "false";
+  }, [autoHideMessageActions]);
+
+  useEffect(() => {
+    document.documentElement.dataset.autoHideViewerHeaderActions = autoHideViewerHeaderActions
+      ? "true"
+      : "false";
+  }, [autoHideViewerHeaderActions]);
+
+  useEffect(() => {
+    document.documentElement.dataset.defaultViewerWrapMode = defaultViewerWrapMode;
+  }, [defaultViewerWrapMode]);
+
+  useEffect(() => {
+    document.documentElement.dataset.defaultDiffViewMode = defaultDiffViewMode;
+  }, [defaultDiffViewMode]);
+
+  useEffect(() => {
+    document.documentElement.dataset.shikiTheme = shikiTheme;
+  }, [shikiTheme]);
+
   const applyZoomAction = useCallback(
     async (action: "in" | "out" | "reset") => {
       try {
@@ -143,6 +336,12 @@ export function useAppearanceController({
   return {
     theme,
     setTheme,
+    darkShikiTheme,
+    setDarkShikiTheme,
+    lightShikiTheme,
+    setLightShikiTheme,
+    shikiTheme,
+    setShikiTheme,
     monoFontFamily,
     setMonoFontFamily,
     regularFontFamily,
@@ -151,8 +350,28 @@ export function useAppearanceController({
     setMonoFontSize,
     regularFontSize,
     setRegularFontSize,
+    messagePageSize,
+    setMessagePageSize,
     useMonospaceForAllMessages,
     setUseMonospaceForAllMessages,
+    autoHideMessageActions,
+    setAutoHideMessageActions,
+    autoHideViewerHeaderActions,
+    setAutoHideViewerHeaderActions,
+    defaultViewerWrapMode,
+    setDefaultViewerWrapMode,
+    defaultDiffViewMode,
+    setDefaultDiffViewMode,
+    preferredExternalEditor,
+    setPreferredExternalEditor,
+    preferredExternalDiffTool,
+    setPreferredExternalDiffTool,
+    terminalAppCommand,
+    setTerminalAppCommand,
+    externalTools,
+    setExternalTools,
+    availableEditors,
+    availableDiffTools,
     zoomPercent,
     canZoomIn: zoomPercent < MAX_ZOOM_PERCENT,
     canZoomOut: zoomPercent > MIN_ZOOM_PERCENT,
@@ -163,5 +382,6 @@ export function useAppearanceController({
     settingsLoading,
     settingsError,
     loadSettingsInfo,
+    loadAvailableExternalTools,
   };
 }

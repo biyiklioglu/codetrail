@@ -1,5 +1,6 @@
 export * from "./contracts/canonical";
 export * from "./contracts/categories";
+export * from "./contracts/externalApps";
 export * from "./contracts/ipc";
 export * from "./contracts/providerMetadata";
 export type { SystemMessageRegexRules } from "./indexing/systemMessageRules";

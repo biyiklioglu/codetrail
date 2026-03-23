@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { createDefaultExternalTools, createKnownToolId } from "../shared/uiPreferences";
 import { AppStateStore } from "./appStateStore";
 
 function createMemoryFs(initialFiles: Record<string, string> = {}) {
@@ -63,11 +64,22 @@ describe("AppStateStore", () => {
       singleClickFoldersExpand: false,
       singleClickProjectsExpand: true,
       theme: "ft-dark",
+      darkShikiTheme: "vesper",
+      lightShikiTheme: "github-light-default",
       monoFontFamily: "droid_sans_mono",
       regularFontFamily: "inter",
       monoFontSize: "13px",
       regularFontSize: "14px",
+      messagePageSize: 25,
       useMonospaceForAllMessages: true,
+      autoHideMessageActions: false,
+      autoHideViewerHeaderActions: true,
+      defaultViewerWrapMode: "wrap",
+      defaultDiffViewMode: "split",
+      preferredExternalEditor: createKnownToolId("zed"),
+      preferredExternalDiffTool: createKnownToolId("vscode"),
+      terminalAppCommand: "/Applications/iTerm.app",
+      externalTools: createDefaultExternalTools(),
       selectedProjectId: "project_alpha",
       selectedSessionId: "session_beta",
       historyMode: "bookmarks",
@@ -103,11 +115,22 @@ describe("AppStateStore", () => {
       singleClickFoldersExpand: false,
       singleClickProjectsExpand: true,
       theme: "ft-dark",
+      darkShikiTheme: "vesper",
+      lightShikiTheme: "github-light-default",
       monoFontFamily: "droid_sans_mono",
       regularFontFamily: "inter",
       monoFontSize: "13px",
       regularFontSize: "14px",
+      messagePageSize: 25,
       useMonospaceForAllMessages: true,
+      autoHideMessageActions: false,
+      autoHideViewerHeaderActions: true,
+      defaultViewerWrapMode: "wrap",
+      defaultDiffViewMode: "split",
+      preferredExternalEditor: createKnownToolId("zed"),
+      preferredExternalDiffTool: createKnownToolId("vscode"),
+      terminalAppCommand: "/Applications/iTerm.app",
+      externalTools: createDefaultExternalTools(),
       selectedProjectId: "project_alpha",
       selectedSessionId: "session_beta",
       historyMode: "bookmarks",
@@ -171,7 +194,16 @@ describe("AppStateStore", () => {
     const persisted = JSON.parse(fs.files.get(filePath) ?? "{}") as {
       pane?: { projectPaneWidth?: number; sessionPaneWidth?: number };
     };
-    expect(persisted.pane).toEqual({ projectPaneWidth: 310, sessionPaneWidth: 370 });
+    expect(persisted.pane).toEqual({
+      projectPaneWidth: 310,
+      sessionPaneWidth: 370,
+      darkShikiTheme: "github-dark-default",
+      lightShikiTheme: "github-light-default",
+      messagePageSize: 50,
+      defaultViewerWrapMode: "nowrap",
+      defaultDiffViewMode: "unified",
+      externalTools: createDefaultExternalTools(),
+    });
   });
 
   it("falls back to empty state for malformed payloads", () => {
@@ -184,6 +216,29 @@ describe("AppStateStore", () => {
 
     expect(store.getPaneState()).toBeNull();
     expect(store.getWindowState()).toBeNull();
+  });
+
+  it("does not infer indexing config from pane data when indexing is absent", () => {
+    const filePath = "/tmp/codetrail-pane-only-state.json";
+    const fs = createMemoryFs({
+      [filePath]: JSON.stringify({
+        pane: {
+          projectPaneWidth: 300,
+          sessionPaneWidth: 420,
+          enabledProviders: ["claude", "codex"],
+        },
+      }),
+    });
+
+    const store = new AppStateStore(filePath, { fs });
+
+    expect(store.getIndexingState()).toBeNull();
+    expect(store.getPaneState()).toEqual(
+      expect.objectContaining({
+        projectPaneWidth: 300,
+        sessionPaneWidth: 420,
+      }),
+    );
   });
 
   it("filters unknown provider and category values instead of dropping the whole array", () => {
@@ -207,8 +262,14 @@ describe("AppStateStore", () => {
     expect(store.getPaneState()).toEqual({
       projectPaneWidth: 300,
       sessionPaneWidth: 360,
+      darkShikiTheme: "github-dark-default",
+      lightShikiTheme: "github-light-default",
+      messagePageSize: 50,
+      defaultViewerWrapMode: "nowrap",
+      defaultDiffViewMode: "unified",
       projectProviders: ["claude"],
       historyCategories: ["assistant"],
+      externalTools: createDefaultExternalTools(),
     });
     expect(store.getIndexingState()).toEqual({
       enabledProviders: ["claude"],
@@ -236,8 +297,14 @@ describe("AppStateStore", () => {
     expect(store.getPaneState()).toEqual({
       projectPaneWidth: 300,
       sessionPaneWidth: 360,
+      darkShikiTheme: "github-dark-default",
+      lightShikiTheme: "github-light-default",
+      messagePageSize: 50,
+      defaultViewerWrapMode: "nowrap",
+      defaultDiffViewMode: "unified",
       projectProviders: ["claude", "cursor"],
       searchProviders: ["cursor", "claude"],
+      externalTools: createDefaultExternalTools(),
     });
     expect(store.getIndexingState()).toEqual({
       enabledProviders: ["claude", "cursor"],
@@ -261,13 +328,52 @@ describe("AppStateStore", () => {
     store.flush();
 
     const reloaded = new AppStateStore(filePath, { fs });
-    expect(reloaded.getPaneState()).toEqual({ projectPaneWidth: 300, sessionPaneWidth: 350 });
+    expect(reloaded.getPaneState()).toEqual({
+      projectPaneWidth: 300,
+      sessionPaneWidth: 350,
+      darkShikiTheme: "github-dark-default",
+      lightShikiTheme: "github-light-default",
+      messagePageSize: 50,
+      defaultViewerWrapMode: "nowrap",
+      defaultDiffViewMode: "unified",
+      externalTools: createDefaultExternalTools(),
+    });
     expect(reloaded.getWindowState()).toEqual({
       width: 1400,
       height: 900,
       y: 50,
       isMaximized: true,
     });
+  });
+
+  it("keeps invalid preferred external tool ids unresolved instead of silently rewriting them", () => {
+    const filePath = "/tmp/codetrail-preferred-tool-ui-state.json";
+    const fs = createMemoryFs({
+      [filePath]: JSON.stringify({
+        pane: {
+          projectPaneWidth: 300,
+          sessionPaneWidth: 360,
+          preferredExternalEditor: "editor:missing",
+          preferredExternalDiffTool: "diff:missing",
+          externalTools: createDefaultExternalTools(),
+        },
+      }),
+    });
+
+    const store = new AppStateStore(filePath, { fs });
+
+    expect(store.getPaneState()).toEqual({
+      projectPaneWidth: 300,
+      sessionPaneWidth: 360,
+      darkShikiTheme: "github-dark-default",
+      lightShikiTheme: "github-light-default",
+      messagePageSize: 50,
+      defaultViewerWrapMode: "nowrap",
+      defaultDiffViewMode: "unified",
+      externalTools: createDefaultExternalTools(),
+    });
+    expect(store.getPaneState()?.preferredExternalEditor ?? null).toBeNull();
+    expect(store.getPaneState()?.preferredExternalDiffTool ?? null).toBeNull();
   });
 
   it("reports write errors through onPersistError", () => {

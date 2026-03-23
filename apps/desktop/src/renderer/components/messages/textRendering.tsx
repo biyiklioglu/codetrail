@@ -1,10 +1,65 @@
-import { Children, type ReactNode, cloneElement, isValidElement } from "react";
+import {
+  Children,
+  Fragment,
+  type ReactNode,
+  cloneElement,
+  isValidElement,
+  startTransition,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { createHighlighter } from "shiki";
 
 import { buildSearchHighlightRegex } from "@codetrail/core/browser";
+import {
+  type ExternalToolConfig,
+  UI_SHIKI_THEME_VALUES,
+  getDefaultShikiThemeForUiTheme,
+  getThemeFamily,
+  resolveShikiThemeForUiTheme,
+} from "../../../shared/uiPreferences";
+import { copyTextToClipboard } from "../../lib/clipboard";
 import { getCodetrailClient } from "../../lib/codetrailClient";
-import { tryParseJsonRecord } from "./toolParsing";
+import { PANE_STATE_UPDATED_EVENT, type PaneStateUpdatedDetail } from "../../lib/paneStateEvents";
+import {
+  listAvailableEditors,
+  openContentInEditor,
+  openDiffInEditor,
+  openFileInEditor,
+  openPath,
+} from "../../lib/pathActions";
+import {
+  type ViewerExternalAppsSnapshot,
+  type ViewerToolPreferences,
+  useViewerExternalAppsContext,
+} from "../../lib/viewerExternalAppsContext";
+import {
+  APPROX_ROW_HEIGHT,
+  DIFF_VIRTUALIZE_ROW_COUNT,
+  EXPAND_LINES_STEP,
+  INITIAL_EXPANDED_LINES,
+  INLINE_FALLBACK_SYNTAX_LINE_LIMIT,
+  VIRTUALIZE_ROW_COUNT,
+} from "./viewerConfig";
+import {
+  type ViewerKind,
+  analyzeTextContent,
+  detectLanguageFromFilePath,
+  detectViewerKind,
+  getContentSummary,
+  shouldProgressivelyRender,
+} from "./viewerDetection";
+import {
+  buildDiffRenderSource,
+  buildDiffViewModel,
+  trimProjectPrefixFromPath,
+} from "./viewerDiffModel";
 
 const EMPTY_KEYWORDS = new Set<string>();
 const JS_KEYWORDS = new Set([
@@ -118,6 +173,1819 @@ const HIGHLIGHT_REGEX_CACHE_LIMIT = 64;
 const highlightRegexCache = new Map<string, RegExp | null>();
 const MARKDOWN_COMPONENTS_CACHE_LIMIT = 32;
 const markdownComponentsCache = new Map<string, Components>();
+const SHIKI_TOKEN_CACHE_LIMIT = 48;
+let shikiHighlighterPromise: Promise<Awaited<ReturnType<typeof createHighlighter>>> | null = null;
+let availableEditorsPromise: Promise<Awaited<ReturnType<typeof listAvailableEditors>>> | null =
+  null;
+let availableEditorsPromiseKey = "";
+let paneStatePromise: Promise<{
+  preferredExternalEditor: string | null;
+  preferredExternalDiffTool: string | null;
+  terminalAppCommand: string;
+  orderedToolIds: string[];
+  externalTools: ExternalToolConfig[];
+}> | null = null;
+
+type EditorInfo = Awaited<ReturnType<typeof listAvailableEditors>>["editors"][number];
+type ShikiTokenLine = Array<{ content: string; color?: string; fontStyle?: number }>;
+
+const defaultViewerExternalAppsSnapshot: ViewerExternalAppsSnapshot = {
+  editors: [],
+  diffTools: [],
+  preferences: {
+    preferredExternalEditor: null,
+    preferredExternalDiffTool: null,
+    terminalAppCommand: "",
+    orderedToolIds: [],
+    externalTools: [],
+  },
+};
+
+const viewerExternalAppsStore = {
+  snapshot: defaultViewerExternalAppsSnapshot,
+  listeners: new Set<() => void>(),
+  promise: null as Promise<void> | null,
+  unsubscribePaneState: null as (() => void) | null,
+};
+
+const themeVariantStore = {
+  current: getCurrentThemeVariant(),
+  shikiTheme: getCurrentShikiTheme(),
+  defaultViewerWrapMode: getCurrentDefaultViewerWrapMode(),
+  defaultDiffViewMode: getCurrentDefaultDiffViewMode(),
+  listeners: new Set<() => void>(),
+  observer: null as MutationObserver | null,
+};
+
+const tokenLineCache = new Map<
+  string,
+  {
+    value: ShikiTokenLine[] | null | undefined;
+    pending: Promise<ShikiTokenLine[] | null> | null;
+  }
+>();
+
+export function resetContentViewerCachesForTests(): void {
+  shikiHighlighterPromise = null;
+  availableEditorsPromise = null;
+  paneStatePromise = null;
+  viewerExternalAppsStore.unsubscribePaneState?.();
+  viewerExternalAppsStore.unsubscribePaneState = null;
+  viewerExternalAppsStore.snapshot = defaultViewerExternalAppsSnapshot;
+  viewerExternalAppsStore.promise = null;
+  themeVariantStore.current = getCurrentThemeVariant();
+  themeVariantStore.shikiTheme = getCurrentShikiTheme();
+  themeVariantStore.defaultViewerWrapMode = getCurrentDefaultViewerWrapMode();
+  themeVariantStore.defaultDiffViewMode = getCurrentDefaultDiffViewMode();
+  tokenLineCache.clear();
+}
+
+async function getShikiHighlighter() {
+  if (!shikiHighlighterPromise) {
+    shikiHighlighterPromise = createHighlighter({
+      themes: [...UI_SHIKI_THEME_VALUES],
+      langs: [
+        "plaintext",
+        "javascript",
+        "jsx",
+        "typescript",
+        "tsx",
+        "json",
+        "bash",
+        "python",
+        "sql",
+        "html",
+        "css",
+        "markdown",
+      ],
+    });
+  }
+  return shikiHighlighterPromise;
+}
+
+function getCurrentThemeVariant(): string {
+  if (typeof document === "undefined") {
+    return "light";
+  }
+  return (
+    document.documentElement.dataset.themeVariant ??
+    document.documentElement.dataset.theme ??
+    "light"
+  );
+}
+
+function getCurrentShikiTheme(): string {
+  if (typeof document === "undefined") {
+    return getDefaultShikiThemeForUiTheme("light");
+  }
+  const theme = (document.documentElement.dataset.themeVariant ??
+    document.documentElement.dataset.theme ??
+    "light") as Parameters<typeof getDefaultShikiThemeForUiTheme>[0];
+  const activeTheme = document.documentElement.dataset.shikiTheme;
+  const family = getThemeFamily(theme);
+  return resolveShikiThemeForUiTheme(
+    theme,
+    family === "dark" ? activeTheme : null,
+    family === "light" ? activeTheme : null,
+  );
+}
+
+function getCurrentDefaultViewerWrapMode(): "nowrap" | "wrap" {
+  if (typeof document === "undefined") {
+    return "nowrap";
+  }
+  return document.documentElement.dataset.defaultViewerWrapMode === "wrap" ? "wrap" : "nowrap";
+}
+
+function getCurrentDefaultDiffViewMode(): "unified" | "split" {
+  if (typeof document === "undefined") {
+    return "unified";
+  }
+  return document.documentElement.dataset.defaultDiffViewMode === "split" ? "split" : "unified";
+}
+
+function emitViewerExternalAppsStore(): void {
+  for (const listener of viewerExternalAppsStore.listeners) {
+    listener();
+  }
+}
+
+function refreshViewerExternalApps(): void {
+  availableEditorsPromise = null;
+  availableEditorsPromiseKey = "";
+  paneStatePromise = null;
+  viewerExternalAppsStore.promise = null;
+  ensureViewerExternalAppsLoaded();
+}
+
+function emitThemeVariantStore(): void {
+  for (const listener of themeVariantStore.listeners) {
+    listener();
+  }
+}
+
+function ensureThemeVariantObserver(): void {
+  if (typeof document === "undefined" || themeVariantStore.observer) {
+    return;
+  }
+  themeVariantStore.current = getCurrentThemeVariant();
+  themeVariantStore.shikiTheme = getCurrentShikiTheme();
+  themeVariantStore.defaultViewerWrapMode = getCurrentDefaultViewerWrapMode();
+  themeVariantStore.defaultDiffViewMode = getCurrentDefaultDiffViewMode();
+  themeVariantStore.observer = new MutationObserver((mutations) => {
+    if (
+      mutations.some(
+        (mutation) =>
+          mutation.type === "attributes" &&
+          (mutation.attributeName === "data-theme" ||
+            mutation.attributeName === "data-theme-variant" ||
+            mutation.attributeName === "data-shiki-theme" ||
+            mutation.attributeName === "data-default-viewer-wrap-mode" ||
+            mutation.attributeName === "data-default-diff-view-mode"),
+      )
+    ) {
+      const next = getCurrentThemeVariant();
+      const nextShikiTheme = getCurrentShikiTheme();
+      const nextViewerWrapMode = getCurrentDefaultViewerWrapMode();
+      const nextDiffViewMode = getCurrentDefaultDiffViewMode();
+      if (
+        next !== themeVariantStore.current ||
+        nextShikiTheme !== themeVariantStore.shikiTheme ||
+        nextViewerWrapMode !== themeVariantStore.defaultViewerWrapMode ||
+        nextDiffViewMode !== themeVariantStore.defaultDiffViewMode
+      ) {
+        themeVariantStore.current = next;
+        themeVariantStore.shikiTheme = nextShikiTheme;
+        themeVariantStore.defaultViewerWrapMode = nextViewerWrapMode;
+        themeVariantStore.defaultDiffViewMode = nextDiffViewMode;
+        emitThemeVariantStore();
+      }
+    }
+  });
+  themeVariantStore.observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: [
+      "data-theme",
+      "data-theme-variant",
+      "data-shiki-theme",
+      "data-default-viewer-wrap-mode",
+      "data-default-diff-view-mode",
+    ],
+  });
+}
+
+function subscribeToThemeVariant(listener: () => void): () => void {
+  ensureThemeVariantObserver();
+  themeVariantStore.listeners.add(listener);
+  return () => {
+    themeVariantStore.listeners.delete(listener);
+  };
+}
+
+function useDocumentThemeVariant(): string {
+  return useSyncExternalStore(
+    subscribeToThemeVariant,
+    () => themeVariantStore.current,
+    () => "light",
+  );
+}
+
+function useDocumentShikiTheme(): string {
+  return useSyncExternalStore(
+    subscribeToThemeVariant,
+    () => themeVariantStore.shikiTheme,
+    () => getDefaultShikiThemeForUiTheme("light"),
+  );
+}
+
+function useDocumentDefaultViewerWrapMode(): "nowrap" | "wrap" {
+  return useSyncExternalStore(
+    subscribeToThemeVariant,
+    () => themeVariantStore.defaultViewerWrapMode,
+    () => "nowrap",
+  );
+}
+
+function useDocumentDefaultDiffViewMode(): "unified" | "split" {
+  return useSyncExternalStore(
+    subscribeToThemeVariant,
+    () => themeVariantStore.defaultDiffViewMode,
+    () => "unified",
+  );
+}
+
+function getCurrentThemeBase(): "light" | "dark" {
+  if (typeof document === "undefined") {
+    return "light";
+  }
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function normalizeShikiLanguage(language: string): string {
+  switch (language) {
+    case "shell":
+    case "sh":
+    case "zsh":
+      return "bash";
+    case "javascript":
+    case "js":
+      return "javascript";
+    case "jsx":
+      return "jsx";
+    case "typescript":
+    case "ts":
+      return "typescript";
+    case "tsx":
+      return "tsx";
+    case "json":
+      return "json";
+    case "python":
+    case "py":
+      return "python";
+    case "sql":
+      return "sql";
+    case "html":
+      return "html";
+    case "css":
+      return "css";
+    case "markdown":
+    case "md":
+      return "markdown";
+    default:
+      return "text";
+  }
+}
+
+function getThemeCssColor(variableName: string, fallback: string): string {
+  if (typeof document === "undefined") {
+    return fallback;
+  }
+  const value = getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+  return value.length > 0 ? value : fallback;
+}
+
+function hashText(value: string): string {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 33) ^ value.charCodeAt(index);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+type RgbColor = { r: number; g: number; b: number };
+
+function parseHexColor(value: string): RgbColor | null {
+  const normalized = value.trim();
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(normalized);
+  if (!match) {
+    return null;
+  }
+  const hex = match[1] ?? "";
+  if (hex.length === 3) {
+    return {
+      r: Number.parseInt(`${hex[0]}${hex[0]}`, 16),
+      g: Number.parseInt(`${hex[1]}${hex[1]}`, 16),
+      b: Number.parseInt(`${hex[2]}${hex[2]}`, 16),
+    };
+  }
+  return {
+    r: Number.parseInt(hex.slice(0, 2), 16),
+    g: Number.parseInt(hex.slice(2, 4), 16),
+    b: Number.parseInt(hex.slice(4, 6), 16),
+  };
+}
+
+function formatHexColor(color: RgbColor): string {
+  const toHex = (value: number) =>
+    Math.max(0, Math.min(255, Math.round(value)))
+      .toString(16)
+      .padStart(2, "0");
+  return `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
+}
+
+function mixColors(source: RgbColor, target: RgbColor, ratio: number): RgbColor {
+  return {
+    r: source.r + (target.r - source.r) * ratio,
+    g: source.g + (target.g - source.g) * ratio,
+    b: source.b + (target.b - source.b) * ratio,
+  };
+}
+
+function toLinearChannel(value: number): number {
+  const normalized = value / 255;
+  return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+}
+
+function relativeLuminance(color: RgbColor): number {
+  return (
+    0.2126 * toLinearChannel(color.r) +
+    0.7152 * toLinearChannel(color.g) +
+    0.0722 * toLinearChannel(color.b)
+  );
+}
+
+function contrastRatio(foreground: RgbColor, background: RgbColor): number {
+  const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background));
+  const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+export function normalizeTokenColorForContrast(
+  color: string,
+  backgroundColor: string,
+  anchorColor: string,
+  minContrast = 4.2,
+): string {
+  const foreground = parseHexColor(color);
+  const background = parseHexColor(backgroundColor);
+  const anchor = parseHexColor(anchorColor);
+  if (!foreground || !background || !anchor) {
+    return color;
+  }
+  if (contrastRatio(foreground, background) >= minContrast) {
+    return color;
+  }
+
+  let best = foreground;
+  for (let step = 1; step <= 10; step += 1) {
+    const candidate = mixColors(foreground, anchor, step / 10);
+    best = candidate;
+    if (contrastRatio(candidate, background) >= minContrast) {
+      return formatHexColor(candidate);
+    }
+  }
+
+  return formatHexColor(best);
+}
+
+function useTokenColorResolver(): (color: string | undefined) => string | undefined {
+  const themeVariant = useDocumentThemeVariant();
+  return useMemo(() => {
+    if (getThemeFamily(themeVariant) !== "light") {
+      return (color: string | undefined) => color;
+    }
+    const backgroundColor = getThemeCssColor("--code-bg", "#fafbfe");
+    const anchorColor = getThemeCssColor("--text-primary", "#1a1c24");
+    return (color: string | undefined) =>
+      color ? normalizeTokenColorForContrast(color, backgroundColor, anchorColor) : color;
+  }, [themeVariant]);
+}
+
+function getExternalToolsCacheKey(externalTools: ExternalToolConfig[]): string {
+  return JSON.stringify(
+    externalTools.map((tool) => ({
+      id: tool.id,
+      kind: tool.kind,
+      label: tool.label,
+      appId: tool.appId,
+      command: tool.command,
+      editorArgs: tool.editorArgs,
+      diffArgs: tool.diffArgs,
+      enabledForEditor: tool.enabledForEditor,
+      enabledForDiff: tool.enabledForDiff,
+    })),
+  );
+}
+
+async function getCachedAvailableEditors(externalTools: ExternalToolConfig[]) {
+  const cacheKey = getExternalToolsCacheKey(externalTools);
+  if (!availableEditorsPromise || availableEditorsPromiseKey !== cacheKey) {
+    availableEditorsPromiseKey = cacheKey;
+    availableEditorsPromise = listAvailableEditors({
+      externalTools,
+    }).catch(() => ({ editors: [], diffTools: [] }));
+  }
+  return availableEditorsPromise;
+}
+
+async function getCachedViewerToolPreferences(): Promise<ViewerToolPreferences> {
+  if (!paneStatePromise) {
+    paneStatePromise = getCodetrailClient()
+      .invoke("ui:getPaneState", {})
+      .then((paneState) => ({
+        preferredExternalEditor: paneState.preferredExternalEditor,
+        preferredExternalDiffTool: paneState.preferredExternalDiffTool,
+        terminalAppCommand:
+          typeof paneState.terminalAppCommand === "string" ? paneState.terminalAppCommand : "",
+        orderedToolIds: Array.isArray(paneState.externalTools)
+          ? paneState.externalTools.map((tool) => tool.id)
+          : [],
+        externalTools: Array.isArray(paneState.externalTools) ? paneState.externalTools : [],
+      }))
+      .catch(() => ({
+        preferredExternalEditor: null,
+        preferredExternalDiffTool: null,
+        terminalAppCommand: "",
+        orderedToolIds: [],
+        externalTools: [],
+      }));
+  }
+  return paneStatePromise;
+}
+
+function ensureViewerExternalAppsLoaded(): void {
+  if (viewerExternalAppsStore.promise) {
+    return;
+  }
+  viewerExternalAppsStore.promise = getCachedViewerToolPreferences()
+    .then(async (nextPreferences) => {
+      const nextTools = await getCachedAvailableEditors(nextPreferences.externalTools);
+      viewerExternalAppsStore.snapshot = {
+        editors: nextTools.editors,
+        diffTools: nextTools.diffTools,
+        preferences: nextPreferences,
+      };
+      emitViewerExternalAppsStore();
+    })
+    .catch(() => {
+      viewerExternalAppsStore.snapshot = {
+        ...viewerExternalAppsStore.snapshot,
+        editors: [],
+        diffTools: [],
+      };
+      emitViewerExternalAppsStore();
+    })
+    .finally(() => {
+      viewerExternalAppsStore.promise = null;
+    });
+}
+
+function ensureViewerExternalAppsPaneStateSubscription(): void {
+  if (viewerExternalAppsStore.unsubscribePaneState || typeof window === "undefined") {
+    return;
+  }
+
+  const handlePaneStateUpdated = (event: Event) => {
+    const detail = (event as CustomEvent<PaneStateUpdatedDetail>).detail;
+    if (detail) {
+      viewerExternalAppsStore.snapshot = {
+        ...viewerExternalAppsStore.snapshot,
+        preferences: {
+          preferredExternalEditor: detail.preferredExternalEditor,
+          preferredExternalDiffTool: detail.preferredExternalDiffTool,
+          terminalAppCommand: detail.terminalAppCommand,
+          orderedToolIds: detail.externalTools.map((tool) => tool.id),
+          externalTools: detail.externalTools,
+        },
+      };
+      emitViewerExternalAppsStore();
+    }
+    refreshViewerExternalApps();
+  };
+
+  window.addEventListener(PANE_STATE_UPDATED_EVENT, handlePaneStateUpdated as EventListener);
+  viewerExternalAppsStore.unsubscribePaneState = () => {
+    window.removeEventListener(PANE_STATE_UPDATED_EVENT, handlePaneStateUpdated as EventListener);
+  };
+}
+
+function subscribeToViewerExternalApps(listener: () => void): () => void {
+  viewerExternalAppsStore.listeners.add(listener);
+  ensureViewerExternalAppsPaneStateSubscription();
+  ensureViewerExternalAppsLoaded();
+  return () => {
+    viewerExternalAppsStore.listeners.delete(listener);
+    if (
+      viewerExternalAppsStore.listeners.size === 0 &&
+      viewerExternalAppsStore.unsubscribePaneState
+    ) {
+      viewerExternalAppsStore.unsubscribePaneState();
+      viewerExternalAppsStore.unsubscribePaneState = null;
+    }
+  };
+}
+
+function useViewerExternalApps() {
+  const contextSnapshot = useViewerExternalAppsContext();
+  useEffect(() => {
+    if (!contextSnapshot) {
+      ensureViewerExternalAppsLoaded();
+    }
+  }, [contextSnapshot]);
+  const fallbackSnapshot = useSyncExternalStore(
+    contextSnapshot ? () => () => undefined : subscribeToViewerExternalApps,
+    () => contextSnapshot ?? viewerExternalAppsStore.snapshot,
+    () => contextSnapshot ?? defaultViewerExternalAppsSnapshot,
+  );
+  return contextSnapshot ?? fallbackSnapshot;
+}
+
+function getShikiTokenCacheKey(shikiTheme: string, language: string, codeValue: string): string {
+  return `${shikiTheme}\u0000${language}\u0000${codeValue.length}\u0000${hashText(codeValue)}`;
+}
+
+function getCachedTokenLines(cacheKey: string): ShikiTokenLine[] | null | undefined {
+  return tokenLineCache.get(cacheKey)?.value;
+}
+
+async function loadShikiTokenLines(
+  cacheKey: string,
+  themeVariant: string,
+  shikiTheme: string,
+  normalizedLanguage: string,
+  codeValue: string,
+): Promise<ShikiTokenLine[] | null> {
+  const existing = tokenLineCache.get(cacheKey);
+  if (existing?.value !== undefined) {
+    return existing.value;
+  }
+  if (existing?.pending) {
+    return existing.pending;
+  }
+
+  const pending = getShikiHighlighter()
+    .then(async (highlighter) => {
+      const defaultTheme = getDefaultShikiThemeForUiTheme(
+        themeVariant as Parameters<typeof getDefaultShikiThemeForUiTheme>[0],
+      );
+      const selectedTheme = resolveShikiThemeForUiTheme(
+        themeVariant as Parameters<typeof resolveShikiThemeForUiTheme>[0],
+        getThemeFamily(themeVariant as Parameters<typeof getDefaultShikiThemeForUiTheme>[0]) ===
+          "dark"
+          ? shikiTheme
+          : null,
+        getThemeFamily(themeVariant as Parameters<typeof getDefaultShikiThemeForUiTheme>[0]) ===
+          "light"
+          ? shikiTheme
+          : null,
+      );
+      try {
+        return (await highlighter.codeToTokens(codeValue, {
+          lang: normalizedLanguage as never,
+          theme: selectedTheme,
+        })) as unknown;
+      } catch {
+        return (await highlighter.codeToTokens(codeValue, {
+          lang: normalizedLanguage as never,
+          theme: defaultTheme,
+        })) as unknown;
+      }
+    })
+    .then((tokensResult) => {
+      const tokens = Array.isArray(tokensResult)
+        ? tokensResult
+        : ((
+            tokensResult as {
+              tokens?: Array<Array<{ content: string; color?: string; fontStyle?: number }>>;
+            }
+          ).tokens ?? null);
+      tokenLineCache.set(cacheKey, { value: tokens, pending: null });
+      if (tokenLineCache.size > SHIKI_TOKEN_CACHE_LIMIT) {
+        const oldestKey = tokenLineCache.keys().next().value;
+        if (typeof oldestKey === "string") {
+          tokenLineCache.delete(oldestKey);
+        }
+      }
+      return tokens;
+    })
+    .catch(() => {
+      tokenLineCache.set(cacheKey, { value: null, pending: null });
+      return null;
+    });
+
+  tokenLineCache.set(cacheKey, { value: undefined, pending });
+  return pending;
+}
+
+function useShikiTokenLines(language: string, codeValue: string, enabled = true) {
+  const themeVariant = useDocumentThemeVariant();
+  const shikiTheme = useDocumentShikiTheme();
+  const normalizedLanguage = normalizeShikiLanguage(language);
+  const cacheKey =
+    enabled && normalizedLanguage !== "text" && codeValue.length > 0
+      ? getShikiTokenCacheKey(shikiTheme, normalizedLanguage, codeValue)
+      : null;
+  const [tokenLines, setTokenLines] = useState<ShikiTokenLine[] | null>(() =>
+    cacheKey ? (getCachedTokenLines(cacheKey) ?? null) : null,
+  );
+
+  useEffect(() => {
+    if (!enabled || normalizedLanguage === "text" || codeValue.length === 0 || !cacheKey) {
+      setTokenLines(null);
+      return;
+    }
+    const cached = getCachedTokenLines(cacheKey);
+    if (cached !== undefined) {
+      setTokenLines(cached);
+      return;
+    }
+    let cancelled = false;
+    void loadShikiTokenLines(
+      cacheKey,
+      themeVariant,
+      shikiTheme,
+      normalizedLanguage,
+      codeValue,
+    ).then((tokens) => {
+      if (!cancelled) {
+        startTransition(() => {
+          setTokenLines(tokens);
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheKey, codeValue, enabled, normalizedLanguage, shikiTheme, themeVariant]);
+
+  return tokenLines;
+}
+
+function renderInlineDiffParts(
+  parts: Array<{ text: string; changed: boolean }>,
+  className: string,
+  lineKey: string,
+): ReactNode[] {
+  let cursor = 0;
+  return parts.map((part) => {
+    const key = `${lineKey}:${cursor}:${part.changed ? "1" : "0"}`;
+    cursor += part.text.length;
+    return (
+      <span key={key} className={part.changed ? className : undefined}>
+        {part.text}
+      </span>
+    );
+  });
+}
+
+function normalizeBadgeLabel(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function getEnabledAppsForRole(editors: EditorInfo[]): EditorInfo[] {
+  return editors.filter((editor) => editor.detected);
+}
+
+function sortAppsByPreferenceOrder(
+  apps: EditorInfo[],
+  preferences: ViewerToolPreferences,
+): EditorInfo[] {
+  if (preferences.orderedToolIds.length === 0) {
+    return apps;
+  }
+  const indexById = new Map(preferences.orderedToolIds.map((id, index) => [id, index]));
+  return [...apps].sort((left, right) => {
+    const leftIndex = indexById.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+    const rightIndex = indexById.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+    if (leftIndex !== rightIndex) {
+      return leftIndex - rightIndex;
+    }
+    return left.label.localeCompare(right.label);
+  });
+}
+
+function getPreferredAppId(
+  preferences: ViewerToolPreferences,
+  role: "editor" | "diff",
+): string | null {
+  return role === "diff"
+    ? preferences.preferredExternalDiffTool
+    : preferences.preferredExternalEditor;
+}
+
+function pickDefaultApp(
+  editors: EditorInfo[],
+  preferences: ViewerToolPreferences,
+  role: "editor" | "diff",
+): EditorInfo | null {
+  const candidates = getEnabledAppsForRole(editors);
+  if (candidates.length === 0) {
+    return null;
+  }
+  const preferredId = getPreferredAppId(preferences, role);
+  return candidates.find((editor) => editor.id === preferredId) ?? candidates[0] ?? null;
+}
+
+function buildEditorOpenStateOverride(preferences: ViewerToolPreferences) {
+  return {
+    ...(preferences.preferredExternalEditor
+      ? { preferredExternalEditor: preferences.preferredExternalEditor }
+      : {}),
+    ...(preferences.preferredExternalDiffTool
+      ? { preferredExternalDiffTool: preferences.preferredExternalDiffTool }
+      : {}),
+    ...(preferences.terminalAppCommand !== undefined
+      ? { terminalAppCommand: preferences.terminalAppCommand }
+      : {}),
+    ...(preferences.externalTools.length > 0 ? { externalTools: preferences.externalTools } : {}),
+  };
+}
+
+function ContentViewer({
+  kind,
+  language,
+  codeValue,
+  metaLabel,
+  filePath,
+  pathRoots = [],
+  query = "",
+  highlightPatterns = [],
+  startLine,
+}: {
+  kind: ViewerKind;
+  language: string;
+  codeValue: string;
+  metaLabel?: string;
+  filePath?: string | null;
+  pathRoots?: string[];
+  query?: string;
+  highlightPatterns?: string[];
+  startLine?: number;
+}) {
+  const { editors, diffTools, preferences } = useViewerExternalApps();
+  const tokenColorResolver = useTokenColorResolver();
+  const defaultViewerWrapMode = useDocumentDefaultViewerWrapMode();
+  const defaultDiffViewMode = useDocumentDefaultDiffViewMode();
+  const [wrap, setWrap] = useState(defaultViewerWrapMode === "wrap");
+  const [diffMode, setDiffMode] = useState<"unified" | "split">(defaultDiffViewMode);
+  const diffModel = useMemo(
+    () => (kind === "diff" ? buildDiffViewModel(codeValue, filePath, pathRoots) : null),
+    [codeValue, filePath, kind, pathRoots],
+  );
+  const absoluteFilePath = diffModel?.absoluteFilePath ?? (filePath ? toLocalPath(filePath) : null);
+  const syntaxLanguage = kind === "diff" ? (diffModel?.sourceLanguage ?? language) : language;
+  const textAnalysis = useMemo(() => analyzeTextContent(codeValue), [codeValue]);
+  const diffRenderSource = useMemo(
+    () => buildDiffRenderSource(diffModel, diffMode),
+    [diffModel, diffMode],
+  );
+  const tokenLines = useShikiTokenLines(syntaxLanguage, codeValue, kind !== "diff");
+  const diffUnifiedTokenLines = useShikiTokenLines(
+    syntaxLanguage,
+    diffRenderSource.unified,
+    kind === "diff" && diffMode === "unified",
+  );
+  const diffSplitLeftTokenLines = useShikiTokenLines(
+    syntaxLanguage,
+    diffRenderSource.splitLeft,
+    kind === "diff" && diffMode === "split",
+  );
+  const diffSplitRightTokenLines = useShikiTokenLines(
+    syntaxLanguage,
+    diffRenderSource.splitRight,
+    kind === "diff" && diffMode === "split",
+  );
+  const totalLines = kind === "diff" ? (diffModel?.rows.length ?? 0) : textAnalysis.totalLines;
+  const isLarge =
+    kind === "diff" ? shouldProgressivelyRender(codeValue, totalLines) : textAnalysis.isLarge;
+  const allowFallbackSyntax = !isLarge && totalLines <= INLINE_FALLBACK_SYNTAX_LINE_LIMIT;
+  const highlightActive = query.trim().length > 0 || highlightPatterns.length > 0;
+  const [visibleCount, setVisibleCount] = useState(
+    isLarge ? Math.min(totalLines, INITIAL_EXPANDED_LINES) : totalLines,
+  );
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+
+  useEffect(() => {
+    setWrap(defaultViewerWrapMode === "wrap");
+  }, [defaultViewerWrapMode]);
+
+  useEffect(() => {
+    setDiffMode(defaultDiffViewMode);
+  }, [defaultDiffViewMode]);
+
+  useEffect(() => {
+    setVisibleCount(isLarge ? Math.min(totalLines, INITIAL_EXPANDED_LINES) : totalLines);
+  }, [isLarge, totalLines]);
+
+  const canReveal =
+    absoluteFilePath !== null && isPathUnderProjectRoots(absoluteFilePath, pathRoots);
+  const sortedEditors = useMemo(
+    () => sortAppsByPreferenceOrder(editors, preferences),
+    [editors, preferences],
+  );
+  const sortedDiffTools = useMemo(
+    () => sortAppsByPreferenceOrder(diffTools, preferences),
+    [diffTools, preferences],
+  );
+  const editorApps = useMemo(() => getEnabledAppsForRole(sortedEditors), [sortedEditors]);
+  const diffApps = useMemo(() => getEnabledAppsForRole(sortedDiffTools), [sortedDiffTools]);
+  const defaultEditorApp = useMemo(
+    () => pickDefaultApp(sortedEditors, preferences, "editor"),
+    [sortedEditors, preferences],
+  );
+  const canOpenFile =
+    kind === "diff"
+      ? absoluteFilePath !== null
+      : absoluteFilePath !== null || editorApps.some((editor) => editor.capabilities.openContent);
+  const canOpenDiff = kind === "diff" && diffApps.length > 0;
+  const canOpenViewerContent = kind !== "diff" && canOpenFile;
+  const editorOpenStateOverride = useMemo(
+    () => buildEditorOpenStateOverride(preferences),
+    [preferences],
+  );
+  const metaPath = metaLabel?.trim() ? metaLabel.trim() : (diffModel?.displayFilePath ?? null);
+  const normalizedKind = normalizeBadgeLabel(kind);
+  const normalizedLanguage = normalizeBadgeLabel(language);
+  const showLanguageBadge =
+    normalizedLanguage.length > 0 &&
+    kind !== "plain" &&
+    kind !== "log" &&
+    normalizedLanguage !== normalizedKind;
+  const showMetaPath =
+    metaPath !== null &&
+    metaPath.length > 0 &&
+    normalizeBadgeLabel(metaPath) !== normalizedKind &&
+    normalizeBadgeLabel(metaPath) !== normalizedLanguage;
+  const displayedMetaPath = showMetaPath ? metaPath : null;
+
+  const buildDiffPayload = () => {
+    if (!diffModel) {
+      return null;
+    }
+    const firstRemoved = diffModel.rows.find(
+      (row) => row.kind === "remove" || row.kind === "paired",
+    );
+    const firstAdded = diffModel.rows.find((row) => row.kind === "add" || row.kind === "paired");
+    const leftContent = diffModel.rows
+      .filter((row) => row.kind !== "add")
+      .map((row) =>
+        row.kind === "context"
+          ? row.text
+          : row.kind === "remove"
+            ? row.text
+            : row.kind === "paired"
+              ? row.leftText
+              : "",
+      )
+      .join("\n");
+    const rightContent = diffModel.rows
+      .filter((row) => row.kind !== "remove")
+      .map((row) =>
+        row.kind === "context"
+          ? row.text
+          : row.kind === "add"
+            ? row.text
+            : row.kind === "paired"
+              ? row.rightText
+              : "",
+      )
+      .join("\n");
+    const targetLine =
+      firstAdded?.kind === "add"
+        ? firstAdded.newLine
+        : firstAdded?.kind === "paired"
+          ? firstAdded.newLine
+          : firstRemoved?.kind === "remove"
+            ? firstRemoved.oldLine
+            : firstRemoved?.kind === "paired"
+              ? firstRemoved.oldLine
+              : startLine;
+    return {
+      title: (metaPath ?? diffModel.displayFilePath) || "Diff",
+      leftContent,
+      rightContent,
+      filePath: absoluteFilePath ?? filePath ?? undefined,
+      line: targetLine,
+    };
+  };
+
+  const handleOpenDiff = async (editorId?: EditorInfo["id"]) => {
+    if (kind === "diff" && diffModel) {
+      const payload = buildDiffPayload();
+      if (!payload) {
+        return;
+      }
+      await openDiffInEditor({
+        title: payload.title,
+        leftContent: payload.leftContent,
+        rightContent: payload.rightContent,
+        ...editorOpenStateOverride,
+        ...(editorId ? { editorId } : {}),
+        ...(payload.filePath ? { filePath: payload.filePath } : {}),
+        ...(payload.line ? { line: payload.line } : {}),
+      });
+    }
+  };
+
+  const handleOpenFileOrContent = async (editorId?: EditorInfo["id"]) => {
+    if (absoluteFilePath) {
+      await openFileInEditor(absoluteFilePath, {
+        ...editorOpenStateOverride,
+        ...(editorId ? { editorId } : {}),
+        ...(startLine ? { line: startLine } : {}),
+      });
+      return;
+    }
+    await openContentInEditor({
+      ...editorOpenStateOverride,
+      ...(editorId ? { editorId } : {}),
+      title: metaPath ?? "Code",
+      content: codeValue,
+      ...(filePath ? { filePath } : {}),
+      ...(language ? { language } : {}),
+      ...(startLine ? { line: startLine } : {}),
+    });
+  };
+
+  const virtualize = !wrap && kind !== "diff" && totalLines > VIRTUALIZE_ROW_COUNT;
+  const visibleLineValues = textAnalysis.lineValues.slice(0, visibleCount);
+  const visibleDiffRows = useMemo(
+    () => (kind === "diff" && diffModel ? diffModel.rows.slice(0, visibleCount) : []),
+    [diffModel, kind, visibleCount],
+  );
+  const diffVisualOffsets = useMemo(
+    () =>
+      kind === "diff" ? buildDiffVisualOffsets(visibleDiffRows, diffMode) : [0],
+    [diffMode, kind, visibleDiffRows],
+  );
+  const diffVisualRowCount =
+    kind === "diff" ? diffVisualOffsets[diffVisualOffsets.length - 1] ?? 0 : 0;
+  const virtualizeDiff =
+    !wrap && kind === "diff" && diffVisualRowCount > DIFF_VIRTUALIZE_ROW_COUNT;
+  const viewportRowCount = 40;
+  const startIndex = virtualize ? Math.max(0, Math.floor(scrollTop / APPROX_ROW_HEIGHT) - 10) : 0;
+  const endIndex = virtualize
+    ? Math.min(visibleLineValues.length, startIndex + viewportRowCount + 20)
+    : visibleLineValues.length;
+  const renderedLineValues = visibleLineValues.slice(startIndex, endIndex);
+  const diffStartVisualIndex = virtualizeDiff
+    ? Math.max(0, Math.floor(scrollTop / APPROX_ROW_HEIGHT) - 10)
+    : 0;
+  const diffEndVisualIndex = virtualizeDiff
+    ? Math.min(diffVisualRowCount, diffStartVisualIndex + viewportRowCount + 20)
+    : diffVisualRowCount;
+  const diffRenderStartIndex = virtualizeDiff
+    ? findDiffRowIndexByVisualOffset(diffVisualOffsets, diffStartVisualIndex)
+    : 0;
+  const diffRenderEndIndex = virtualizeDiff
+    ? Math.min(
+        visibleDiffRows.length,
+        findDiffRowIndexByVisualOffset(
+          diffVisualOffsets,
+          Math.max(diffStartVisualIndex, diffEndVisualIndex - 1),
+        ) + 1,
+      )
+    : visibleDiffRows.length;
+  const diffTopSpacerHeight = virtualizeDiff
+    ? (diffVisualOffsets[diffRenderStartIndex] ?? 0) * APPROX_ROW_HEIGHT
+    : 0;
+  const diffBottomSpacerHeight = virtualizeDiff
+    ? Math.max(
+        0,
+        diffVisualRowCount - (diffVisualOffsets[diffRenderEndIndex] ?? diffVisualRowCount),
+      ) * APPROX_ROW_HEIGHT
+    : 0;
+
+  return (
+    <div
+      className={`code-block${kind === "diff" ? " diff-block" : ""} content-viewer content-viewer-${kind}${wrap ? " wrap" : ""}`}
+    >
+      <div className="code-meta content-viewer-header">
+        <div className="content-viewer-meta">
+          {kind === "diff" ? null : <span className="content-viewer-badge">{kind}</span>}
+          {showLanguageBadge ? (
+            <span className="content-viewer-badge secondary">{language}</span>
+          ) : null}
+          {kind === "diff" && diffModel ? (
+            <span
+              className="content-viewer-diff-counts"
+              aria-label={`${diffModel.addedLineCount} added lines and ${diffModel.removedLineCount} removed lines`}
+              title={`${diffModel.addedLineCount} added, ${diffModel.removedLineCount} removed`}
+            >
+              <span className="diff-meta-added">+{diffModel.addedLineCount}</span>
+              <span className="diff-meta-removed">-{diffModel.removedLineCount}</span>
+            </span>
+          ) : null}
+          {displayedMetaPath ? (
+            <span className="content-viewer-path" title={metaPath ?? undefined}>
+              {displayedMetaPath}
+            </span>
+          ) : null}
+        </div>
+        <div className="content-viewer-actions">
+          {kind === "diff" ? (
+            <button
+              type="button"
+              className={`content-viewer-action message-action-button${
+                diffMode === "split" ? " is-active" : ""
+              }`}
+              title={
+                diffMode === "unified"
+                  ? "Currently showing unified diff. Click to switch to split diff view."
+                  : "Currently showing split diff. Click to switch to unified diff view."
+              }
+              onClick={() => setDiffMode((value) => (value === "unified" ? "split" : "unified"))}
+            >
+              {diffMode === "unified" ? "Unified" : "Split"}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="content-viewer-action message-action-button"
+            title={
+              wrap
+                ? "Currently wrapping long lines. Click to disable line wrapping."
+                : "Currently not wrapping long lines. Click to enable line wrapping."
+            }
+            onClick={() => setWrap((value) => !value)}
+          >
+            {wrap ? "Wrap" : "No Wrap"}
+          </button>
+          <button
+            type="button"
+            className="content-viewer-action message-action-button"
+            title="Copy content"
+            onClick={() => {
+              void copyTextToClipboard(codeValue);
+            }}
+          >
+            Copy
+          </button>
+          {kind === "diff" && canOpenFile ? (
+            <button
+              type="button"
+              className="content-viewer-action message-action-button"
+              title="Open in external editor"
+              onClick={() => void handleOpenFileOrContent(defaultEditorApp?.id)}
+            >
+              Open
+            </button>
+          ) : null}
+          {kind !== "diff" && canOpenViewerContent ? (
+            <button
+              type="button"
+              className="content-viewer-action message-action-button"
+              title="Open in external editor"
+              onClick={() => void handleOpenFileOrContent()}
+            >
+              Open
+            </button>
+          ) : null}
+          {kind === "diff" && absoluteFilePath && editorApps.length > 0 ? (
+            <ViewerAppMenu
+              label="Open With"
+              apps={editorApps}
+              onSelect={(editorId) => void handleOpenFileOrContent(editorId)}
+            />
+          ) : null}
+          {canOpenDiff ? (
+            <button
+              type="button"
+              className="content-viewer-action message-action-button"
+              title="Open in external diff tool"
+              onClick={() => void handleOpenDiff()}
+            >
+              Diff
+            </button>
+          ) : null}
+          {kind === "diff" && diffApps.length > 0 ? (
+            <ViewerAppMenu
+              label="Diff With"
+              apps={diffApps}
+              onSelect={(editorId) => void handleOpenDiff(editorId)}
+            />
+          ) : null}
+          {kind !== "diff" && editorApps.length > 1 ? (
+            <ViewerAppMenu
+              label="Open With"
+              apps={editorApps}
+              onSelect={(editorId) => void handleOpenFileOrContent(editorId)}
+            />
+          ) : null}
+          {canReveal && absoluteFilePath ? (
+            <button
+              type="button"
+              className="content-viewer-action message-action-button"
+              title="Reveal in file manager"
+              onClick={() => {
+                void openPath(absoluteFilePath);
+              }}
+            >
+              Reveal
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {kind === "diff" && diffModel ? (
+        <div
+          ref={bodyRef}
+          className={`content-viewer-body${virtualizeDiff ? " virtualized" : ""}`}
+          onScroll={(event) => {
+            if (virtualizeDiff) {
+              setScrollTop(event.currentTarget.scrollTop);
+            }
+          }}
+        >
+          <DiffViewerBody
+            diffModel={diffModel}
+            diffMode={diffMode}
+            wrap={wrap}
+            syntaxLanguage={syntaxLanguage}
+            query={query}
+            highlightActive={highlightActive}
+            highlightPatterns={highlightPatterns}
+            visibleCount={visibleCount}
+            startIndex={diffRenderStartIndex}
+            endIndex={diffRenderEndIndex}
+            virtualize={virtualizeDiff}
+            topSpacerHeight={diffTopSpacerHeight}
+            bottomSpacerHeight={diffBottomSpacerHeight}
+            unifiedTokenLines={diffUnifiedTokenLines}
+            splitLeftTokenLines={diffSplitLeftTokenLines}
+            splitRightTokenLines={diffSplitRightTokenLines}
+            allowFallbackSyntax={allowFallbackSyntax}
+            tokenColorResolver={tokenColorResolver}
+          />
+        </div>
+      ) : (
+        <div
+          ref={bodyRef}
+          className={`content-viewer-body${virtualize ? " virtualized" : ""}`}
+          onScroll={(event) => {
+            if (virtualize) {
+              setScrollTop(event.currentTarget.scrollTop);
+            }
+          }}
+        >
+          {virtualize ? (
+            <div style={{ height: startIndex * APPROX_ROW_HEIGHT }} aria-hidden />
+          ) : null}
+          <pre className="code-pre">
+            {renderedLineValues.map((line, index) => {
+              const lineNumber = startIndex + index + 1;
+              const tokenLine = tokenLines?.[lineNumber - 1];
+              return (
+                <div
+                  key={`${lineNumber}:${line.length}`}
+                  className={`content-viewer-line kind-${kind}`}
+                >
+                  <span className="content-viewer-ln">{lineNumber}</span>
+                  <span className="content-viewer-code">
+                    {renderCodeLineContent(
+                      line,
+                      highlightActive,
+                      query,
+                      `viewer:${lineNumber}`,
+                      highlightPatterns,
+                      tokenLine,
+                      syntaxLanguage,
+                      allowFallbackSyntax,
+                      tokenColorResolver,
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+          </pre>
+          {virtualize ? (
+            <div
+              style={{
+                height: Math.max(0, visibleLineValues.length - endIndex) * APPROX_ROW_HEIGHT,
+              }}
+              aria-hidden
+            />
+          ) : null}
+        </div>
+      )}
+      {visibleCount < totalLines ? (
+        <div className="content-viewer-footer">
+          <button
+            type="button"
+            className="content-viewer-action message-action-button"
+            onClick={() =>
+              setVisibleCount((value) => Math.min(totalLines, value + EXPAND_LINES_STEP))
+            }
+          >
+            Show More
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function renderTokenLine(
+  lineNumber: string,
+  tokenLine: ShikiTokenLine,
+  tokenColorResolver: (color: string | undefined) => string | undefined,
+): ReactNode[] {
+  return tokenLine.map((token, tokenIndex) => (
+    <span
+      key={`${lineNumber}:${tokenIndex}:${token.content.length}`}
+      style={{
+        color: tokenColorResolver(token.color),
+        fontStyle: ((token.fontStyle ?? 0) & 1) !== 0 ? "italic" : undefined,
+        fontWeight: ((token.fontStyle ?? 0) & 2) !== 0 ? 650 : undefined,
+      }}
+    >
+      {token.content}
+    </span>
+  ));
+}
+
+function renderCodeLineContent(
+  line: string,
+  highlightActive: boolean,
+  query: string,
+  key: string,
+  highlightPatterns: string[],
+  tokenLine: ShikiTokenLine | null | undefined,
+  language: string,
+  allowFallbackSyntax: boolean,
+  tokenColorResolver: (color: string | undefined) => string | undefined,
+): ReactNode[] {
+  if (highlightActive) {
+    return buildHighlightedTextNodes(line, query, key, highlightPatterns);
+  }
+  if (tokenLine) {
+    return renderTokenLine(key, tokenLine, tokenColorResolver);
+  }
+  if (allowFallbackSyntax) {
+    return renderSyntaxHighlightedLine(line, language);
+  }
+  return [<span key={`${key}:plain`}>{line}</span>];
+}
+
+function countDiffVisualRows(
+  rows: ReturnType<typeof buildDiffViewModel>["rows"],
+  diffMode: "unified" | "split",
+): number {
+  if (diffMode === "split") {
+    return rows.length;
+  }
+  let count = 0;
+  for (const row of rows) {
+    count += row.kind === "paired" ? 2 : 1;
+  }
+  return count;
+}
+
+function buildDiffVisualOffsets(
+  rows: ReturnType<typeof buildDiffViewModel>["rows"],
+  diffMode: "unified" | "split",
+): number[] {
+  const offsets = new Array<number>(rows.length + 1);
+  offsets[0] = 0;
+  for (let index = 0; index < rows.length; index += 1) {
+    offsets[index + 1] =
+      offsets[index]! + (diffMode === "unified" && rows[index]?.kind === "paired" ? 2 : 1);
+  }
+  return offsets;
+}
+
+function findDiffRowIndexByVisualOffset(offsets: number[], visualIndex: number): number {
+  let low = 0;
+  let high = offsets.length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (offsets[middle + 1]! <= visualIndex) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
+function ViewerAppMenu({
+  label,
+  apps,
+  onSelect,
+}: {
+  label: string;
+  apps: EditorInfo[];
+  onSelect: (editorId: EditorInfo["id"]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const initialMenuFocusIndexRef = useRef(0);
+  const [activeItemIndex, setActiveItemIndex] = useState(0);
+  const [menuPosition, setMenuPosition] = useState<{
+    top: number;
+    left: number;
+    minWidth: number;
+  } | null>(null);
+
+  const closeMenu = (restoreFocus = true) => {
+    setOpen(false);
+    if (restoreFocus) {
+      returnFocusRef.current?.focus({ preventScroll: true });
+    }
+  };
+
+  useEffect(() => {
+    if (!open) {
+      setMenuPosition(null);
+      itemRefs.current = [];
+      return;
+    }
+
+    setActiveItemIndex(Math.min(initialMenuFocusIndexRef.current, Math.max(0, apps.length - 1)));
+
+    const updatePosition = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+      const estimatedWidth = Math.max(rect.width, 220);
+      const left = Math.max(
+        12,
+        Math.min(rect.right - estimatedWidth, window.innerWidth - estimatedWidth - 12),
+      );
+      setMenuPosition({
+        top: rect.bottom + 6,
+        left,
+        minWidth: Math.max(rect.width, 180),
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    document.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      document.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [apps.length, open]);
+
+  useEffect(() => {
+    if (!open || !menuPosition) {
+      return;
+    }
+    itemRefs.current[activeItemIndex]?.focus({ preventScroll: true });
+  }, [activeItemIndex, menuPosition, open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!menuRef.current?.contains(target) && !popoverRef.current?.contains(target)) {
+        closeMenu();
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="content-viewer-menu">
+      <button
+        type="button"
+        className="content-viewer-action message-action-button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        ref={buttonRef}
+        onMouseDown={(event) => {
+          returnFocusRef.current =
+            document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          event.preventDefault();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            returnFocusRef.current =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            initialMenuFocusIndexRef.current = event.key === "ArrowUp" ? apps.length - 1 : 0;
+            setOpen(true);
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            closeMenu();
+          }
+        }}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {label}
+      </button>
+      {open && menuPosition && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={popoverRef}
+              className="content-viewer-menu-popover"
+              role="menu"
+              aria-label={label}
+              tabIndex={-1}
+              onKeyDown={(event) => {
+                if (apps.length === 0) {
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeMenu();
+                  return;
+                }
+                if (event.key === "Tab") {
+                  closeMenu(false);
+                  return;
+                }
+                let nextIndex: number | null = null;
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  nextIndex = (activeItemIndex + 1) % apps.length;
+                } else if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  nextIndex = (activeItemIndex - 1 + apps.length) % apps.length;
+                } else if (event.key === "Home") {
+                  event.preventDefault();
+                  nextIndex = 0;
+                } else if (event.key === "End") {
+                  event.preventDefault();
+                  nextIndex = apps.length - 1;
+                }
+                if (nextIndex !== null) {
+                  setActiveItemIndex(nextIndex);
+                }
+              }}
+              style={{
+                position: "fixed",
+                top: `${menuPosition.top}px`,
+                left: `${menuPosition.left}px`,
+                minWidth: `${menuPosition.minWidth}px`,
+              }}
+            >
+              {apps.map((app, index) => (
+                <button
+                  key={app.id}
+                  type="button"
+                  className="content-viewer-menu-item"
+                  role="menuitem"
+                  tabIndex={index === activeItemIndex ? 0 : -1}
+                  ref={(node) => {
+                    itemRefs.current[index] = node;
+                  }}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                  }}
+                  onFocus={() => {
+                    setActiveItemIndex(index);
+                  }}
+                  onClick={() => {
+                    closeMenu();
+                    onSelect(app.id);
+                  }}
+                >
+                  <span>{app.label}</span>
+                </button>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
+
+function DiffViewerBody({
+  diffModel,
+  diffMode,
+  wrap,
+  syntaxLanguage,
+  query,
+  highlightActive,
+  highlightPatterns,
+  visibleCount,
+  startIndex,
+  endIndex,
+  virtualize,
+  topSpacerHeight,
+  bottomSpacerHeight,
+  unifiedTokenLines,
+  splitLeftTokenLines,
+  splitRightTokenLines,
+  allowFallbackSyntax,
+  tokenColorResolver,
+}: {
+  diffModel: ReturnType<typeof buildDiffViewModel>;
+  diffMode: "unified" | "split";
+  wrap: boolean;
+  syntaxLanguage: string;
+  query: string;
+  highlightActive: boolean;
+  highlightPatterns: string[];
+  visibleCount: number;
+  startIndex: number;
+  endIndex: number;
+  virtualize: boolean;
+  topSpacerHeight: number;
+  bottomSpacerHeight: number;
+  unifiedTokenLines: ShikiTokenLine[] | null;
+  splitLeftTokenLines: ShikiTokenLine[] | null;
+  splitRightTokenLines: ShikiTokenLine[] | null;
+  allowFallbackSyntax: boolean;
+  tokenColorResolver: (color: string | undefined) => string | undefined;
+}) {
+  const rows = useMemo(() => diffModel.rows.slice(0, visibleCount), [diffModel.rows, visibleCount]);
+  const renderedRows = rows.slice(startIndex, endIndex);
+  const unifiedTokenRows = useMemo(() => {
+    if (!unifiedTokenLines) {
+      return null;
+    }
+    const mapped: Array<
+      | { kind: "single"; tokenLine: ShikiTokenLine | undefined }
+      | {
+          kind: "paired";
+          leftTokenLine: ShikiTokenLine | undefined;
+          rightTokenLine: ShikiTokenLine | undefined;
+        }
+    > = [];
+    let tokenIndex = 0;
+    for (const row of rows) {
+      if (row.kind === "paired") {
+        mapped.push({
+          kind: "paired",
+          leftTokenLine: unifiedTokenLines[tokenIndex],
+          rightTokenLine: unifiedTokenLines[tokenIndex + 1],
+        });
+        tokenIndex += 2;
+        continue;
+      }
+      mapped.push({
+        kind: "single",
+        tokenLine: unifiedTokenLines[tokenIndex],
+      });
+      tokenIndex += 1;
+    }
+    return mapped;
+  }, [rows, unifiedTokenLines]);
+  return diffMode === "split" ? (
+    <div className={`diff-table diff-table-split${wrap ? " wrap" : ""}`}>
+      {virtualize && topSpacerHeight > 0 ? (
+        <div style={{ height: topSpacerHeight }} aria-hidden />
+      ) : null}
+      {renderedRows.map((row, index) => {
+        const rowIndex = startIndex + index;
+        const key = `${row.kind}:${rowIndex}`;
+        const leftTokenLine = splitLeftTokenLines?.[rowIndex];
+        const rightTokenLine = splitRightTokenLines?.[rowIndex];
+        if (row.kind === "context") {
+          return (
+            <div key={key} className="diff-split-row diff-context">
+              <span className="diff-ln">{row.oldLine}</span>
+              <span className="diff-code">
+                {renderCodeLineContent(
+                  row.text,
+                  highlightActive,
+                  query,
+                  `${key}:l`,
+                  highlightPatterns,
+                  leftTokenLine,
+                  syntaxLanguage,
+                  allowFallbackSyntax,
+                  tokenColorResolver,
+                )}
+              </span>
+              <span className="diff-ln">{row.newLine}</span>
+              <span className="diff-code">
+                {renderCodeLineContent(
+                  row.text,
+                  highlightActive,
+                  query,
+                  `${key}:r`,
+                  highlightPatterns,
+                  rightTokenLine,
+                  syntaxLanguage,
+                  allowFallbackSyntax,
+                  tokenColorResolver,
+                )}
+              </span>
+            </div>
+          );
+        }
+        if (row.kind === "paired") {
+          return (
+            <div key={key} className="diff-split-row">
+              <span className="diff-ln">{row.oldLine}</span>
+              <span className="diff-code diff-remove">
+                {highlightActive
+                  ? buildHighlightedTextNodes(row.leftText, query, `${key}:lp`, highlightPatterns)
+                  : leftTokenLine
+                    ? renderTokenLine(`${key}:left`, leftTokenLine, tokenColorResolver)
+                    : allowFallbackSyntax
+                      ? renderInlineDiffParts(row.leftParts, "diff-word-remove", `${key}:left`)
+                      : [<span key={`${key}:left:plain`}>{row.leftText}</span>]}
+              </span>
+              <span className="diff-ln">{row.newLine}</span>
+              <span className="diff-code diff-add">
+                {highlightActive
+                  ? buildHighlightedTextNodes(row.rightText, query, `${key}:rp`, highlightPatterns)
+                  : rightTokenLine
+                    ? renderTokenLine(`${key}:right`, rightTokenLine, tokenColorResolver)
+                    : allowFallbackSyntax
+                      ? renderInlineDiffParts(row.rightParts, "diff-word-add", `${key}:right`)
+                      : [<span key={`${key}:right:plain`}>{row.rightText}</span>]}
+              </span>
+            </div>
+          );
+        }
+        if (row.kind === "remove") {
+          return (
+            <div key={key} className="diff-split-row">
+              <span className="diff-ln">{row.oldLine}</span>
+              <span className="diff-code diff-remove">
+                {renderCodeLineContent(
+                  row.text,
+                  highlightActive,
+                  query,
+                  `${key}:remove`,
+                  highlightPatterns,
+                  leftTokenLine,
+                  syntaxLanguage,
+                  allowFallbackSyntax,
+                  tokenColorResolver,
+                )}
+              </span>
+              <span className="diff-ln"> </span>
+              <span className="diff-code" />
+            </div>
+          );
+        }
+        return (
+          <div key={key} className="diff-split-row">
+            <span className="diff-ln"> </span>
+            <span className="diff-code" />
+            <span className="diff-ln">{row.newLine}</span>
+            <span className="diff-code diff-add">
+              {renderCodeLineContent(
+                row.text,
+                highlightActive,
+                query,
+                `${key}:add`,
+                highlightPatterns,
+                rightTokenLine,
+                syntaxLanguage,
+                allowFallbackSyntax,
+                tokenColorResolver,
+              )}
+            </span>
+          </div>
+        );
+      })}
+      {virtualize && bottomSpacerHeight > 0 ? (
+        <div style={{ height: bottomSpacerHeight }} aria-hidden />
+      ) : null}
+    </div>
+  ) : (
+    <div className={`diff-table${wrap ? " wrap" : ""}`}>
+      {virtualize && topSpacerHeight > 0 ? (
+        <div style={{ height: topSpacerHeight }} aria-hidden />
+      ) : null}
+      {renderedRows.map((row, index) => {
+        const rowIndex = startIndex + index;
+        const key = `${row.kind}:${rowIndex}`;
+        if (row.kind === "context") {
+          const tokenRow = unifiedTokenRows?.[rowIndex];
+          const tokenLine = tokenRow?.kind === "single" ? tokenRow.tokenLine : undefined;
+          return (
+            <div key={key} className="diff-row diff-context">
+              <span className="diff-ln">{row.newLine}</span>
+              <span className="diff-code">
+                {renderCodeLineContent(
+                  row.text,
+                  highlightActive,
+                  query,
+                  `${key}:context`,
+                  highlightPatterns,
+                  tokenLine,
+                  syntaxLanguage,
+                  allowFallbackSyntax,
+                  tokenColorResolver,
+                )}
+              </span>
+            </div>
+          );
+        }
+        if (row.kind === "paired") {
+          const tokenRow = unifiedTokenRows?.[rowIndex];
+          const removeTokenLine =
+            tokenRow?.kind === "paired" ? tokenRow.leftTokenLine : undefined;
+          const addTokenLine = tokenRow?.kind === "paired" ? tokenRow.rightTokenLine : undefined;
+          return (
+            <Fragment key={key}>
+              <div key={`${key}:remove`} className="diff-row diff-remove">
+                <span className="diff-ln">{row.oldLine}</span>
+                <span className="diff-code">
+                  {highlightActive
+                    ? buildHighlightedTextNodes(
+                        row.leftText,
+                        query,
+                        `${key}:left`,
+                        highlightPatterns,
+                      )
+                    : removeTokenLine
+                      ? renderTokenLine(`${key}:l`, removeTokenLine, tokenColorResolver)
+                      : allowFallbackSyntax
+                        ? renderInlineDiffParts(row.leftParts, "diff-word-remove", `${key}:l`)
+                        : [<span key={`${key}:l:plain`}>{row.leftText}</span>]}
+                </span>
+              </div>
+              <div key={`${key}:add`} className="diff-row diff-add">
+                <span className="diff-ln">{row.newLine}</span>
+                <span className="diff-code">
+                  {highlightActive
+                    ? buildHighlightedTextNodes(
+                        row.rightText,
+                        query,
+                        `${key}:right`,
+                        highlightPatterns,
+                      )
+                    : addTokenLine
+                      ? renderTokenLine(`${key}:r`, addTokenLine, tokenColorResolver)
+                      : allowFallbackSyntax
+                        ? renderInlineDiffParts(row.rightParts, "diff-word-add", `${key}:r`)
+                        : [<span key={`${key}:r:plain`}>{row.rightText}</span>]}
+                </span>
+              </div>
+            </Fragment>
+          );
+        }
+        if (row.kind === "remove") {
+          const tokenRow = unifiedTokenRows?.[rowIndex];
+          const tokenLine = tokenRow?.kind === "single" ? tokenRow.tokenLine : undefined;
+          return (
+            <div key={key} className="diff-row diff-remove">
+              <span className="diff-ln">{row.oldLine}</span>
+              <span className="diff-code">
+                {renderCodeLineContent(
+                  row.text,
+                  highlightActive,
+                  query,
+                  `${key}:remove`,
+                  highlightPatterns,
+                  tokenLine,
+                  syntaxLanguage,
+                  allowFallbackSyntax,
+                  tokenColorResolver,
+                )}
+              </span>
+            </div>
+          );
+        }
+        const tokenRow = unifiedTokenRows?.[rowIndex];
+        const tokenLine = tokenRow?.kind === "single" ? tokenRow.tokenLine : undefined;
+        return (
+          <div key={key} className="diff-row diff-add">
+            <span className="diff-ln">{row.newLine}</span>
+            <span className="diff-code">
+              {renderCodeLineContent(
+                row.text,
+                highlightActive,
+                query,
+                `${key}:add`,
+                highlightPatterns,
+                tokenLine,
+                syntaxLanguage,
+                allowFallbackSyntax,
+                tokenColorResolver,
+              )}
+            </span>
+          </div>
+        );
+      })}
+      {virtualize && bottomSpacerHeight > 0 ? (
+        <div style={{ height: bottomSpacerHeight }} aria-hidden />
+      ) : null}
+    </div>
+  );
+}
 
 export function renderRichText(
   value: string,
@@ -302,6 +2170,8 @@ function buildMarkdownComponents(
           language={codeDescriptor.syntaxLanguage}
           codeValue={codeValue}
           metaLabel={codeDescriptor.metaLabel}
+          {...(codeDescriptor.filePath ? { filePath: codeDescriptor.filePath } : {})}
+          {...(codeDescriptor.startLine ? { startLine: codeDescriptor.startLine } : {})}
           query={query}
           highlightPatterns={highlightPatterns}
         />
@@ -796,7 +2666,15 @@ function stripLineColumnSuffix(pathValue: string): string {
 
 async function openLocalPath(path: string): Promise<void> {
   try {
-    const result = await getCodetrailClient().invoke("path:openInFileManager", { path });
+    const preferences = await getCachedViewerToolPreferences();
+    const result = await getCodetrailClient().invoke("editor:open", {
+      kind: "file",
+      filePath: path,
+      preferredExternalEditor: preferences.preferredExternalEditor ?? undefined,
+      preferredExternalDiffTool: preferences.preferredExternalDiffTool ?? undefined,
+      terminalAppCommand: preferences.terminalAppCommand,
+      externalTools: preferences.externalTools,
+    });
     if (!result.ok) {
       console.error("[codetrail] failed opening local markdown link", path, result.error);
     }
@@ -809,41 +2687,43 @@ export function CodeBlock({
   language,
   codeValue,
   metaLabel,
+  filePath,
+  pathRoots = [],
+  startLine,
   query = "",
   highlightPatterns = [],
 }: {
   language: string;
   codeValue: string;
   metaLabel?: string;
+  filePath?: string | null;
+  pathRoots?: string[];
+  startLine?: number;
   query?: string;
   highlightPatterns?: string[];
 }) {
   const normalizedLanguage = language.trim().toLowerCase();
-  if (isLikelyDiff(normalizedLanguage, codeValue)) {
-    return <DiffBlock codeValue={codeValue} query={query} highlightPatterns={highlightPatterns} />;
-  }
-
-  const lines = codeValue.split(/\r?\n/);
-  const renderedLines = lines.map((line, index) => (
-    <span key={`${index}:${line.length}`} className="code-line">
-      {query.trim() || highlightPatterns.length > 0
-        ? buildHighlightedTextNodes(line, query, `code:${index}`, highlightPatterns)
-        : renderSyntaxHighlightedLine(line, normalizedLanguage)}
-      {"\n"}
-    </span>
-  ));
-
+  const kind = detectViewerKind(normalizedLanguage, codeValue);
   return (
-    <div className="code-block">
-      <div className="code-meta">{metaLabel || normalizedLanguage || "code"}</div>
-      <pre className="code-pre">{renderedLines}</pre>
-    </div>
+    <ContentViewer
+      kind={kind}
+      language={normalizedLanguage}
+      codeValue={codeValue}
+      {...(metaLabel ? { metaLabel } : {})}
+      {...(filePath !== undefined ? { filePath } : {})}
+      pathRoots={pathRoots}
+      query={query}
+      highlightPatterns={highlightPatterns}
+      {...(startLine ? { startLine } : {})}
+    />
   );
 }
 
 type CodeFenceDescriptor = {
   syntaxLanguage: string;
   metaLabel: string;
+  filePath: string | null;
+  startLine?: number;
 };
 
 function describeCodeFence(fenceInfo: string | null, pathRoots: string[]): CodeFenceDescriptor {
@@ -852,6 +2732,7 @@ function describeCodeFence(fenceInfo: string | null, pathRoots: string[]): CodeF
     return {
       syntaxLanguage: "",
       metaLabel: "",
+      filePath: null,
     };
   }
 
@@ -861,6 +2742,8 @@ function describeCodeFence(fenceInfo: string | null, pathRoots: string[]): CodeF
     return {
       syntaxLanguage: detectLanguageFromFilePath(sourceRef.filePath),
       metaLabel: `${displayPath}:${sourceRef.startLine}`,
+      filePath: sourceRef.filePath,
+      startLine: sourceRef.startLine,
     };
   }
 
@@ -869,12 +2752,14 @@ function describeCodeFence(fenceInfo: string | null, pathRoots: string[]): CodeF
     return {
       syntaxLanguage: detectLanguageFromFilePath(path),
       metaLabel: trimProjectPrefixFromPath(path, pathRoots),
+      filePath: path,
     };
   }
 
   return {
     syntaxLanguage: normalizedInfo,
     metaLabel: normalizedInfo,
+    filePath: null,
   };
 }
 
@@ -924,165 +2809,17 @@ export function DiffBlock({
   query?: string;
   highlightPatterns?: string[];
 }) {
-  const lines = codeValue.split(/\r?\n/);
-  const rows: ReactNode[] = [];
-  let oldLineNumber = 1;
-  let newLineNumber = 1;
-  let addedLineCount = 0;
-  let removedLineCount = 0;
-  let index = 0;
-  while (index < lines.length) {
-    const line = lines[index] ?? "";
-    const lineKey = `${index}:${line.length}`;
-    if (line.startsWith("@@")) {
-      const hunkStart = parseDiffHunkStart(line);
-      if (hunkStart) {
-        oldLineNumber = hunkStart.oldLine;
-        newLineNumber = hunkStart.newLine;
-      }
-      index += 1;
-      continue;
-    }
-
-    if (isRemovedDiffLine(line) && isAddedDiffLine(lines[index + 1] ?? "")) {
-      const nextLine = lines[index + 1] ?? "";
-      const inlineDiff = diffInlineSegments(line.slice(1), nextLine.slice(1));
-      rows.push(
-        <div key={`${lineKey}:remove`} className="diff-row diff-remove">
-          <span className="diff-ln"> </span>
-          <span className="diff-code">
-            {query.trim() || highlightPatterns.length > 0
-              ? buildHighlightedTextNodes(
-                  line.slice(1),
-                  query,
-                  `${lineKey}:remove-highlight`,
-                  highlightPatterns,
-                )
-              : (() => {
-                  let leftCursor = 0;
-                  return inlineDiff.left.map((part) => {
-                    const key = `${lineKey}:l:${leftCursor}:${part.changed ? "1" : "0"}`;
-                    leftCursor += part.text.length;
-                    return (
-                      <span key={key} className={part.changed ? "diff-word-remove" : undefined}>
-                        {part.text}
-                      </span>
-                    );
-                  });
-                })()}
-          </span>
-        </div>,
-      );
-      rows.push(
-        <div key={`${lineKey}:add`} className="diff-row diff-add">
-          <span className="diff-ln">{newLineNumber}</span>
-          <span className="diff-code">
-            {query.trim() || highlightPatterns.length > 0
-              ? buildHighlightedTextNodes(
-                  nextLine.slice(1),
-                  query,
-                  `${lineKey}:add-highlight`,
-                  highlightPatterns,
-                )
-              : (() => {
-                  let rightCursor = 0;
-                  return inlineDiff.right.map((part) => {
-                    const key = `${lineKey}:r:${rightCursor}:${part.changed ? "1" : "0"}`;
-                    rightCursor += part.text.length;
-                    return (
-                      <span key={key} className={part.changed ? "diff-word-add" : undefined}>
-                        {part.text}
-                      </span>
-                    );
-                  });
-                })()}
-          </span>
-        </div>,
-      );
-      removedLineCount += 1;
-      addedLineCount += 1;
-      oldLineNumber += 1;
-      newLineNumber += 1;
-      index += 2;
-      continue;
-    }
-
-    if (isAddedDiffLine(line)) {
-      rows.push(
-        <div key={`${lineKey}:add-only`} className="diff-row diff-add">
-          <span className="diff-ln">{newLineNumber}</span>
-          <span className="diff-code">
-            {buildHighlightedTextNodes(
-              line.slice(1),
-              query,
-              `${lineKey}:add-only`,
-              highlightPatterns,
-            )}
-          </span>
-        </div>,
-      );
-      addedLineCount += 1;
-      newLineNumber += 1;
-    } else if (isRemovedDiffLine(line)) {
-      rows.push(
-        <div key={`${lineKey}:remove-only`} className="diff-row diff-remove">
-          <span className="diff-ln"> </span>
-          <span className="diff-code">
-            {buildHighlightedTextNodes(
-              line.slice(1),
-              query,
-              `${lineKey}:remove-only`,
-              highlightPatterns,
-            )}
-          </span>
-        </div>,
-      );
-      removedLineCount += 1;
-      oldLineNumber += 1;
-    } else if (
-      line.startsWith("diff --git") ||
-      line.startsWith("index ") ||
-      line.startsWith("--- ") ||
-      line.startsWith("+++ ")
-    ) {
-      index += 1;
-      continue;
-    } else {
-      rows.push(
-        <div key={`${lineKey}:context`} className="diff-row diff-context">
-          <span className="diff-ln">{newLineNumber}</span>
-          <span className="diff-code">
-            {buildHighlightedTextNodes(
-              line.startsWith(" ") ? line.slice(1) : line,
-              query,
-              `${lineKey}:context`,
-              highlightPatterns,
-            )}
-          </span>
-        </div>,
-      );
-      oldLineNumber += 1;
-      newLineNumber += 1;
-    }
-    index += 1;
-  }
-
-  const parsedFilePath = filePath ?? extractDiffFilePath(lines);
-  const displayFilePath = parsedFilePath
-    ? trimProjectPrefixFromPath(parsedFilePath, pathRoots)
-    : "Diff";
-
   return (
-    <div className="code-block diff-block">
-      <div className="code-meta diff-meta-bar">
-        <span className="diff-meta-file">{displayFilePath}</span>
-        <span className="diff-meta-counts">
-          <span className="diff-meta-added">+{addedLineCount}</span>
-          <span className="diff-meta-removed">-{removedLineCount}</span>
-        </span>
-      </div>
-      <div className="diff-table">{rows}</div>
-    </div>
+    <ContentViewer
+      kind="diff"
+      language="diff"
+      codeValue={codeValue}
+      {...(filePath ? { metaLabel: trimProjectPrefixFromPath(filePath, pathRoots) } : {})}
+      {...(filePath !== undefined ? { filePath } : {})}
+      pathRoots={pathRoots}
+      query={query}
+      highlightPatterns={highlightPatterns}
+    />
   );
 }
 
@@ -1148,206 +2885,12 @@ function languageKeywords(language: string): Set<string> {
   return LANGUAGE_KEYWORDS[language] ?? EMPTY_KEYWORDS;
 }
 
-export function detectLanguageFromContent(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "text";
-  }
-  if (isLikelyDiff("", value)) {
-    return "diff";
-  }
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    const parsed = tryParseJsonRecord(value);
-    if (parsed || trimmed.startsWith("[")) {
-      return "json";
-    }
-  }
-  if (trimmed.includes("<html") || trimmed.includes("</")) {
-    return "html";
-  }
-  return "text";
-}
-
-export function detectLanguageFromFilePath(path: string | null): string {
-  if (!path) {
-    return "text";
-  }
-  const normalized = path.toLowerCase();
-  if (normalized.endsWith(".ts") || normalized.endsWith(".tsx")) {
-    return "typescript";
-  }
-  if (normalized.endsWith(".js") || normalized.endsWith(".jsx")) {
-    return "javascript";
-  }
-  if (normalized.endsWith(".py")) {
-    return "python";
-  }
-  if (normalized.endsWith(".json")) {
-    return "json";
-  }
-  if (normalized.endsWith(".css")) {
-    return "css";
-  }
-  if (normalized.endsWith(".html")) {
-    return "html";
-  }
-  if (normalized.endsWith(".sql")) {
-    return "sql";
-  }
-  if (normalized.endsWith(".md")) {
-    return "markdown";
-  }
-  if (normalized.endsWith(".sh") || normalized.endsWith(".zsh") || normalized.endsWith(".bash")) {
-    return "shell";
-  }
-  return "text";
-}
-
-export function isLikelyDiff(language: string, codeValue: string): boolean {
-  if (language.includes("diff") || language === "patch") {
-    return true;
-  }
-  const lines = codeValue.split(/\r?\n/).filter((line) => line.length > 0);
-  if (lines.length === 0) {
-    return false;
-  }
-  const hasStrongMarker = lines.some(
-    (line) =>
-      line.startsWith("@@") ||
-      line.startsWith("diff --git") ||
-      line.startsWith("--- ") ||
-      line.startsWith("+++ "),
-  );
-  if (hasStrongMarker) {
-    return true;
-  }
-
-  const addedLines = lines.filter((line) => isAddedDiffLine(line)).length;
-  const removedLines = lines.filter((line) => isRemovedDiffLine(line)).length;
-  const contextLines = lines.filter((line) => line.startsWith(" ")).length;
-  return addedLines > 0 && removedLines > 0 && addedLines + removedLines + contextLines >= 4;
-}
-
-function isAddedDiffLine(line: string): boolean {
-  return line.startsWith("+") && !line.startsWith("+++ ");
-}
-
-function isRemovedDiffLine(line: string): boolean {
-  return line.startsWith("-") && !line.startsWith("--- ");
-}
-
-function parseDiffHunkStart(line: string): { oldLine: number; newLine: number } | null {
-  const match = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-  if (!match) {
-    return null;
-  }
-  const oldLine = Number(match[1]);
-  const newLine = Number(match[2]);
-  if (!Number.isFinite(oldLine) || !Number.isFinite(newLine)) {
-    return null;
-  }
-  return { oldLine, newLine };
-}
-
-function extractDiffFilePath(lines: string[]): string | null {
-  const headerLine =
-    lines.find((line) => line.startsWith("+++ ") && !line.includes("/dev/null")) ??
-    lines.find((line) => line.startsWith("--- ") && !line.includes("/dev/null")) ??
-    null;
-  if (!headerLine) {
-    return null;
-  }
-
-  const candidate = headerLine.slice(4).trim();
-  if (!candidate) {
-    return null;
-  }
-
-  return candidate.replace(/^["']|["']$/g, "").replace(/^[ab]\//, "");
-}
-
-function trimProjectPrefixFromPath(filePath: string, pathRoots: string[]): string {
-  const normalizedFilePath = filePath.replace(/\\/g, "/");
-  const normalizedRoots = pathRoots.map((root) => root.replace(/\\/g, "/").replace(/\/+$/, ""));
-
-  for (const root of normalizedRoots) {
-    if (!root) {
-      continue;
-    }
-    if (normalizedFilePath === root) {
-      return normalizedFilePath.split("/").pop() ?? normalizedFilePath;
-    }
-    if (normalizedFilePath.startsWith(`${root}/`)) {
-      return normalizedFilePath.slice(root.length + 1);
-    }
-  }
-
-  return normalizedFilePath;
-}
-
-function diffInlineSegments(
-  left: string,
-  right: string,
-): {
-  left: Array<{ text: string; changed: boolean }>;
-  right: Array<{ text: string; changed: boolean }>;
-} {
-  const leftTokens = left.split(/(\s+)/).filter((part) => part.length > 0);
-  const rightTokens = right.split(/(\s+)/).filter((part) => part.length > 0);
-  const matrix: number[][] = Array.from({ length: leftTokens.length + 1 }, () =>
-    Array.from({ length: rightTokens.length + 1 }, () => 0),
-  );
-
-  for (let i = leftTokens.length - 1; i >= 0; i -= 1) {
-    for (let j = rightTokens.length - 1; j >= 0; j -= 1) {
-      const leftToken = leftTokens[i] ?? "";
-      const rightToken = rightTokens[j] ?? "";
-      const currentRow = matrix[i];
-      if (!currentRow) {
-        continue;
-      }
-      if (leftToken === rightToken) {
-        currentRow[j] = (matrix[i + 1]?.[j + 1] ?? 0) + 1;
-      } else {
-        currentRow[j] = Math.max(matrix[i + 1]?.[j] ?? 0, currentRow[j + 1] ?? 0);
-      }
-    }
-  }
-
-  const leftParts: Array<{ text: string; changed: boolean }> = [];
-  const rightParts: Array<{ text: string; changed: boolean }> = [];
-  let i = 0;
-  let j = 0;
-  while (i < leftTokens.length && j < rightTokens.length) {
-    const leftToken = leftTokens[i] ?? "";
-    const rightToken = rightTokens[j] ?? "";
-    if (leftToken === rightToken) {
-      leftParts.push({ text: leftToken, changed: false });
-      rightParts.push({ text: rightToken, changed: false });
-      i += 1;
-      j += 1;
-      continue;
-    }
-    if ((matrix[i + 1]?.[j] ?? 0) >= (matrix[i]?.[j + 1] ?? 0)) {
-      leftParts.push({ text: leftToken, changed: true });
-      i += 1;
-      continue;
-    }
-    rightParts.push({ text: rightToken, changed: true });
-    j += 1;
-  }
-
-  while (i < leftTokens.length) {
-    leftParts.push({ text: leftTokens[i] ?? "", changed: true });
-    i += 1;
-  }
-  while (j < rightTokens.length) {
-    rightParts.push({ text: rightTokens[j] ?? "", changed: true });
-    j += 1;
-  }
-
-  return { left: leftParts, right: rightParts };
-}
+export {
+  detectLanguageFromContent,
+  detectLanguageFromFilePath,
+  isLikelyDiff,
+  looksLikeLogContent,
+} from "./viewerDetection";
 
 export function buildHighlightedTextNodes(
   value: string,

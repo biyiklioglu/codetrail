@@ -1,7 +1,7 @@
-import { realpath, stat } from "node:fs/promises";
+import { readdir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 
-import { BrowserWindow, app, ipcMain, shell } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 
 import {
   DATABASE_SCHEMA_VERSION,
@@ -24,6 +24,11 @@ import { HISTORY_EXPORT_PROGRESS_CHANNEL } from "../shared/historyExport";
 import type { AppStateStore } from "./appStateStore";
 import { initializeBookmarkStore, resolveBookmarksDbPath } from "./data/bookmarkStore";
 import { type QueryService, createQueryService } from "./data/queryService";
+import { listAvailableEditors, openInEditor } from "./editorRegistry";
+import {
+  cleanupStaleEditorTempArtifacts,
+  resetActiveEditorTempArtifacts,
+} from "./editorTempArtifacts";
 import {
   type FileWatcherBatch,
   type FileWatcherOptions,
@@ -88,6 +93,12 @@ export async function bootstrapMainProcess(
   options: BootstrapOptions = {},
 ): Promise<BootstrapResult> {
   await disposeRuntimeState(runtimeState);
+  resetActiveEditorTempArtifacts();
+  await cleanupStaleEditorTempArtifacts({
+    readdir,
+    stat,
+    rm,
+  }).catch(() => undefined);
   const runtime = createRuntimeState();
   runtimeState = runtime;
   const dbPath = options.dbPath ?? join(app.getPath("userData"), "codetrail.sqlite");
@@ -333,6 +344,78 @@ export async function bootstrapMainProcess(
         error: error.length > 0 ? error : null,
       };
     },
+    "dialog:pickExternalToolCommand": async () => {
+      const dialogResult = await dialog.showOpenDialog({
+        title: "Choose External Tool Command",
+        buttonLabel: "Choose Command",
+        properties: process.platform === "darwin" ? ["openFile", "openDirectory"] : ["openFile"],
+      });
+      if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
+        return { canceled: true, path: null, error: null };
+      }
+
+      const selectedPath = dialogResult.filePaths[0] ?? null;
+      if (!selectedPath) {
+        return { canceled: true, path: null, error: null };
+      }
+
+      const validationError = await validateExternalToolCommandPath(selectedPath);
+      if (validationError) {
+        return { canceled: false, path: null, error: validationError };
+      }
+
+      return { canceled: false, path: selectedPath, error: null };
+    },
+    "editor:listAvailable": (payload) => {
+      const paneState = options.appStateStore?.getPaneState() ?? null;
+      return listAvailableEditors(
+        payload.externalTools
+          ? {
+              ...(paneState ?? {}),
+              externalTools: payload.externalTools,
+            }
+          : paneState,
+      );
+    },
+    "editor:open": async (payload) => {
+      if ("filePath" in payload && payload.filePath) {
+        if (!isAbsolute(payload.filePath)) {
+          return {
+            ok: false,
+            error: "File path must be absolute.",
+          };
+        }
+        const targetPath = await resolveCanonicalPath(payload.filePath);
+        if (!isPathAllowedByRoots(targetPath, readAllowedRoots())) {
+          return {
+            ok: false,
+            error: "Path is outside indexed projects and app storage roots.",
+          };
+        }
+      }
+      const paneState = options.appStateStore?.getPaneState() ?? null;
+      const paneStateOverride =
+        paneState ||
+        payload.externalTools ||
+        payload.preferredExternalEditor ||
+        payload.preferredExternalDiffTool ||
+        payload.terminalAppCommand
+          ? {
+              ...(paneState ?? {}),
+              ...(payload.externalTools ? { externalTools: payload.externalTools } : {}),
+              ...(payload.preferredExternalEditor
+                ? { preferredExternalEditor: payload.preferredExternalEditor }
+                : {}),
+              ...(payload.preferredExternalDiffTool
+                ? { preferredExternalDiffTool: payload.preferredExternalDiffTool }
+                : {}),
+              ...(payload.terminalAppCommand !== undefined
+                ? { terminalAppCommand: payload.terminalAppCommand }
+                : {}),
+            }
+          : null;
+      return openInEditor(payload, paneStateOverride);
+    },
     "ui:getPaneState": () => {
       const paneState = options.appStateStore?.getPaneState();
       const result = Object.fromEntries(
@@ -498,6 +581,7 @@ export async function bootstrapMainProcess(
 export async function shutdownMainProcess(): Promise<void> {
   await disposeRuntimeState(runtimeState);
   runtimeState = null;
+  resetActiveEditorTempArtifacts();
 }
 
 function getAllowedOpenInFileManagerRoots(input: {
@@ -557,6 +641,23 @@ async function resolveCanonicalPath(value: string): Promise<string> {
     return normalizeResolvedPath(await realpath(normalizedPath));
   } catch {
     return normalizedPath;
+  }
+}
+
+async function validateExternalToolCommandPath(value: string): Promise<string | null> {
+  const resolvedPath = await resolveCanonicalPath(value);
+
+  try {
+    const entry = await stat(resolvedPath);
+    if (entry.isFile()) {
+      return null;
+    }
+    if (process.platform === "darwin" && resolvedPath.toLowerCase().endsWith(".app")) {
+      return null;
+    }
+    return "Choose an executable file or a macOS .app bundle.";
+  } catch {
+    return "Selected command could not be accessed.";
   }
 }
 
