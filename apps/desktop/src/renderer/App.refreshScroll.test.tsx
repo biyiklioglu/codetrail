@@ -373,11 +373,11 @@ describe("App refresh scroll preservation", () => {
     // Navigate to page 2 (away from newest in DESC).
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 3/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("3");
     });
 
     // In jsdom, scrollTop defaults to 0 which is the top edge — pinned for DESC.
@@ -389,7 +389,7 @@ describe("App refresh scroll preservation", () => {
 
     // Top of page 3 is not the live edge for DESC; stay on page 3.
     await waitFor(() => {
-      expect(screen.getByText(/Page 3/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("3");
     });
   });
 
@@ -467,7 +467,7 @@ describe("App refresh scroll preservation", () => {
     // Navigate to page 2, then mock as scrolled away.
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
     const messageList = container.querySelector<HTMLElement>(".msg-scroll.message-list");
     if (messageList) mockScrolledAway(messageList);
@@ -476,7 +476,7 @@ describe("App refresh scroll preservation", () => {
 
     // Should still be on page 2.
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
   });
 
@@ -556,7 +556,7 @@ describe("App refresh scroll preservation", () => {
 
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
     const messageList = container.querySelector<HTMLElement>(".msg-scroll.message-list");
@@ -569,7 +569,7 @@ describe("App refresh scroll preservation", () => {
 
     // Bottom of page 2 is visually pinned but not the live edge for ASC after growth.
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
   });
 
@@ -662,7 +662,7 @@ describe("App refresh scroll preservation", () => {
     // Navigate to page 2.
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
     // Mock scrolled away from top (NOT pinned for DESC).
@@ -676,7 +676,7 @@ describe("App refresh scroll preservation", () => {
 
     // Should stay on page 2, not navigate to page 0.
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
   });
 
@@ -793,7 +793,7 @@ describe("App refresh scroll preservation", () => {
     // Navigate to page 2 (away from page 0).
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
     const messageList = document.querySelector<HTMLElement>(".msg-scroll.message-list");
@@ -803,7 +803,7 @@ describe("App refresh scroll preservation", () => {
 
     // Top of page 2 is not the live edge for DESC project-all.
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
   });
 
@@ -847,7 +847,7 @@ describe("App refresh scroll preservation", () => {
 
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
     const messageList = container.querySelector<HTMLElement>(".msg-scroll.message-list");
@@ -859,7 +859,7 @@ describe("App refresh scroll preservation", () => {
     await advanceRefreshTimers();
 
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
   });
 
@@ -928,7 +928,7 @@ describe("App refresh scroll preservation", () => {
 
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
     const messageList = document.querySelector<HTMLElement>(".msg-scroll.message-list");
@@ -940,7 +940,7 @@ describe("App refresh scroll preservation", () => {
     await advanceRefreshTimers();
 
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
   });
 
@@ -980,11 +980,11 @@ describe("App refresh scroll preservation", () => {
     // Navigate to page 3 (index 2).
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 3/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("3");
     });
 
     // Mock scrolled away so we don't trigger auto-scroll.
@@ -1003,7 +1003,7 @@ describe("App refresh scroll preservation", () => {
     // Server clamps page 2 → page 0 (only 1 page exists now).
     // The response.page !== sessionPage guard should update the page.
     await waitFor(() => {
-      expect(screen.getByText(/Page 1 /)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
     });
   });
 
@@ -1030,7 +1030,7 @@ describe("App refresh scroll preservation", () => {
     // Navigate to page 2.
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
     // Mock scrolled away so auto-scroll doesn't engage.
@@ -1051,7 +1051,7 @@ describe("App refresh scroll preservation", () => {
 
     // Should still be on page 2 after 3 ticks.
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
     const detailCallsAfterAutoRefresh = client.invoke.mock.calls.filter(

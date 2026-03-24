@@ -731,7 +731,8 @@ describe("App shell", () => {
 
     await waitFor(() => {
       expect(screen.getByText("First assistant body")).toBeInTheDocument();
-      expect(screen.getByText("Page 1 / 2 (4 messages)")).toBeInTheDocument();
+      expect(screen.getByText("4 messages")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
     });
 
     await user.click(screen.getAllByRole("button", { name: "Collapse message" })[0]!);
@@ -740,16 +741,182 @@ describe("App shell", () => {
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
       expect(screen.getByText("Third assistant body")).toBeInTheDocument();
-      expect(screen.getByText("Page 2 / 2 (4 messages)")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
     await user.click(screen.getByRole("button", { name: "Previous page" }));
     await waitFor(() => {
       expect(screen.getByText("First assistant body")).toBeInTheDocument();
-      expect(screen.getByText("Page 1 / 2 (4 messages)")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
     });
 
     expect(container.querySelectorAll(".message.category-assistant.expanded")).toHaveLength(2);
+  });
+
+  it("keeps footer paging controls focused on messages and only commits page input on Enter", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "sessions:getDetail": (request) => {
+        const page = typeof request === "object" && request && "page" in request ? request.page : 0;
+        return {
+          session: {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Investigate markdown rendering",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 4,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+          totalCount: 4,
+          categoryCounts: {
+            user: 0,
+            assistant: 4,
+            tool_use: 0,
+            tool_edit: 0,
+            tool_result: 0,
+            thinking: 0,
+            system: 0,
+          },
+          page: typeof page === "number" ? page : 0,
+          pageSize: 2,
+          focusIndex: null,
+          messages:
+            page === 0
+              ? [
+                  {
+                    id: "assistant_1",
+                    sourceId: "assistant_src_1",
+                    sessionId: "session_1",
+                    provider: "claude",
+                    category: "assistant",
+                    content: "First assistant body",
+                    createdAt: "2026-03-01T10:00:00.000Z",
+                    tokenInput: null,
+                    tokenOutput: null,
+                    operationDurationMs: null,
+                    operationDurationSource: null,
+                    operationDurationConfidence: null,
+                  },
+                  {
+                    id: "assistant_2",
+                    sourceId: "assistant_src_2",
+                    sessionId: "session_1",
+                    provider: "claude",
+                    category: "assistant",
+                    content: "Second assistant body",
+                    createdAt: "2026-03-01T10:00:02.000Z",
+                    tokenInput: null,
+                    tokenOutput: null,
+                    operationDurationMs: null,
+                    operationDurationSource: null,
+                    operationDurationConfidence: null,
+                  },
+                ]
+              : [
+                  {
+                    id: "assistant_3",
+                    sourceId: "assistant_src_3",
+                    sessionId: "session_1",
+                    provider: "claude",
+                    category: "assistant",
+                    content: "Third assistant body",
+                    createdAt: "2026-03-01T10:00:04.000Z",
+                    tokenInput: null,
+                    tokenOutput: null,
+                    operationDurationMs: null,
+                    operationDurationSource: null,
+                    operationDurationConfidence: null,
+                  },
+                  {
+                    id: "assistant_4",
+                    sourceId: "assistant_src_4",
+                    sessionId: "session_1",
+                    provider: "claude",
+                    category: "assistant",
+                    content: "Fourth assistant body",
+                    createdAt: "2026-03-01T10:00:06.000Z",
+                    tokenInput: null,
+                    tokenOutput: null,
+                    operationDurationMs: null,
+                    operationDurationSource: null,
+                    operationDurationConfidence: null,
+                  },
+                ],
+        };
+      },
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            messagePageSize: 2,
+          } as unknown as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    const messageList = container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+    const footer = container.querySelector<HTMLDivElement>(".msg-pagination");
+
+    await waitFor(() => {
+      expect(screen.getByText("First assistant body")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
+    });
+
+    expect(messageList).not.toBeNull();
+    expect(footer).not.toBeNull();
+
+    messageList?.focus();
+    expect(document.activeElement).toBe(messageList);
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
+    });
+    expect(document.activeElement).toBe(messageList);
+
+    fireEvent.mouseDown(footer!);
+    expect(document.activeElement).toBe(messageList);
+
+    const pageInput = screen.getByRole("textbox", { name: "Page number" });
+
+    await user.click(pageInput);
+    await user.clear(pageInput);
+    await user.type(pageInput, "1");
+    await user.keyboard("{Tab}");
+    expect(pageInput).toHaveValue("2");
+    expect(document.activeElement).toBe(messageList);
+
+    await user.click(pageInput);
+    await user.clear(pageInput);
+    await user.type(pageInput, "1");
+    await user.keyboard("{Escape}");
+    expect(pageInput).toHaveValue("2");
+    expect(document.activeElement).toBe(messageList);
+
+    await user.click(pageInput);
+    await user.clear(pageInput);
+    await user.type(pageInput, "1{Enter}");
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
+      expect(screen.getByText("First assistant body")).toBeInTheDocument();
+    });
+    expect(document.activeElement).toBe(messageList);
   });
 
   it("does not show a project-level live row while viewing a different session", async () => {
@@ -859,12 +1026,13 @@ describe("App shell", () => {
     renderWithClient(<App />, client);
 
     await waitFor(() => {
-      expect(screen.getByText("Page 1 / 5 (250 messages)")).toBeInTheDocument();
+      expect(screen.getByText("250 messages")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
     });
 
     fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
     await waitFor(() => {
-      expect(screen.getByText("Page 2 / 5 (250 messages)")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
     await user.click(screen.getByRole("button", { name: "Search" }));
@@ -1466,7 +1634,8 @@ describe("App shell", () => {
       expect(screen.getByRole("button", { name: "Close bookmarks" })).toBeInTheDocument();
     });
     expect(screen.getByText("Saved markdown summary")).toBeInTheDocument();
-    expect(screen.getByText("Page 1 / 3 (25 bookmarks)")).toBeInTheDocument();
+    expect(screen.getByText("25 bookmarks")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
 
     await user.click(screen.getByRole("button", { name: "Close bookmarks" }));
 

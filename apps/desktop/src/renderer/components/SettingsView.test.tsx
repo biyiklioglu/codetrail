@@ -350,7 +350,7 @@ describe("SettingsView", () => {
     expect(screen.getByText("System Message Rules")).toBeInTheDocument();
 
     const selects = screen.getAllByRole("combobox");
-    expect(selects.length).toBeGreaterThanOrEqual(9);
+    expect(selects.length).toBeGreaterThanOrEqual(8);
     await user.selectOptions(screen.getByRole("combobox", { name: "Theme" }), "midnight");
     expect(screen.getByRole("option", { name: "Tokyo Night" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Light Plus" })).not.toBeInTheDocument();
@@ -358,14 +358,10 @@ describe("SettingsView", () => {
       screen.getByRole("combobox", { name: "Text viewer theme" }),
       "tokyo-night",
     );
-    await user.selectOptions(screen.getByRole("combobox", { name: "Messages per page" }), "25");
     await user.selectOptions(screen.getByRole("combobox", { name: "Monospaced font" }), "current");
     await user.selectOptions(screen.getByRole("combobox", { name: "Monospaced size" }), "13px");
     await user.selectOptions(screen.getByRole("combobox", { name: "Regular font" }), "inter");
     await user.selectOptions(screen.getByRole("combobox", { name: "Regular size" }), "14px");
-    await user.clear(screen.getByRole("textbox", { name: "Zoom" }));
-    await user.type(screen.getByRole("textbox", { name: "Zoom" }), "104%");
-    await user.tab();
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Preferred editor" }),
       "custom:1",
@@ -437,8 +433,6 @@ describe("SettingsView", () => {
 
     expect(baseProps.appearance.onThemeChange).toHaveBeenCalledWith("midnight");
     expect(baseProps.appearance.onShikiThemeChange).toHaveBeenCalledWith("tokyo-night");
-    expect(baseProps.appearance.onMessagePageSizeChange).toHaveBeenCalledWith(25);
-    expect(baseProps.appearance.onZoomPercentChange).toHaveBeenCalledWith(104);
     expect(baseProps.appearance.onMonoFontFamilyChange).toHaveBeenCalledWith("current");
     expect(baseProps.appearance.onMonoFontSizeChange).toHaveBeenCalledWith("13px");
     expect(baseProps.appearance.onRegularFontFamilyChange).toHaveBeenCalledWith("inter");

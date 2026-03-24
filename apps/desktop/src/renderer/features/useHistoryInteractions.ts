@@ -933,16 +933,51 @@ export function useHistoryInteractions({
       return;
     }
     refreshContextRef.current = null;
+    setPendingMessagePageNavigation(null);
     setSessionPage((value) => Math.max(0, value - 1));
-  }, [canNavigatePages, refreshContextRef, setSessionPage]);
+  }, [canNavigatePages, refreshContextRef, setPendingMessagePageNavigation, setSessionPage]);
 
   const goToNextHistoryPage = useCallback(() => {
     if (!canNavigatePages) {
       return;
     }
     refreshContextRef.current = null;
+    setPendingMessagePageNavigation(null);
     setSessionPage((value) => Math.min(totalPages - 1, value + 1));
-  }, [canNavigatePages, refreshContextRef, setSessionPage, totalPages]);
+  }, [
+    canNavigatePages,
+    refreshContextRef,
+    setPendingMessagePageNavigation,
+    setSessionPage,
+    totalPages,
+  ]);
+
+  const goToHistoryPage = useCallback(
+    (page: number) => {
+      if (!canNavigatePages) {
+        return;
+      }
+      const targetPage = Math.max(0, Math.min(totalPages - 1, Math.trunc(page)));
+      refreshContextRef.current = null;
+      setPendingMessagePageNavigation(null);
+      setSessionPage(targetPage);
+    },
+    [
+      canNavigatePages,
+      refreshContextRef,
+      setPendingMessagePageNavigation,
+      setSessionPage,
+      totalPages,
+    ],
+  );
+
+  const goToFirstHistoryPage = useCallback(() => {
+    goToHistoryPage(0);
+  }, [goToHistoryPage]);
+
+  const goToLastHistoryPage = useCallback(() => {
+    goToHistoryPage(totalPages - 1);
+  }, [goToHistoryPage, totalPages]);
 
   const focusAdjacentHistoryMessage = useCallback(
     (direction: Direction, { preserveFocus = false }: { preserveFocus?: boolean } = {}) => {
@@ -1091,6 +1126,9 @@ export function useHistoryInteractions({
     selectAdjacentProject,
     handleProjectTreeArrow,
     handleProjectTreeEnter,
+    goToHistoryPage,
+    goToFirstHistoryPage,
+    goToLastHistoryPage,
     goToPreviousHistoryPage,
     goToNextHistoryPage,
     focusAdjacentHistoryMessage,

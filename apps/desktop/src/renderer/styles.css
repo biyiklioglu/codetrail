@@ -3746,8 +3746,37 @@ mark {
   flex-shrink: 0;
 }
 
+.msg-pagination {
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.msg-pagination-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.msg-pagination-summary {
+  min-width: 120px;
+}
+
+.msg-pagination-controls {
+  flex: 1;
+  justify-content: center;
+  min-width: 320px;
+}
+
+.msg-pagination-page-size {
+  justify-content: flex-end;
+  min-width: 140px;
+}
+
 .page-btn,
 .pagination-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-surface);
@@ -3767,10 +3796,93 @@ mark {
   box-shadow: var(--shadow-md);
 }
 
+.page-btn.page-icon-btn {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 6px;
+}
+
+.page-btn.page-icon-btn .toolbar-icon {
+  width: 14px;
+  height: 14px;
+}
+
 .page-info,
 .pagination-row span {
   color: var(--text-tertiary);
   font-size: 12px;
+}
+
+.page-total {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.page-jump-control,
+.page-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.page-jump-label-text,
+.page-size-label-text {
+  white-space: nowrap;
+}
+
+.page-jump-input {
+  width: 56px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.page-jump-total {
+  white-space: nowrap;
+}
+
+.pagination-select-wrap {
+  position: relative;
+}
+
+.pagination-select {
+  min-height: 30px;
+  padding: 5px 28px 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  appearance: none;
+}
+
+.pagination-select-chevron {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.pagination-select-chevron svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
 }
 
 .search-view {

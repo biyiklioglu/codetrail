@@ -1190,6 +1190,9 @@ export function useHistoryController({
     selectAdjacentProject,
     handleProjectTreeArrow,
     handleProjectTreeEnter,
+    goToHistoryPage,
+    goToFirstHistoryPage,
+    goToLastHistoryPage,
     goToPreviousHistoryPage,
     goToNextHistoryPage,
     focusAdjacentHistoryMessage,
@@ -1489,6 +1492,8 @@ export function useHistoryController({
     setFocusMessageId,
     visibleFocusedMessageId,
     sessionPage,
+    messagePageSize: appearance.messagePageSize,
+    setMessagePageSize: appearance.setMessagePageSize,
     loadedHistoryPage,
     setSessionPage,
     sessionQueryInput,
@@ -1539,6 +1544,9 @@ export function useHistoryController({
     selectAdjacentProject,
     handleProjectTreeArrow,
     handleProjectTreeEnter,
+    goToHistoryPage,
+    goToFirstHistoryPage,
+    goToLastHistoryPage,
     goToPreviousHistoryPage,
     goToNextHistoryPage,
     handleRefresh,
@@ -1642,7 +1650,7 @@ export function useHistoryController({
         };
 
         if (source === "manual") {
-          const sharedLoads = [
+          const sharedLoads: Promise<unknown>[] = [
             loadProjects("resort"),
             loadSessions(),
             refreshTreeProjectSessions(),

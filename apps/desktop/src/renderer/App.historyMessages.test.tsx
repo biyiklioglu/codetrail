@@ -63,7 +63,8 @@ describe("App history messages", () => {
     const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
 
     await waitFor(() => {
-      expect(screen.getByText("Page 1 / 5 (250 messages)")).toBeInTheDocument();
+      expect(screen.getByText("250 messages")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
     });
 
     await dispatchWindowShortcut({ key: "ArrowDown", metaKey: true });
@@ -77,7 +78,7 @@ describe("App history messages", () => {
     await dispatchWindowShortcut({ key: "ArrowDown", metaKey: true });
 
     await waitFor(() => {
-      expect(screen.getByText("Page 2 / 5 (250 messages)")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
       expect(getFocusedHistoryMessageId(container)).toBe("m1");
       expect(document.activeElement).toBe(messageList());
     });

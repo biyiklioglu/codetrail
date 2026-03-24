@@ -1,7 +1,8 @@
-import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 
 import type { MessageCategory } from "@codetrail/core/browser";
 
+import { type MessagePageSize, UI_MESSAGE_PAGE_SIZE_VALUES } from "../../shared/uiPreferences";
 import { CATEGORIES } from "../app/constants";
 import type { WatchLiveStatusResponse } from "../app/types";
 import { AdvancedSearchToggleButton } from "../components/AdvancedSearchToggleButton";
@@ -84,6 +85,15 @@ function isInteractiveHeaderTarget(target: EventTarget | null): boolean {
   );
 }
 
+function selectNumericValueOrFallback<T extends number>(
+  value: string,
+  allowedValues: readonly T[],
+  fallback: T,
+): T {
+  const numericValue = Number(value);
+  return allowedValues.includes(numericValue as T) ? (numericValue as T) : fallback;
+}
+
 export function HistoryDetailPane({
   history,
   advancedSearchEnabled,
@@ -136,6 +146,8 @@ export function HistoryDetailPane({
   const historySearchPlaceholder = getSearchQueryPlaceholder(advancedSearchEnabled);
   const historySearchTooltip = getSearchQueryTooltip(advancedSearchEnabled);
   const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
+  const [pageInputValue, setPageInputValue] = useState(() => `${history.sessionPage + 1}`);
+  const skipNextPageInputBlurResetRef = useRef(false);
   const liveSession = useMemo(
     () =>
       selectRelevantLiveSession({
@@ -175,6 +187,10 @@ export function HistoryDetailPane({
     };
   }, [liveSession]);
 
+  useEffect(() => {
+    setPageInputValue(`${history.sessionPage + 1}`);
+  }, [history.sessionPage]);
+
   const liveTimer = liveSession
     ? formatCompactLiveAge(liveSession.lastActivityAt, liveNowMs)
     : null;
@@ -182,6 +198,26 @@ export function HistoryDetailPane({
   const liveSummary = liveSession
     ? ["Live", liveTimer, liveSession.statusText, liveDetailText].filter(Boolean).join(" · ")
     : null;
+
+  const resetPageInputValue = () => {
+    setPageInputValue(`${history.sessionPage + 1}`);
+  };
+
+  const commitPageInputValue = () => {
+    const parsedValue = Number.parseInt(pageInputValue.trim(), 10);
+    skipNextPageInputBlurResetRef.current = true;
+    if (!Number.isFinite(parsedValue)) {
+      resetPageInputValue();
+      history.focusMessagePane();
+      return;
+    }
+    const nextPageNumber = Math.max(1, Math.min(history.totalPages, parsedValue));
+    setPageInputValue(`${nextPageNumber}`);
+    if (nextPageNumber !== history.sessionPage + 1) {
+      history.goToHistoryPage(nextPageNumber - 1);
+    }
+    history.focusMessagePane();
+  };
 
   return (
     <div className="history-view">
@@ -484,34 +520,144 @@ export function HistoryDetailPane({
         )}
       </div>
 
-      <div className="msg-pagination pagination-row">
-        <button
-          type="button"
-          className="page-btn"
-          onClick={() => {
-            history.goToPreviousHistoryPage();
-            history.focusMessagePane();
-          }}
-          disabled={!history.canGoToPreviousHistoryPage}
-          title={formatTooltip("Previous page", "Cmd+Left")}
-          aria-label="Previous page"
-        >
-          Previous
-        </button>
-        <span className="page-info">{`Page ${history.sessionPage + 1} / ${history.totalPages} (${paginationTotal} ${paginationUnit})`}</span>
-        <button
-          type="button"
-          className="page-btn"
-          onClick={() => {
-            history.goToNextHistoryPage();
-            history.focusMessagePane();
-          }}
-          disabled={!history.canGoToNextHistoryPage}
-          title={formatTooltip("Next page", "Cmd+Right")}
-          aria-label="Next page"
-        >
-          Next
-        </button>
+      <div
+        className="msg-pagination pagination-row"
+        onMouseDown={(event) => {
+          if (isInteractiveHeaderTarget(event.target)) {
+            return;
+          }
+          history.focusMessagePane();
+        }}
+      >
+        <div className="msg-pagination-group msg-pagination-summary">
+          <span className="page-total">{`${paginationTotal} ${paginationUnit}`}</span>
+        </div>
+
+        <div className="msg-pagination-group msg-pagination-controls">
+          <button
+            type="button"
+            className="page-btn page-icon-btn"
+            onClick={() => {
+              history.goToFirstHistoryPage();
+              history.focusMessagePane();
+            }}
+            disabled={!history.canGoToPreviousHistoryPage}
+            title="First page"
+            aria-label="First page"
+          >
+            <ToolbarIcon name="chevronsLeft" />
+          </button>
+          <button
+            type="button"
+            className="page-btn page-icon-btn"
+            onClick={() => {
+              history.goToPreviousHistoryPage();
+              history.focusMessagePane();
+            }}
+            disabled={!history.canGoToPreviousHistoryPage}
+            title={formatTooltip("Previous page", "Cmd+Left")}
+            aria-label="Previous page"
+          >
+            <ToolbarIcon name="chevronLeft" />
+          </button>
+
+          <label className="page-jump-control">
+            <span className="page-jump-label-text">Page</span>
+            <input
+              className="page-jump-input"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={pageInputValue}
+              onChange={(event) => {
+                setPageInputValue(event.target.value);
+              }}
+              onBlur={() => {
+                if (skipNextPageInputBlurResetRef.current) {
+                  skipNextPageInputBlurResetRef.current = false;
+                  return;
+                }
+                resetPageInputValue();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitPageInputValue();
+                  return;
+                }
+                if (event.key === "Escape" || event.key === "Tab") {
+                  event.preventDefault();
+                  resetPageInputValue();
+                  history.focusMessagePane();
+                }
+              }}
+              aria-label="Page number"
+            />
+            <span className="page-jump-total">{`of ${history.totalPages}`}</span>
+          </label>
+
+          <button
+            type="button"
+            className="page-btn page-icon-btn"
+            onClick={() => {
+              history.goToNextHistoryPage();
+              history.focusMessagePane();
+            }}
+            disabled={!history.canGoToNextHistoryPage}
+            title={formatTooltip("Next page", "Cmd+Right")}
+            aria-label="Next page"
+          >
+            <ToolbarIcon name="chevronRight" />
+          </button>
+          <button
+            type="button"
+            className="page-btn page-icon-btn"
+            onClick={() => {
+              history.goToLastHistoryPage();
+              history.focusMessagePane();
+            }}
+            disabled={!history.canGoToNextHistoryPage}
+            title="Last page"
+            aria-label="Last page"
+          >
+            <ToolbarIcon name="chevronsRight" />
+          </button>
+        </div>
+
+        <div className="msg-pagination-group msg-pagination-page-size">
+          <label className="page-size-control">
+            <span className="page-size-label-text">Per page</span>
+            <div className="pagination-select-wrap">
+              <select
+                className="pagination-select"
+                aria-label="Messages per page"
+                value={history.messagePageSize}
+                onChange={(event) => {
+                  history.setMessagePageSize(
+                    selectNumericValueOrFallback(
+                      event.target.value,
+                      UI_MESSAGE_PAGE_SIZE_VALUES,
+                      history.messagePageSize as MessagePageSize,
+                    ),
+                  );
+                  history.focusMessagePane();
+                }}
+              >
+                {UI_MESSAGE_PAGE_SIZE_VALUES.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+              <span className="pagination-select-chevron" aria-hidden>
+                <svg viewBox="0 0 12 12">
+                  <title>Open menu</title>
+                  <path d="M3 4.5L6 7.5L9 4.5" />
+                </svg>
+              </span>
+            </div>
+          </label>
+        </div>
       </div>
     </div>
   );

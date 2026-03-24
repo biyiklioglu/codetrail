@@ -16,7 +16,10 @@ export type ToolbarIconName =
   | "zoomReset"
   | "expandAll"
   | "collapseAll"
+  | "chevronsLeft"
   | "chevronLeft"
+  | "chevronRight"
+  | "chevronsRight"
   | "bookmark"
   | "folderOpen"
   | "trash"
@@ -45,8 +48,11 @@ const TOOLBAR_ICON_PATHS = {
   zoomReset: "M12 6v5l3 2M6 5h12v14H6z",
   expandAll: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
   collapseAll: "M7 7h10v10H7z",
+  chevronsLeft: "M11 5l-6 7 6 7M19 5l-6 7 6 7",
   chevronLeft: "M15 5l-6 7 6 7",
+  chevronRight: "M9 5l6 7-6 7",
   bookmark: "M6 4h12v16l-6-4-6 4z",
+  chevronsRight: "M5 5l6 7-6 7M13 5l6 7-6 7",
   export: "M12 3v11M8 10l4 4 4-4M5 19h14",
   sortAsc: "M7 17V6M7 6l-3 3M7 6l3 3M12 17h8M12 13h6M12 9h4M12 5h2",
   sortDesc: "M7 6v11M7 17l-3-3M7 17l3-3M12 17h2M12 13h4M12 9h6M12 5h8",
@@ -70,7 +76,10 @@ const TOOLBAR_ICON_TITLES: Record<ToolbarIconName, string> = {
   zoomReset: "Reset zoom",
   expandAll: "Expand all",
   collapseAll: "Collapse all",
+  chevronsLeft: "First page",
   chevronLeft: "Back",
+  chevronRight: "Next",
+  chevronsRight: "Last page",
   bookmark: "Bookmark",
   folderOpen: "Open folder",
   trash: "Delete",
