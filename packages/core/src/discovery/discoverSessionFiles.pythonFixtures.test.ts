@@ -18,23 +18,55 @@ describe("discoverSessionFiles python fixtures", () => {
       includeClaudeSubagents: false,
     });
 
-    expect(discovered).toHaveLength(5);
+    expect(discovered).toHaveLength(10);
     expect(new Set(discovered.map((file) => file.provider))).toEqual(
       new Set(["claude", "codex", "gemini", "cursor", "copilot"]),
     );
 
-    const claude = discovered.find((file) => file.provider === "claude");
-    const codex = discovered.find((file) => file.provider === "codex");
+    const claude = discovered.find(
+      (file) => file.sourceSessionId === "claude-session-redacted-001",
+    );
+    const claudeInRepoWorktree = discovered.find(
+      (file) => file.sourceSessionId === "claude-session-redacted-wt-001",
+    );
+    const claudeExternalWorktree = discovered.find(
+      (file) => file.sourceSessionId === "claude-session-redacted-wt-002",
+    );
+    const codex = discovered.find((file) => file.sourceSessionId === "codex-session-redacted-001");
+    const codexRemoteWorktree = discovered.find(
+      (file) => file.sourceSessionId === "codex-worktree-remote-001",
+    );
+    const codexLocalMain = discovered.find(
+      (file) => file.sourceSessionId === "codex-local-main-001",
+    );
+    const codexLocalWorktree = discovered.find(
+      (file) => file.sourceSessionId === "codex-local-worktree-001",
+    );
     const gemini = discovered.find((file) => file.provider === "gemini");
     const cursor = discovered.find((file) => file.provider === "cursor");
     const copilot = discovered.find((file) => file.provider === "copilot");
 
     expect(claude?.sourceSessionId).toBe("claude-session-redacted-001");
     expect(claude?.projectPath).toBe("/Users/redacted/workspace/demo/claude");
+    expect(claudeInRepoWorktree?.projectPath).toBe("/Users/redacted/workspace/demo/claude");
+    expect(claudeInRepoWorktree?.metadata.worktreeLabel).toBe("funny-haibt");
+    expect(claudeInRepoWorktree?.metadata.worktreeSource).toBe("claude_cwd");
+    expect(claudeExternalWorktree?.projectPath).toBe("/Users/redacted/workspace/demo/claude");
+    expect(claudeExternalWorktree?.metadata.worktreeLabel).toBe("competent-matsumoto");
+    expect(claudeExternalWorktree?.metadata.worktreeSource).toBe("claude_env_text");
 
     expect(codex?.sourceSessionId).toBe("codex-session-redacted-001");
     expect(codex?.projectPath).toBe("/Users/redacted/workspace/demo-codex");
     expect(codex?.sessionIdentity.startsWith("codex:codex-session-redacted-001:")).toBe(true);
+    expect(codexRemoteWorktree?.projectPath).toBe(
+      "/Users/redacted/.codex/worktrees/64ef/demo-codex",
+    );
+    expect(codexRemoteWorktree?.metadata.worktreeLabel).toBe("64ef");
+    expect(codexRemoteWorktree?.metadata.repositoryUrl).toBe("https://example.com/demo-codex.git");
+    expect(codexLocalMain?.projectPath).toBe("/Users/redacted/src/test123");
+    expect(codexLocalWorktree?.projectPath).toBe("/Users/redacted/src/test123");
+    expect(codexLocalWorktree?.metadata.worktreeLabel).toBe("c5dd");
+    expect(codexLocalWorktree?.metadata.worktreeSource).toBe("codex_fork");
 
     expect(gemini?.sourceSessionId).toBe("gemini-session-redacted-001");
     expect(gemini?.projectPath).toBe("/Users/redacted/workspace/demo-gemini");

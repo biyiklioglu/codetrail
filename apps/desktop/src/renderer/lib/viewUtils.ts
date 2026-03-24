@@ -31,6 +31,7 @@ type SessionSummaryLike = {
   modelNames: string;
   startedAt: string | null;
   endedAt: string | null;
+  worktreeLabel?: string | null | undefined;
 };
 
 export function toggleValue<T>(values: T[], value: T): T[] {
@@ -108,18 +109,20 @@ export function countProviders(values: Provider[]): Record<Provider, number> {
 
 export function deriveSessionTitle(session: SessionSummaryLike): string {
   const source = session.title.trim();
+  const prefix = session.worktreeLabel ? `[WT: ${session.worktreeLabel}] ` : "";
   if (!source) {
-    return session.modelNames || session.id;
+    return `${prefix}${session.modelNames || session.id}`;
   }
   const singleLine = source.replace(/\s+/g, " ").trim();
   const words = singleLine.split(" ");
   const compactWords = words.slice(0, 12).join(" ");
   const preview = words.length > 12 ? `${compactWords}…` : compactWords;
   const maxLength = 84;
-  if (preview.length <= maxLength) {
-    return preview;
+  const combined = `${prefix}${preview}`;
+  if (combined.length <= maxLength) {
+    return combined;
   }
-  return `${preview.slice(0, maxLength - 1)}…`;
+  return `${combined.slice(0, maxLength - 1)}…`;
 }
 
 export function compactPath(path: string): string {

@@ -4,13 +4,17 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import type { SessionSummary } from "../../app/types";
 import { SessionPane } from "./SessionPane";
 
-const sessions = [
-  {
-    id: "session_1",
-    projectId: "project_1",
-    provider: "claude" as const,
+function createSessionSummary(
+  overrides: Partial<SessionSummary> & Pick<SessionSummary, "id" | "projectId">,
+): SessionSummary {
+  const { id, projectId, ...rest } = overrides;
+  return {
+    id,
+    projectId,
+    provider: "claude",
     filePath: "/tmp/session-1.jsonl",
     title: "Investigate markdown rendering",
     modelNames: "claude-opus",
@@ -19,11 +23,29 @@ const sessions = [
     durationMs: 5000,
     gitBranch: "main",
     cwd: "/workspace",
+    sessionIdentity: null,
+    providerSessionId: null,
+    sessionKind: null,
+    canonicalProjectPath: null,
+    repositoryUrl: null,
+    gitCommitHash: null,
+    lineageParentId: null,
+    providerClient: null,
+    providerSource: null,
+    providerClientVersion: null,
+    resolutionSource: null,
+    worktreeLabel: null,
+    worktreeSource: null,
     messageCount: 3,
     bookmarkCount: 0,
     tokenInputTotal: 10,
     tokenOutputTotal: 8,
-  },
+    ...rest,
+  };
+}
+
+const sessions: SessionSummary[] = [
+  createSessionSummary({ id: "session_1", projectId: "project_1" }),
 ];
 
 describe("SessionPane", () => {

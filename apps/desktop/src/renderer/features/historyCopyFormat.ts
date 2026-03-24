@@ -9,7 +9,7 @@ export function formatProjectDetails(
   } = {},
 ): string {
   const messageCount = overrides.messageCount ?? project.messageCount;
-  return [
+  const lines = [
     `Name: ${project.name || "(untitled project)"}`,
     `Provider: ${prettyProvider(project.provider)}`,
     `Project ID: ${project.id}`,
@@ -17,7 +17,14 @@ export function formatProjectDetails(
     `Sessions: ${project.sessionCount}`,
     `Messages: ${messageCount}`,
     `Last Activity: ${project.lastActivity ?? "-"}`,
-  ].join("\n");
+  ];
+
+  pushIfValue(lines, "Provider Project Key", project.providerProjectKey);
+  pushIfValue(lines, "Repository URL", project.repositoryUrl);
+  pushIfValue(lines, "Resolution State", project.resolutionState);
+  pushIfValue(lines, "Resolution Source", project.resolutionSource);
+
+  return lines.join("\n");
 }
 
 export function formatSessionDetails(
@@ -37,8 +44,10 @@ export function formatSessionDetails(
     `Provider: ${prettyProvider(session.provider)}`,
     `Project: ${options.projectLabel || "(unknown project)"}`,
     `Session ID: ${session.id}`,
+    `Session Kind: ${session.sessionKind ?? "regular"}`,
     `File: ${session.filePath}`,
-    `CWD: ${session.cwd ?? "-"}`,
+    `Project Path: ${session.canonicalProjectPath ?? "-"}`,
+    `Workspace Path: ${session.cwd ?? "-"}`,
     `Branch: ${session.gitBranch ?? "-"}`,
     `Models: ${session.modelNames || "-"}`,
     `Started: ${session.startedAt ?? "-"}`,
@@ -47,9 +56,28 @@ export function formatSessionDetails(
     `Messages: ${messageCount}`,
   ];
 
+  pushIfValue(lines, "Session Identity", session.sessionIdentity);
+  pushIfValue(lines, "Provider Session ID", session.providerSessionId);
+  pushIfValue(lines, "Repository URL", session.repositoryUrl);
+  pushIfValue(lines, "Git Commit", session.gitCommitHash);
+  pushIfValue(lines, "Lineage Parent", session.lineageParentId);
+  pushIfValue(lines, "Provider Client", session.providerClient);
+  pushIfValue(lines, "Provider Source", session.providerSource);
+  pushIfValue(lines, "Provider Version", session.providerClientVersion);
+  pushIfValue(lines, "Resolution Source", session.resolutionSource);
+  pushIfValue(lines, "Worktree Label", session.worktreeLabel);
+  pushIfValue(lines, "Worktree Source", session.worktreeSource);
+
   if (options.page) {
     lines.push(`Page: ${options.page.current}/${options.page.total}`);
   }
 
   return lines.join("\n");
+}
+
+function pushIfValue(lines: string[], label: string, value: string | null | undefined): void {
+  if (!value) {
+    return;
+  }
+  lines.push(`${label}: ${value}`);
 }

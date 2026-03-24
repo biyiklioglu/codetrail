@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { openDatabase } from "../db/bootstrap";
-import type { DiscoveryConfig } from "../discovery";
+import type { DiscoveredSessionFile, DiscoveryConfig } from "../discovery";
 import { makeSessionId } from "./ids";
 import { runIncrementalIndexing } from "./indexSessions";
 
@@ -26,6 +26,51 @@ function createDiscoveryConfig(dir: string): DiscoveryConfig {
     cursorRoot: join(dir, ".cursor", "projects"),
     copilotRoot: join(dir, ".copilot-workspace"),
     includeClaudeSubagents: false,
+  };
+}
+
+function makeDiscoveredSessionFile(
+  overrides: Omit<Partial<DiscoveredSessionFile>, "metadata"> &
+    Pick<DiscoveredSessionFile, "provider" | "filePath"> & {
+      metadata?: Partial<DiscoveredSessionFile["metadata"]>;
+    },
+): DiscoveredSessionFile {
+  const projectPath = overrides.projectPath ?? "";
+  const canonicalProjectPath = overrides.canonicalProjectPath ?? projectPath;
+  return {
+    provider: overrides.provider,
+    projectPath,
+    canonicalProjectPath,
+    projectName: overrides.projectName ?? "project",
+    sessionIdentity: overrides.sessionIdentity ?? `${overrides.provider}:session:test`,
+    sourceSessionId: overrides.sourceSessionId ?? "session",
+    filePath: overrides.filePath,
+    fileSize: overrides.fileSize ?? 1,
+    fileMtimeMs: overrides.fileMtimeMs ?? Date.now(),
+    metadata: {
+      includeInHistory: true,
+      isSubagent: false,
+      unresolvedProject: false,
+      gitBranch: null,
+      cwd: null,
+      worktreeLabel: null,
+      worktreeSource: null,
+      repositoryUrl: null,
+      forkedFromSessionId: null,
+      parentSessionCwd: null,
+      providerProjectKey: null,
+      providerSessionId: null,
+      sessionKind: null,
+      gitCommitHash: null,
+      providerClient: null,
+      providerSource: null,
+      providerClientVersion: null,
+      lineageParentId: null,
+      resolutionSource: null,
+      projectMetadata: null,
+      sessionMetadata: null,
+      ...overrides.metadata,
+    },
   };
 }
 
@@ -642,6 +687,7 @@ describe("runIncrementalIndexing", () => {
           {
             provider: "codex",
             projectPath: "/workspace/codex",
+            canonicalProjectPath: "/workspace/codex",
             projectName: "codex",
             sessionIdentity,
             sourceSessionId: "codex-session-oversized",
@@ -654,6 +700,11 @@ describe("runIncrementalIndexing", () => {
               unresolvedProject: false,
               gitBranch: "main",
               cwd: "/workspace/codex",
+              worktreeLabel: null,
+              worktreeSource: null,
+              repositoryUrl: null,
+              forkedFromSessionId: null,
+              parentSessionCwd: null,
             },
           },
         ],
@@ -937,6 +988,7 @@ describe("runIncrementalIndexing", () => {
       {
         provider: "codex" as const,
         projectPath: "/workspace/codex",
+        canonicalProjectPath: "/workspace/codex",
         projectName: "codex",
         sessionIdentity: "codex:codex-session-resume:test",
         sourceSessionId: "codex-session-resume",
@@ -949,6 +1001,11 @@ describe("runIncrementalIndexing", () => {
           unresolvedProject: false,
           gitBranch: "main",
           cwd: "/workspace/codex",
+          worktreeLabel: null,
+          worktreeSource: null,
+          repositoryUrl: null,
+          forkedFromSessionId: null,
+          parentSessionCwd: null,
         },
       },
     ];
@@ -1294,6 +1351,7 @@ describe("runIncrementalIndexing", () => {
           {
             provider: "gemini" as const,
             projectPath: "/workspace/gemini",
+            canonicalProjectPath: "/workspace/gemini",
             projectName: "gemini",
             sessionIdentity: "gemini:materialized-hard-omit:test",
             sourceSessionId: "gemini-materialized-hard-omit",
@@ -1306,6 +1364,11 @@ describe("runIncrementalIndexing", () => {
               unresolvedProject: false,
               gitBranch: null,
               cwd: "/workspace/gemini",
+              worktreeLabel: null,
+              worktreeSource: null,
+              repositoryUrl: null,
+              forkedFromSessionId: null,
+              parentSessionCwd: null,
             },
           },
         ],
@@ -1709,6 +1772,7 @@ describe("runIncrementalIndexing", () => {
           {
             provider: "codex",
             projectPath: "/workspace/codex",
+            canonicalProjectPath: "/workspace/codex",
             projectName: "codex",
             sessionIdentity: "codex:codex-session-good:test",
             sourceSessionId: "codex-session-good",
@@ -1721,11 +1785,17 @@ describe("runIncrementalIndexing", () => {
               unresolvedProject: false,
               gitBranch: "main",
               cwd: "/workspace/codex",
+              worktreeLabel: null,
+              worktreeSource: null,
+              repositoryUrl: null,
+              forkedFromSessionId: null,
+              parentSessionCwd: null,
             },
           },
           {
             provider: "codex",
             projectPath: "/workspace/codex",
+            canonicalProjectPath: "/workspace/codex",
             projectName: "codex",
             sessionIdentity: "codex:codex-session-missing:test",
             sourceSessionId: "codex-session-missing",
@@ -1738,6 +1808,11 @@ describe("runIncrementalIndexing", () => {
               unresolvedProject: false,
               gitBranch: "main",
               cwd: "/workspace/codex",
+              worktreeLabel: null,
+              worktreeSource: null,
+              repositoryUrl: null,
+              forkedFromSessionId: null,
+              parentSessionCwd: null,
             },
           },
         ],
@@ -2444,5 +2519,204 @@ describe("runIncrementalIndexing", () => {
     expect(notices).toContain("index.deleted_session_rewrite_ignored");
 
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("groups Codex worktree sessions under the canonical project path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-worktree-grouping-"));
+    const dbPath = join(dir, "index.db");
+    const mainFile = join(dir, ".codex", "sessions", "2026", "03", "24", "main.jsonl");
+    const worktreeFile = join(dir, ".codex", "sessions", "2026", "03", "24", "worktree.jsonl");
+    mkdirSync(dirname(mainFile), { recursive: true });
+    writeFileSync(
+      mainFile,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T12:00:00Z",
+        type: "session_meta",
+        payload: {
+          id: "main",
+          cwd: "/Users/test/workspace/demo-codex",
+          git: { branch: "main", repository_url: "https://example.com/demo-codex.git" },
+        },
+      })}\n`,
+    );
+    writeFileSync(
+      worktreeFile,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T12:01:00Z",
+        type: "session_meta",
+        payload: {
+          id: "worktree",
+          cwd: "/Users/test/.codex/worktrees/64ef/demo-codex",
+          git: { branch: "codex/worktree", repository_url: "https://example.com/demo-codex.git" },
+        },
+      })}\n`,
+    );
+
+    const result = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig: {
+        codexRoot: join(dir, ".codex", "sessions"),
+        enabledProviders: ["codex"],
+      },
+    });
+
+    expect(result.indexedFiles).toBe(2);
+
+    const db = openDatabase(dbPath);
+    try {
+      const projects = db.prepare("SELECT path FROM projects ORDER BY path").all() as Array<{
+        path: string;
+      }>;
+      const sessions = db
+        .prepare("SELECT cwd, worktree_label FROM sessions ORDER BY cwd")
+        .all() as Array<{ cwd: string; worktree_label: string | null }>;
+
+      expect(projects).toEqual([{ path: "/Users/test/workspace/demo-codex" }]);
+      expect(sessions).toEqual([
+        { cwd: "/Users/test/.codex/worktrees/64ef/demo-codex", worktree_label: "64ef" },
+        { cwd: "/Users/test/workspace/demo-codex", worktree_label: null },
+      ]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves ambiguous Codex worktree basename matches as separate projects", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-worktree-ambiguous-"));
+    const dbPath = join(dir, "index.db");
+    const notices: string[] = [];
+    const discovery = () => [
+      makeDiscoveredSessionFile({
+        provider: "codex",
+        projectPath: "/Users/test/workspace-a/shared",
+        canonicalProjectPath: "/Users/test/workspace-a/shared",
+        projectName: "shared",
+        sessionIdentity: "codex:main-a:test",
+        sourceSessionId: "main-a",
+        filePath: join(dir, "main-a.jsonl"),
+        metadata: {
+          cwd: "/Users/test/workspace-a/shared",
+        },
+      }),
+      makeDiscoveredSessionFile({
+        provider: "codex",
+        projectPath: "/Users/test/workspace-b/shared",
+        canonicalProjectPath: "/Users/test/workspace-b/shared",
+        projectName: "shared",
+        sessionIdentity: "codex:main-b:test",
+        sourceSessionId: "main-b",
+        filePath: join(dir, "main-b.jsonl"),
+        metadata: {
+          cwd: "/Users/test/workspace-b/shared",
+        },
+      }),
+      makeDiscoveredSessionFile({
+        provider: "codex",
+        projectPath: "/Users/test/.codex/worktrees/c5dd/shared",
+        canonicalProjectPath: "/Users/test/.codex/worktrees/c5dd/shared",
+        projectName: "shared",
+        sessionIdentity: "codex:worktree:test",
+        sourceSessionId: "worktree",
+        filePath: join(dir, "worktree.jsonl"),
+        metadata: {
+          cwd: "/Users/test/.codex/worktrees/c5dd/shared",
+          worktreeLabel: "c5dd",
+        },
+      }),
+    ];
+
+    writeFileSync(join(dir, "main-a.jsonl"), "\n");
+    writeFileSync(join(dir, "main-b.jsonl"), "\n");
+    writeFileSync(join(dir, "worktree.jsonl"), "\n");
+
+    const result = runIncrementalIndexing(
+      { dbPath, enabledProviders: ["codex"] },
+      {
+        discoverSessionFiles: discovery,
+        onNotice: (notice) => notices.push(notice.code),
+      },
+    );
+
+    expect(result.indexedFiles).toBe(3);
+
+    const db = openDatabase(dbPath);
+    try {
+      const projects = db.prepare("SELECT path FROM projects ORDER BY path").all() as Array<{
+        path: string;
+      }>;
+      const worktreeSession = db
+        .prepare("SELECT project_id, cwd, worktree_label FROM sessions WHERE id = ?")
+        .get(makeSessionId("codex", "codex:worktree:test")) as {
+        project_id: string;
+        cwd: string;
+        worktree_label: string | null;
+      };
+
+      expect(projects.map((project) => project.path)).toEqual([
+        "/Users/test/.codex/worktrees/c5dd/shared",
+        "/Users/test/workspace-a/shared",
+        "/Users/test/workspace-b/shared",
+      ]);
+      expect(worktreeSession.cwd).toBe("/Users/test/.codex/worktrees/c5dd/shared");
+      expect(worktreeSession.worktree_label).toBeNull();
+      expect(notices).toEqual([]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats optional project and session metadata as best-effort during indexing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-best-effort-metadata-"));
+    const dbPath = join(dir, "index.db");
+    const filePath = join(dir, "session.jsonl");
+    writeFileSync(filePath, "\n");
+
+    const circularProjectMetadata: Record<string, unknown> = {};
+    circularProjectMetadata.self = circularProjectMetadata;
+    const circularSessionMetadata: Record<string, unknown> = {};
+    circularSessionMetadata.self = circularSessionMetadata;
+
+    const result = runIncrementalIndexing(
+      { dbPath, enabledProviders: ["codex"] },
+      {
+        discoverSessionFiles: () => [
+          makeDiscoveredSessionFile({
+            provider: "codex",
+            projectPath: "/workspace/demo",
+            canonicalProjectPath: "/workspace/demo",
+            projectName: "demo",
+            sessionIdentity: "codex:metadata:test",
+            sourceSessionId: "metadata-session",
+            filePath,
+            metadata: {
+              providerSessionId: "metadata-session",
+              sessionKind: "regular",
+              projectMetadata: circularProjectMetadata,
+              sessionMetadata: circularSessionMetadata,
+            },
+          }),
+        ],
+      },
+    );
+
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    try {
+      const project = db
+        .prepare("SELECT metadata_json FROM projects WHERE path = ?")
+        .get("/workspace/demo") as { metadata_json: string | null };
+      const session = db
+        .prepare("SELECT metadata_json FROM sessions WHERE file_path = ?")
+        .get(filePath) as { metadata_json: string | null };
+
+      expect(project.metadata_json).toBeNull();
+      expect(session.metadata_json).toBeNull();
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

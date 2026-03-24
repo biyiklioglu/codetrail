@@ -46,6 +46,19 @@ type SessionSummaryRow = {
   duration_ms: number | null;
   git_branch: string | null;
   cwd: string | null;
+  session_identity: string | null;
+  provider_session_id: string | null;
+  session_kind: string | null;
+  canonical_project_path: string | null;
+  repository_url: string | null;
+  git_commit_hash: string | null;
+  lineage_parent_id: string | null;
+  provider_client: string | null;
+  provider_source: string | null;
+  provider_client_version: string | null;
+  resolution_source: string | null;
+  worktree_label: string | null;
+  worktree_source: string | null;
   activity_at: string | null;
   message_count: number;
   token_input_total: number;
@@ -57,8 +70,10 @@ type ProjectSummaryRow = {
   provider: Provider;
   name: string;
   path: string;
-  created_at: string;
-  updated_at: string;
+  provider_project_key: string | null;
+  repository_url: string | null;
+  resolution_state: string | null;
+  resolution_source: string | null;
   session_count: number;
   message_count: number;
   last_activity: string | null;
@@ -362,6 +377,10 @@ function listProjectsWithDatabase(
          p.provider,
          p.name,
          p.path,
+         p.provider_project_key,
+         p.repository_url,
+         p.resolution_state,
+         p.resolution_source,
          COALESCE(ps.session_count, 0) as session_count,
          COALESCE(ps.message_count, 0) as message_count,
          ps.last_activity as last_activity
@@ -380,6 +399,10 @@ function listProjectsWithDatabase(
       provider: row.provider,
       name: row.name,
       path: row.path,
+      providerProjectKey: row.provider_project_key,
+      repositoryUrl: row.repository_url,
+      resolutionState: row.resolution_state,
+      resolutionSource: row.resolution_source,
       sessionCount: row.session_count,
       messageCount: row.message_count,
       bookmarkCount: bookmarkCounts[row.id] ?? bookmarkStore.countProjectBookmarks(row.id),
@@ -414,6 +437,19 @@ function listSessionsWithDatabase(
          s.duration_ms,
          s.git_branch,
          s.cwd,
+         s.session_identity,
+         s.provider_session_id,
+         s.session_kind,
+         s.canonical_project_path,
+         s.repository_url,
+         s.git_commit_hash,
+         s.lineage_parent_id,
+         s.provider_client,
+         s.provider_source,
+         s.provider_client_version,
+         s.resolution_source,
+         s.worktree_label,
+         s.worktree_source,
          s.message_count,
          s.token_input_total,
          s.token_output_total
@@ -469,6 +505,19 @@ function listSessionsManyWithDatabase(
          s.duration_ms,
          s.git_branch,
          s.cwd,
+         s.session_identity,
+         s.provider_session_id,
+         s.session_kind,
+         s.canonical_project_path,
+         s.repository_url,
+         s.git_commit_hash,
+         s.lineage_parent_id,
+         s.provider_client,
+         s.provider_source,
+         s.provider_client_version,
+         s.resolution_source,
+         s.worktree_label,
+         s.worktree_source,
          s.message_count,
          s.token_input_total,
          s.token_output_total
@@ -664,6 +713,19 @@ function getSessionDetailWithDatabase(
          s.duration_ms,
          s.git_branch,
          s.cwd,
+         s.session_identity,
+         s.provider_session_id,
+         s.session_kind,
+         s.canonical_project_path,
+         s.repository_url,
+         s.git_commit_hash,
+         s.lineage_parent_id,
+         s.provider_client,
+         s.provider_source,
+         s.provider_client_version,
+         s.resolution_source,
+         s.worktree_label,
+         s.worktree_source,
          s.message_count,
          s.token_input_total,
          s.token_output_total
@@ -874,8 +936,10 @@ function deleteProjectWithStore(
          p.provider,
          p.name,
          p.path,
-         p.created_at,
-         p.updated_at,
+         p.provider_project_key,
+         p.repository_url,
+         p.resolution_state,
+         p.resolution_source,
          COALESCE(ps.session_count, 0) as session_count,
          COALESCE(ps.message_count, 0) as message_count,
          ps.last_activity as last_activity
@@ -904,7 +968,9 @@ function deleteProjectWithStore(
       .prepare("SELECT id, file_path FROM sessions WHERE project_id = ?")
       .all(projectRow.id) as Array<{ id: string; file_path: string }>;
     for (const row of sessionIds) {
-      upsertDeletedSessionTombstone(db, row.id);
+      tryUpsertDeletedSessionTombstone(db, row.id, {
+        allowIncompleteResumeMetadata: true,
+      });
     }
     for (const row of sessionIds) {
       deleteSessionCascade(db, row.id, row.file_path);
@@ -983,7 +1049,7 @@ function listProjectBookmarksWithStore(
     ...(bookmarkQuery !== null ? { query: bookmarkQuery } : {}),
     searchMode: request.searchMode ?? "simple",
     ...(request.categories ? { categories: request.categories } : {}),
-    sortDirection: request.sortDirection,
+    sortDirection: request.sortDirection ?? "asc",
     limit: pageSize,
     offset: page * pageSize,
   });
@@ -1456,6 +1522,19 @@ function mapSessionSummaryRow(
     durationMs: row.duration_ms,
     gitBranch: row.git_branch,
     cwd: row.cwd,
+    sessionIdentity: row.session_identity,
+    providerSessionId: row.provider_session_id,
+    sessionKind: row.session_kind,
+    canonicalProjectPath: row.canonical_project_path,
+    repositoryUrl: row.repository_url,
+    gitCommitHash: row.git_commit_hash,
+    lineageParentId: row.lineage_parent_id,
+    providerClient: row.provider_client,
+    providerSource: row.provider_source,
+    providerClientVersion: row.provider_client_version,
+    resolutionSource: row.resolution_source,
+    worktreeLabel: row.worktree_label,
+    worktreeSource: row.worktree_source,
     messageCount: row.message_count,
     bookmarkCount,
     tokenInputTotal: row.token_input_total,
@@ -1634,6 +1713,32 @@ function upsertDeletedSessionTombstone(db: DatabaseHandle, sessionId: string): v
     checkpointRow?.head_hash ?? null,
     checkpointRow?.tail_hash ?? null,
   );
+}
+
+function tryUpsertDeletedSessionTombstone(
+  db: DatabaseHandle,
+  sessionId: string,
+  options: { allowIncompleteResumeMetadata: boolean },
+): void {
+  if (!options.allowIncompleteResumeMetadata) {
+    upsertDeletedSessionTombstone(db, sessionId);
+    return;
+  }
+
+  try {
+    upsertDeletedSessionTombstone(db, sessionId);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("incremental resume metadata is incomplete")
+    ) {
+      console.warn(
+        `[codetrail] Skipping deleted-session tombstone for "${sessionId}" because incremental resume metadata is incomplete.`,
+      );
+      return;
+    }
+    throw error;
+  }
 }
 
 function withDatabase<T>(

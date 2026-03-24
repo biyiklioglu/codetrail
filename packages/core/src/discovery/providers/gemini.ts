@@ -39,6 +39,7 @@ function toDiscoveredGeminiFile(
   const projectHash = readString(content.projectHash) ?? "";
   const containerDir = geminiContainerDir(filePath);
   let resolvedProjectPath = resolution.resolveProjectPath(projectHash);
+  let resolutionSource = resolvedProjectPath ? "project_hash" : "unresolved";
 
   if (!resolvedProjectPath) {
     const projectRootPath = join(containerDir, ".project_root");
@@ -47,6 +48,7 @@ function toDiscoveredGeminiFile(
       if (fallbackPath.length > 0) {
         resolvedProjectPath = fallbackPath;
         resolution.rememberProjectPath(projectHash, fallbackPath);
+        resolutionSource = "project_root";
       }
     }
   }
@@ -59,6 +61,7 @@ function toDiscoveredGeminiFile(
   return {
     provider: "gemini",
     projectPath,
+    canonicalProjectPath: projectPath,
     projectName: unresolvedProject ? fallbackProjectName : projectNameFromPath(projectPath),
     sessionIdentity,
     sourceSessionId,
@@ -71,6 +74,22 @@ function toDiscoveredGeminiFile(
       unresolvedProject,
       gitBranch: null,
       cwd: projectPath || null,
+      worktreeLabel: null,
+      worktreeSource: null,
+      repositoryUrl: null,
+      forkedFromSessionId: null,
+      parentSessionCwd: null,
+      providerProjectKey: projectHash || null,
+      providerSessionId: sourceSessionId,
+      sessionKind: "regular",
+      gitCommitHash: null,
+      providerClient: "Gemini",
+      providerSource: null,
+      providerClientVersion: null,
+      lineageParentId: null,
+      resolutionSource,
+      projectMetadata: null,
+      sessionMetadata: null,
     },
   };
 }

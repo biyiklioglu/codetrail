@@ -60,6 +60,34 @@ describe("viewUtils", () => {
     expect(compactPath("")).toBe("(no path)");
   });
 
+  it("prefixes grouped worktree sessions in derived titles", () => {
+    expect(
+      deriveSessionTitle({
+        id: "session_worktree",
+        title: "Investigate flaky test behavior",
+        modelNames: "gpt-5.4",
+        startedAt: null,
+        endedAt: null,
+        worktreeLabel: "c5dd",
+      }),
+    ).toContain("[WT: c5dd]");
+  });
+
+  it("truncates prefixed worktree session titles within the display limit", () => {
+    const title = deriveSessionTitle({
+      id: "session_worktree_truncated",
+      title:
+        "This is a very long session title intended to exceed the display limit once the worktree prefix is added in front of it for rendering",
+      modelNames: "gpt-5.4",
+      startedAt: null,
+      endedAt: null,
+      worktreeLabel: "c5dd",
+    });
+
+    expect(title).toContain("[WT: c5dd]");
+    expect(title.length).toBeLessThanOrEqual(84);
+  });
+
   it("clamps numeric ranges", () => {
     expect(clamp(10, 1, 8)).toBe(8);
     expect(clamp(-2, 1, 8)).toBe(1);

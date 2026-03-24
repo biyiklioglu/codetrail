@@ -6,6 +6,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import type { ProjectSummary, SessionSummary } from "../../app/types";
 import { SEARCH_PLACEHOLDERS } from "../../lib/searchLabels";
 import { ProjectPane } from "./ProjectPane";
 
@@ -17,37 +18,92 @@ type ProjectPaneOverrides = {
   actions?: Partial<ComponentProps<typeof ProjectPane>["actions"]>;
 };
 
-const projects = [
-  {
+function createProjectSummary(
+  overrides: Partial<ProjectSummary> & Pick<ProjectSummary, "id" | "provider" | "name" | "path">,
+): ProjectSummary {
+  const { id, provider, name, path, ...rest } = overrides;
+  return {
+    id,
+    provider,
+    name,
+    path,
+    providerProjectKey: null,
+    repositoryUrl: null,
+    resolutionState: null,
+    resolutionSource: null,
+    sessionCount: 1,
+    messageCount: 0,
+    bookmarkCount: 0,
+    lastActivity: null,
+    ...rest,
+  };
+}
+
+function createSessionSummary(
+  overrides: Partial<SessionSummary> & Pick<SessionSummary, "id" | "projectId">,
+): SessionSummary {
+  const { id, projectId, ...rest } = overrides;
+  return {
+    id,
+    projectId,
+    provider: "claude",
+    filePath: `/tmp/${id}.jsonl`,
+    title: id,
+    modelNames: "claude-opus",
+    startedAt: "2026-03-01T10:00:00.000Z",
+    endedAt: "2026-03-01T10:00:05.000Z",
+    durationMs: 5000,
+    gitBranch: "main",
+    cwd: "/workspace",
+    sessionIdentity: null,
+    providerSessionId: null,
+    sessionKind: null,
+    canonicalProjectPath: null,
+    repositoryUrl: null,
+    gitCommitHash: null,
+    lineageParentId: null,
+    providerClient: null,
+    providerSource: null,
+    providerClientVersion: null,
+    resolutionSource: null,
+    worktreeLabel: null,
+    worktreeSource: null,
+    messageCount: 0,
+    bookmarkCount: 0,
+    tokenInputTotal: 0,
+    tokenOutputTotal: 0,
+    ...rest,
+  };
+}
+
+const projects: ProjectSummary[] = [
+  createProjectSummary({
     id: "project_1",
-    provider: "claude" as const,
+    provider: "claude",
     name: "Project One",
     path: "/Users/test/project-one",
     sessionCount: 2,
     messageCount: 12,
-    bookmarkCount: 0,
     lastActivity: "2026-03-01T12:00:00.000Z",
-  },
-  {
+  }),
+  createProjectSummary({
     id: "project_2",
-    provider: "codex" as const,
+    provider: "codex",
     name: "Project Two",
     path: "/Users/test/project-two",
     sessionCount: 1,
     messageCount: 6,
-    bookmarkCount: 0,
     lastActivity: "2026-03-01T13:00:00.000Z",
-  },
-  {
+  }),
+  createProjectSummary({
     id: "project_3",
-    provider: "gemini" as const,
+    provider: "gemini",
     name: "Project Three",
     path: "/tmp/project-three",
     sessionCount: 7,
     messageCount: 22,
-    bookmarkCount: 0,
     lastActivity: "2026-03-01T10:00:00.000Z",
-  },
+  }),
 ];
 
 function createProjectPaneProps(
@@ -331,40 +387,26 @@ describe("ProjectPane", () => {
         selectedSessionId: "session_2",
         treeProjectSessionsByProjectId: {
           project_1: [
-            {
+            createSessionSummary({
               id: "session_1",
               projectId: "project_1",
-              provider: "claude",
               filePath: "/tmp/session-1.jsonl",
               title: "Session One",
-              modelNames: "claude-opus",
-              startedAt: "2026-03-01T10:00:00.000Z",
-              endedAt: "2026-03-01T10:00:05.000Z",
-              durationMs: 5000,
-              gitBranch: "main",
-              cwd: "/workspace",
               messageCount: 3,
-              bookmarkCount: 0,
               tokenInputTotal: 10,
               tokenOutputTotal: 8,
-            },
-            {
+            }),
+            createSessionSummary({
               id: "session_2",
               projectId: "project_1",
-              provider: "claude",
               filePath: "/tmp/session-2.jsonl",
               title: "Session Two",
-              modelNames: "claude-opus",
               startedAt: "2026-03-01T11:00:00.000Z",
               endedAt: "2026-03-01T11:00:05.000Z",
-              durationMs: 5000,
-              gitBranch: "main",
-              cwd: "/workspace",
               messageCount: 4,
-              bookmarkCount: 0,
               tokenInputTotal: 12,
               tokenOutputTotal: 9,
-            },
+            }),
           ],
         },
       },
@@ -392,40 +434,26 @@ describe("ProjectPane", () => {
         selectedProjectId: "project_1",
         treeProjectSessionsByProjectId: {
           project_1: [
-            {
+            createSessionSummary({
               id: "session_1",
               projectId: "project_1",
-              provider: "claude",
               filePath: "/tmp/session-1.jsonl",
               title: "Session One",
-              modelNames: "claude-opus",
-              startedAt: "2026-03-01T10:00:00.000Z",
-              endedAt: "2026-03-01T10:00:05.000Z",
-              durationMs: 5000,
-              gitBranch: "main",
-              cwd: "/workspace",
               messageCount: 3,
-              bookmarkCount: 0,
               tokenInputTotal: 10,
               tokenOutputTotal: 8,
-            },
-            {
+            }),
+            createSessionSummary({
               id: "session_2",
               projectId: "project_1",
-              provider: "claude",
               filePath: "/tmp/session-2.jsonl",
               title: "Session Two",
-              modelNames: "claude-opus",
               startedAt: "2026-03-01T11:00:00.000Z",
               endedAt: "2026-03-01T11:00:05.000Z",
-              durationMs: 5000,
-              gitBranch: "main",
-              cwd: "/workspace",
               messageCount: 4,
-              bookmarkCount: 0,
               tokenInputTotal: 12,
               tokenOutputTotal: 9,
-            },
+            }),
           ],
         },
       },
@@ -454,40 +482,26 @@ describe("ProjectPane", () => {
             projectUpdates: {},
             treeProjectSessionsByProjectId: {
               project_1: [
-                {
+                createSessionSummary({
                   id: "session_1",
                   projectId: "project_1",
-                  provider: "claude",
                   filePath: "/tmp/session-1.jsonl",
                   title: "Session One",
-                  modelNames: "claude-opus",
-                  startedAt: "2026-03-01T10:00:00.000Z",
-                  endedAt: "2026-03-01T10:00:05.000Z",
-                  durationMs: 5000,
-                  gitBranch: "main",
-                  cwd: "/workspace",
                   messageCount: 3,
-                  bookmarkCount: 0,
                   tokenInputTotal: 10,
                   tokenOutputTotal: 8,
-                },
-                {
+                }),
+                createSessionSummary({
                   id: "session_2",
                   projectId: "project_1",
-                  provider: "claude",
                   filePath: "/tmp/session-2.jsonl",
                   title: "Session Two",
-                  modelNames: "claude-opus",
                   startedAt: "2026-03-01T11:00:00.000Z",
                   endedAt: "2026-03-01T11:00:05.000Z",
-                  durationMs: 5000,
-                  gitBranch: "main",
-                  cwd: "/workspace",
                   messageCount: 4,
-                  bookmarkCount: 0,
                   tokenInputTotal: 12,
                   tokenOutputTotal: 9,
-                },
+                }),
               ],
             },
           },
@@ -722,10 +736,9 @@ describe("ProjectPane", () => {
         sortedProjects: [{ ...projects[0]!, bookmarkCount: 3 }],
         treeProjectSessionsByProjectId: {
           project_1: [
-            {
+            createSessionSummary({
               id: "session_1",
               projectId: "project_1",
-              provider: "claude",
               filePath: "/Users/test/project-one/session.jsonl",
               title: "Investigate markdown rendering",
               modelNames: "claude-opus-4-1",
@@ -738,7 +751,7 @@ describe("ProjectPane", () => {
               bookmarkCount: 2,
               tokenInputTotal: 10,
               tokenOutputTotal: 20,
-            },
+            }),
           ],
         },
       },
@@ -782,10 +795,9 @@ describe("ProjectPane", () => {
         sortedProjects: [projects[0]!],
         treeProjectSessionsByProjectId: {
           project_1: [
-            {
+            createSessionSummary({
               id: "session_1",
               projectId: "project_1",
-              provider: "claude",
               filePath: "/Users/test/project-one/session.jsonl",
               title: "Investigate markdown rendering",
               modelNames: "claude-opus-4-1",
@@ -798,7 +810,7 @@ describe("ProjectPane", () => {
               bookmarkCount: 2,
               tokenInputTotal: 10,
               tokenOutputTotal: 20,
-            },
+            }),
           ],
         },
       },

@@ -562,6 +562,10 @@ describe("queryService in-memory", () => {
         provider: "cursor",
         name: "Cursor Project",
         path: "/workspace/cursor-project",
+        providerProjectKey: null,
+        repositoryUrl: null,
+        resolutionState: null,
+        resolutionSource: null,
         sessionCount: 0,
         messageCount: 0,
         bookmarkCount: 0,
@@ -1655,7 +1659,7 @@ describe("queryService in-memory", () => {
     expect(bookmarkStore.removeProjectBookmarks).not.toHaveBeenCalled();
   });
 
-  it("fails project deletion loudly when a session cannot be tombstoned and leaves project data untouched", () => {
+  it("allows project deletion when a session resume tombstone is incomplete and skips it", () => {
     const db = seedQueryDb();
     db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(
       "/workspace/project-one/session-1.jsonl",
@@ -1667,20 +1671,34 @@ describe("queryService in-memory", () => {
     const bookmarkStore = createBookmarkStoreMock({
       removeProjectBookmarks: vi.fn(() => 2),
     });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const service = createQueryServiceFromDb(db, {
       bookmarkStore,
       ownsBookmarkStore: false,
     });
 
-    expect(() => service.deleteProject({ projectId: "project_1" })).toThrowError(
-      'Cannot delete indexed history for session "session_1" because its incremental resume metadata is incomplete.',
+    expect(service.deleteProject({ projectId: "project_1" })).toEqual({
+      deleted: true,
+      provider: "claude",
+      sourceFormat: "jsonl_stream",
+      removedSessionCount: 1,
+      removedMessageCount: 2,
+      removedBookmarkCount: 2,
+    });
+    expect(bookmarkStore.removeProjectBookmarks).toHaveBeenCalledWith("project_1");
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[codetrail] Skipping deleted-session tombstone for "session_1" because incremental resume metadata is incomplete.',
     );
-    expect(bookmarkStore.removeProjectBookmarks).not.toHaveBeenCalled();
-    expect((db.prepare("SELECT COUNT(*) as c FROM projects").get() as { c: number }).c).toBe(1);
-    expect((db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) as c FROM projects").get() as { c: number }).c).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(0);
     expect(
       (db.prepare("SELECT COUNT(*) as c FROM deleted_projects").get() as { c: number }).c,
+    ).toBe(1);
+    expect(
+      (db.prepare("SELECT COUNT(*) as c FROM deleted_sessions").get() as { c: number }).c,
     ).toBe(0);
+
+    warnSpy.mockRestore();
   });
 
   it("allows project deletion when a legacy session row is missing file metadata and skips its tombstone", () => {

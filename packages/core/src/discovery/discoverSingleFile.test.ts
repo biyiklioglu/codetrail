@@ -99,6 +99,85 @@ describe("discoverSingleFile", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("prefers Claude transcript cwd over decoded folder names when sessions-index is missing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-single-claude-worktree-cwd-"));
+    const config = makeConfig(dir);
+    const claudeProject = join(
+      config.claudeRoot,
+      "-Users-test-workspace-demo--claude-worktrees-funny-haibt",
+    );
+    mkdirSync(claudeProject, { recursive: true });
+
+    writeFileSync(
+      join(claudeProject, "s2.jsonl"),
+      `${JSON.stringify({
+        sessionId: "s2",
+        cwd: "/Users/test/workspace/demo/.claude/worktrees/funny-haibt",
+        gitBranch: "claude/funny-haibt",
+        type: "user",
+        message: { role: "user", content: "Hi" },
+      })}\n`,
+    );
+
+    const result = discoverSingleFile(join(claudeProject, "s2.jsonl"), config);
+
+    const discovered = expectDefined(result, "Expected Claude worktree session result");
+    expect(discovered.projectPath).toBe("/Users/test/workspace/demo");
+    expect(discovered.canonicalProjectPath).toBe("/Users/test/workspace/demo");
+    expect(discovered.metadata.cwd).toBe(
+      "/Users/test/workspace/demo/.claude/worktrees/funny-haibt",
+    );
+    expect(discovered.metadata.worktreeLabel).toBe("funny-haibt");
+    expect(discovered.metadata.worktreeSource).toBe("claude_cwd");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("derives external Claude worktree parents from transcript text", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-single-claude-worktree-env-"));
+    const config = makeConfig(dir);
+    const claudeProject = join(config.claudeRoot, "-Users-test-tmp-demo-worktree");
+    mkdirSync(claudeProject, { recursive: true });
+
+    writeFileSync(
+      join(claudeProject, "s3.jsonl"),
+      `${[
+        JSON.stringify({
+          sessionId: "s3",
+          cwd: "/Users/test/tmp/demo/worktree-a",
+          gitBranch: "claude/worktree-a",
+          type: "user",
+          message: { role: "user", content: "Hi" },
+        }),
+        JSON.stringify({
+          sessionId: "s3",
+          cwd: "/Users/test/tmp/demo/worktree-a",
+          gitBranch: "claude/worktree-a",
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                thinking:
+                  "Environment\nMain repository: /Users/test/workspace/demo\nWorktree name: worktree-a",
+              },
+            ],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const result = discoverSingleFile(join(claudeProject, "s3.jsonl"), config);
+
+    const discovered = expectDefined(result, "Expected Claude external worktree result");
+    expect(discovered.projectPath).toBe("/Users/test/workspace/demo");
+    expect(discovered.metadata.worktreeLabel).toBe("worktree-a");
+    expect(discovered.metadata.worktreeSource).toBe("claude_env_text");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("correctly identifies a Codex session file", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-single-codex-"));
     const config = makeConfig(dir);
@@ -124,6 +203,91 @@ describe("discoverSingleFile", () => {
     expect(discovered.sourceSessionId).toBe("codex-1");
     expect(discovered.metadata.cwd).toBe("/workspace/codex");
     expect(discovered.metadata.gitBranch).toBe("dev");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("derives Codex worktree parent cwd from early function call context", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-single-codex-worktree-"));
+    const config = makeConfig(dir);
+    const codexDir = join(config.codexRoot, "2026", "03", "24");
+    mkdirSync(codexDir, { recursive: true });
+
+    writeFileSync(
+      join(codexDir, "rollout-worktree.jsonl"),
+      `${[
+        JSON.stringify({
+          type: "session_meta",
+          payload: {
+            id: "codex-worktree-1",
+            forked_from_id: "parent-1",
+            cwd: "/Users/test/.codex/worktrees/c5dd/test123",
+            git: { branch: "codex/whatever" },
+          },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "exec_command",
+            arguments: JSON.stringify({
+              cmd: "git rev-parse --show-toplevel",
+              workdir: "/Users/test/src/test123",
+            }),
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const result = discoverSingleFile(join(codexDir, "rollout-worktree.jsonl"), config);
+
+    const discovered = expectDefined(result, "Expected Codex worktree session result");
+    expect(discovered.projectPath).toBe("/Users/test/src/test123");
+    expect(discovered.canonicalProjectPath).toBe("/Users/test/src/test123");
+    expect(discovered.metadata.cwd).toBe("/Users/test/.codex/worktrees/c5dd/test123");
+    expect(discovered.metadata.worktreeLabel).toBe("c5dd");
+    expect(discovered.metadata.worktreeSource).toBe("codex_fork");
+    expect(discovered.metadata.parentSessionCwd).toBe("/Users/test/src/test123");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("derives Codex worktree parent cwd from turn_context records", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-single-codex-turn-context-"));
+    const config = makeConfig(dir);
+    const codexDir = join(config.codexRoot, "2026", "03", "24");
+    mkdirSync(codexDir, { recursive: true });
+
+    writeFileSync(
+      join(codexDir, "rollout-turn-context.jsonl"),
+      `${[
+        JSON.stringify({
+          type: "session_meta",
+          payload: {
+            id: "codex-worktree-turn-context",
+            cwd: "/Users/test/.codex/worktrees/c5dd/test123",
+            git: { branch: "codex/whatever" },
+          },
+        }),
+        JSON.stringify({
+          type: "turn_context",
+          payload: {
+            cwd: "/Users/test/src/test123",
+            git: { branch: "main" },
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const result = discoverSingleFile(join(codexDir, "rollout-turn-context.jsonl"), config);
+
+    const discovered = expectDefined(result, "Expected Codex turn_context worktree result");
+    expect(discovered.projectPath).toBe("/Users/test/src/test123");
+    expect(discovered.canonicalProjectPath).toBe("/Users/test/src/test123");
+    expect(discovered.metadata.cwd).toBe("/Users/test/.codex/worktrees/c5dd/test123");
+    expect(discovered.metadata.worktreeLabel).toBe("c5dd");
+    expect(discovered.metadata.worktreeSource).toBe("codex_fork");
+    expect(discovered.metadata.parentSessionCwd).toBe("/Users/test/src/test123");
 
     rmSync(dir, { recursive: true, force: true });
   });

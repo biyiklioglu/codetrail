@@ -53,23 +53,11 @@ describe("historyExport", () => {
     const payload = collectHistoryExportPayload(
       createQueryServiceFixture({
         getSessionDetail: vi.fn(() => ({
-          session: {
+          session: createSessionSummary({
             id: "session_1",
             projectId: "project_1",
-            provider: "claude" as const,
-            filePath: "/tmp/session.jsonl",
-            title: "Session",
-            modelNames: "claude-opus",
-            startedAt: null,
-            endedAt: null,
-            durationMs: null,
-            gitBranch: null,
-            cwd: null,
             messageCount: 1,
-            bookmarkCount: 0,
-            tokenInputTotal: 0,
-            tokenOutputTotal: 0,
-          },
+          }),
           totalCount: 1,
           categoryCounts: {
             user: 0,
@@ -149,23 +137,11 @@ describe("historyExport", () => {
     const getSessionDetail = vi
       .fn<QueryService["getSessionDetail"]>()
       .mockImplementation((request) => ({
-        session: {
+        session: createSessionSummary({
           id: request.sessionId,
           projectId: "project_1",
-          provider: "claude",
-          filePath: "/tmp/session.jsonl",
-          title: "Session",
-          modelNames: "claude-opus",
-          startedAt: null,
-          endedAt: null,
-          durationMs: null,
-          gitBranch: null,
-          cwd: null,
           messageCount: 501,
-          bookmarkCount: 0,
-          tokenInputTotal: 0,
-          tokenOutputTotal: 0,
-        },
+        }),
         totalCount: 501,
         categoryCounts: {
           user: 1,
@@ -307,6 +283,46 @@ function createQueryServiceFixture(overrides: Partial<QueryService> = {}): Query
     close: vi.fn(),
     ...overrides,
   } as QueryService;
+}
+
+function createSessionSummary(
+  overrides: Partial<ReturnType<QueryService["getSessionDetail"]>["session"]> & {
+    id: string;
+    projectId: string;
+  },
+) {
+  const { id, projectId, ...rest } = overrides;
+  return {
+    id,
+    projectId,
+    provider: "claude" as const,
+    filePath: "/tmp/session.jsonl",
+    title: "Session",
+    modelNames: "claude-opus",
+    startedAt: null,
+    endedAt: null,
+    durationMs: null,
+    gitBranch: null,
+    cwd: null,
+    sessionIdentity: null,
+    providerSessionId: null,
+    sessionKind: null,
+    canonicalProjectPath: null,
+    repositoryUrl: null,
+    gitCommitHash: null,
+    lineageParentId: null,
+    providerClient: null,
+    providerSource: null,
+    providerClientVersion: null,
+    resolutionSource: null,
+    worktreeLabel: null,
+    worktreeSource: null,
+    messageCount: 0,
+    bookmarkCount: 0,
+    tokenInputTotal: 0,
+    tokenOutputTotal: 0,
+    ...rest,
+  };
 }
 
 function createSessionMessage(

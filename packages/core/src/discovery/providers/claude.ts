@@ -1,5 +1,6 @@
 import { basename, extname, join } from "node:path";
 
+import { compactMetadata } from "../../metadata";
 import {
   type ResolvedDiscoveryDependencies,
   getDiscoveryPath,
@@ -15,6 +16,53 @@ import {
   readClaudeJsonlMeta,
   readClaudeSessionsIndex,
 } from "./claudeHelpers";
+import { matchClaudeManagedWorktree } from "./worktreeHelpers";
+
+function resolveClaudeProjectInfo(args: {
+  sessionIndexProjectPath: string | undefined;
+  fallbackProjectId: string;
+  fileMeta: ReturnType<typeof readClaudeJsonlMeta>;
+}): {
+  projectPath: string;
+  worktreeLabel: string | null;
+  worktreeSource: "claude_cwd" | "claude_env_text" | null;
+  resolutionSource: string;
+} {
+  if (args.sessionIndexProjectPath) {
+    return {
+      projectPath: args.sessionIndexProjectPath,
+      worktreeLabel: null,
+      worktreeSource: null,
+      resolutionSource: "sessions_index",
+    };
+  }
+
+  if (args.fileMeta.canonicalProjectPath) {
+    const claudeManagedWorktree = matchClaudeManagedWorktree(args.fileMeta.cwd);
+    return {
+      projectPath: args.fileMeta.canonicalProjectPath,
+      worktreeLabel: args.fileMeta.worktreeLabel,
+      worktreeSource: claudeManagedWorktree ? "claude_cwd" : "claude_env_text",
+      resolutionSource: claudeManagedWorktree ? "claude_cwd" : "claude_env_text",
+    };
+  }
+
+  if (args.fileMeta.cwd) {
+    return {
+      projectPath: args.fileMeta.cwd,
+      worktreeLabel: null,
+      worktreeSource: null,
+      resolutionSource: "cwd",
+    };
+  }
+
+  return {
+    projectPath: decodeClaudeProjectId(args.fallbackProjectId),
+    worktreeLabel: null,
+    worktreeSource: null,
+    resolutionSource: "project_id",
+  };
+}
 
 export function discoverClaudeFiles(
   config: ResolvedDiscoveryConfig,
@@ -48,13 +96,17 @@ export function discoverClaudeFiles(
       const sessionIdentity = entry.name.slice(0, -".jsonl".length);
       const fileMeta = readClaudeJsonlMeta(filePath, dependencies);
       const sessionIndexEntry = sessionsIndexById.get(sessionIdentity);
-      const projectPath =
-        sessionIndexEntry?.projectPath ?? decodeClaudeProjectId(projectEntry.name);
+      const projectInfo = resolveClaudeProjectInfo({
+        sessionIndexProjectPath: sessionIndexEntry?.projectPath,
+        fallbackProjectId: projectEntry.name,
+        fileMeta,
+      });
 
       discovered.push({
         provider: "claude",
-        projectPath,
-        projectName: projectNameFromPath(projectPath),
+        projectPath: projectInfo.projectPath,
+        canonicalProjectPath: projectInfo.projectPath,
+        projectName: projectNameFromPath(projectInfo.projectPath),
         sessionIdentity,
         sourceSessionId: sessionIdentity,
         filePath,
@@ -66,6 +118,25 @@ export function discoverClaudeFiles(
           unresolvedProject: false,
           gitBranch: fileMeta.gitBranch,
           cwd: fileMeta.cwd,
+          worktreeLabel: projectInfo.worktreeLabel,
+          worktreeSource: projectInfo.worktreeSource,
+          repositoryUrl: null,
+          forkedFromSessionId: null,
+          parentSessionCwd: fileMeta.mainRepositoryPath,
+          providerProjectKey: projectEntry.name,
+          providerSessionId: fileMeta.sessionId ?? sessionIdentity,
+          sessionKind: fileMeta.isSidechain ? "sidechain" : "regular",
+          gitCommitHash: null,
+          providerClient: "Claude",
+          providerSource: null,
+          providerClientVersion: fileMeta.version,
+          lineageParentId: null,
+          resolutionSource: projectInfo.resolutionSource,
+          projectMetadata: null,
+          sessionMetadata: compactMetadata({
+            userType: fileMeta.userType,
+            isSidechain: fileMeta.isSidechain ? true : undefined,
+          }),
         },
       });
     }
@@ -99,13 +170,17 @@ export function discoverClaudeFiles(
         const subagentName = fileEntry.name.slice(0, -".jsonl".length);
         const sessionIdentity = `${parentSessionId}:subagent:${subagentName}`;
         const sessionIndexEntry = sessionsIndexById.get(parentSessionId);
-        const projectPath =
-          sessionIndexEntry?.projectPath ?? decodeClaudeProjectId(projectEntry.name);
+        const projectInfo = resolveClaudeProjectInfo({
+          sessionIndexProjectPath: sessionIndexEntry?.projectPath,
+          fallbackProjectId: projectEntry.name,
+          fileMeta,
+        });
 
         discovered.push({
           provider: "claude",
-          projectPath,
-          projectName: projectNameFromPath(projectPath),
+          projectPath: projectInfo.projectPath,
+          canonicalProjectPath: projectInfo.projectPath,
+          projectName: projectNameFromPath(projectInfo.projectPath),
           sessionIdentity,
           sourceSessionId: parentSessionId,
           filePath,
@@ -117,6 +192,25 @@ export function discoverClaudeFiles(
             unresolvedProject: false,
             gitBranch: fileMeta.gitBranch,
             cwd: fileMeta.cwd,
+            worktreeLabel: projectInfo.worktreeLabel,
+            worktreeSource: projectInfo.worktreeSource,
+            repositoryUrl: null,
+            forkedFromSessionId: null,
+            parentSessionCwd: fileMeta.mainRepositoryPath,
+            providerProjectKey: projectEntry.name,
+            providerSessionId: fileMeta.sessionId ?? subagentName,
+            sessionKind: "subagent",
+            gitCommitHash: null,
+            providerClient: "Claude",
+            providerSource: null,
+            providerClientVersion: fileMeta.version,
+            lineageParentId: parentSessionId,
+            resolutionSource: projectInfo.resolutionSource,
+            projectMetadata: null,
+            sessionMetadata: compactMetadata({
+              userType: fileMeta.userType,
+              isSidechain: fileMeta.isSidechain ? true : undefined,
+            }),
           },
         });
       }
@@ -159,13 +253,18 @@ export function discoverSingleClaudeFile(
   const sessionIdentity = basename(filePath, ".jsonl");
   const sessionsIndexById = readClaudeSessionsIndex(projectDir, dependencies);
   const sessionIndexEntry = sessionsIndexById.get(sessionIdentity);
-  const projectPath = sessionIndexEntry?.projectPath ?? decodeClaudeProjectId(projectId);
   const fileMeta = readClaudeJsonlMeta(filePath, dependencies);
+  const projectInfo = resolveClaudeProjectInfo({
+    sessionIndexProjectPath: sessionIndexEntry?.projectPath,
+    fallbackProjectId: projectId,
+    fileMeta,
+  });
 
   return {
     provider: "claude",
-    projectPath,
-    projectName: projectNameFromPath(projectPath),
+    projectPath: projectInfo.projectPath,
+    canonicalProjectPath: projectInfo.projectPath,
+    projectName: projectNameFromPath(projectInfo.projectPath),
     sessionIdentity,
     sourceSessionId: sessionIdentity,
     filePath,
@@ -177,6 +276,25 @@ export function discoverSingleClaudeFile(
       unresolvedProject: false,
       gitBranch: fileMeta.gitBranch,
       cwd: fileMeta.cwd,
+      worktreeLabel: projectInfo.worktreeLabel,
+      worktreeSource: projectInfo.worktreeSource,
+      repositoryUrl: null,
+      forkedFromSessionId: null,
+      parentSessionCwd: fileMeta.mainRepositoryPath,
+      providerProjectKey: projectId,
+      providerSessionId: fileMeta.sessionId ?? sessionIdentity,
+      sessionKind: fileMeta.isSidechain ? "sidechain" : "regular",
+      gitCommitHash: null,
+      providerClient: "Claude",
+      providerSource: null,
+      providerClientVersion: fileMeta.version,
+      lineageParentId: null,
+      resolutionSource: projectInfo.resolutionSource,
+      projectMetadata: null,
+      sessionMetadata: compactMetadata({
+        userType: fileMeta.userType,
+        isSidechain: fileMeta.isSidechain ? true : undefined,
+      }),
     },
   };
 }
