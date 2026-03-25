@@ -20,7 +20,7 @@ Code Trail discovers session files from each provider's local directory, parses 
 
 - **[Bun](https://bun.sh/)** v1.1+ for package management and scripts
 - **Node.js** v20 or v22 LTS
-- **macOS, Linux, or Windows** for day-to-day development
+- **macOS** or _Windows (experimental)_
 
 ### Mac
 
@@ -44,6 +44,8 @@ bun run desktop:start
 ### Windows
 
 Use **Node.js 22 LTS** on a clean machine for the smoothest native-module setup.
+
+Windows support is still experimental and not well tested yet. It should be treated as best-effort for now. Contributions to improve Windows support are very welcome.
 
 Prerequisites:
 
@@ -121,7 +123,7 @@ Prebuilt binaries are published on [GitHub Releases](https://github.com/mdemirha
 xattr -dr com.apple.quarantine "/Applications/Code Trail.app"
 ```
 
-- **Windows**: download either `CodeTrailSetup.exe` or the portable `.zip` from Releases.
+- **Windows**: experimental. Download either `CodeTrailSetup.exe` or the portable `.zip` from Releases if you want to try it, but expect rough edges. Contributions to improve Windows support are welcome.
 
 ### Mac
 
@@ -155,6 +157,8 @@ bun run desktop:make:win
 ```
 
 Artifacts are written to `apps/desktop/out/`.
+
+Windows builds are still experimental and have not had the same level of testing as macOS builds.
 
 The Windows release flow:
 
