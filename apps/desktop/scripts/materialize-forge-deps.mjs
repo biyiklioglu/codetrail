@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,7 +50,7 @@ function materializeForPackage(packagePath) {
     const targetPath = join(nestedNodeModulesPath, depName);
     mkdirSync(dirname(targetPath), { recursive: true });
     if (!existsSync(targetPath)) {
-      symlinkSync(sourcePath, targetPath);
+      cpSync(sourcePath, targetPath, { recursive: true });
     }
 
     materializeForPackage(sourcePath);

@@ -1,15 +1,25 @@
 import type { MenuItemConstructorOptions } from "electron";
 
 import type { AppCommand } from "../shared/appCommands";
+import type { DesktopPlatform } from "../shared/desktopPlatform";
 
 type BuildAppMenuTemplateOptions = {
   appName: string;
+  platform: DesktopPlatform;
   isDevelopment: boolean;
   dispatchAppCommand: (command: AppCommand) => void;
   reloadFocusedWindow: () => void;
   forceReloadFocusedWindow: () => void;
   toggleFocusedWindowDevTools: () => void;
 };
+
+function createSeparatorItem(): MenuItemConstructorOptions {
+  return { type: "separator" };
+}
+
+function createRoleMenuItem(role: NonNullable<MenuItemConstructorOptions["role"]>): MenuItemConstructorOptions {
+  return { role };
+}
 
 function createCommandMenuItem(
   label: string,
@@ -29,6 +39,7 @@ function createCommandMenuItem(
 
 export function buildAppMenuTemplate({
   appName,
+  platform,
   isDevelopment,
   dispatchAppCommand,
   reloadFocusedWindow,
@@ -36,46 +47,54 @@ export function buildAppMenuTemplate({
   toggleFocusedWindowDevTools,
 }: BuildAppMenuTemplateOptions): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = [
-    {
-      label: appName,
-      submenu: [
-        createCommandMenuItem(
-          "Settings…",
-          "CommandOrControl+,",
-          "open-settings",
-          dispatchAppCommand,
-        ),
-        {
-          type: "separator",
-        },
-        { role: "services" },
-        {
-          type: "separator",
-        },
-        { role: "hide" },
-        { role: "hideOthers" },
-        { role: "unhide" },
-        {
-          type: "separator",
-        },
-        { role: "quit" },
-      ],
-    },
+    ...(platform === "darwin"
+      ? [
+          {
+            label: appName,
+            submenu: [
+              createCommandMenuItem(
+                "Settings…",
+                "CommandOrControl+,",
+                "open-settings",
+                dispatchAppCommand,
+              ),
+              createSeparatorItem(),
+              createRoleMenuItem("services"),
+              createSeparatorItem(),
+              createRoleMenuItem("hide"),
+              createRoleMenuItem("hideOthers"),
+              createRoleMenuItem("unhide"),
+              createSeparatorItem(),
+              createRoleMenuItem("quit"),
+            ],
+          },
+        ]
+      : [
+          {
+            label: "File",
+            submenu: [
+              createCommandMenuItem(
+                "Settings…",
+                "CommandOrControl+,",
+                "open-settings",
+                dispatchAppCommand,
+              ),
+              createSeparatorItem(),
+              createRoleMenuItem("quit"),
+            ],
+          },
+        ]),
     {
       role: "editMenu",
       submenu: [
-        { role: "undo" },
-        { role: "redo" },
-        {
-          type: "separator",
-        },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { role: "selectAll" },
-        {
-          type: "separator",
-        },
+        createRoleMenuItem("undo"),
+        createRoleMenuItem("redo"),
+        createSeparatorItem(),
+        createRoleMenuItem("cut"),
+        createRoleMenuItem("copy"),
+        createRoleMenuItem("paste"),
+        createRoleMenuItem("selectAll"),
+        createSeparatorItem(),
         createCommandMenuItem(
           "Search Current View",
           "CommandOrControl+F",
@@ -105,9 +124,7 @@ export function buildAppMenuTemplate({
           "toggle-auto-refresh",
           dispatchAppCommand,
         ),
-        {
-          type: "separator",
-        },
+        createSeparatorItem(),
         createCommandMenuItem("Zoom In", "CommandOrControl+=", "zoom-in", dispatchAppCommand),
         createCommandMenuItem("Zoom Out", "CommandOrControl+-", "zoom-out", dispatchAppCommand),
         createCommandMenuItem(
@@ -116,9 +133,7 @@ export function buildAppMenuTemplate({
           "zoom-reset",
           dispatchAppCommand,
         ),
-        {
-          type: "separator",
-        },
+        createSeparatorItem(),
         createCommandMenuItem(
           "Toggle Projects Pane",
           "CommandOrControl+B",
@@ -143,15 +158,20 @@ export function buildAppMenuTemplate({
           "toggle-all-messages-expanded",
           dispatchAppCommand,
         ),
-        {
-          type: "separator",
-        },
-        { role: "togglefullscreen" },
+        createSeparatorItem(),
+        createRoleMenuItem("togglefullscreen"),
       ],
     },
     {
       role: "windowMenu",
-      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "front" }],
+      submenu:
+        platform === "darwin"
+          ? [
+              createRoleMenuItem("minimize"),
+              createRoleMenuItem("zoom"),
+              createRoleMenuItem("front"),
+            ]
+          : [createRoleMenuItem("minimize"), createRoleMenuItem("close")],
     },
     {
       label: "Help",

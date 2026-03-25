@@ -17,12 +17,14 @@ import { type AppStateStore, createAppStateStore } from "./appStateStore";
 import { bootstrapMainProcess, shutdownMainProcess } from "./bootstrap";
 import { appendDebugLog } from "./debugLog";
 import { resolveSideBySideInstance } from "./instanceMode";
+import { getCurrentMainPlatformConfig } from "./platformConfig";
 import { createBeforeQuitHandler } from "./quitLifecycle";
 import { serializeError } from "./serializeError";
 
 let mainWindowRef: BrowserWindow | null = null;
 let debugLogPathCache: string | null = null;
 const APP_NAME = "Code Trail";
+const mainPlatform = getCurrentMainPlatformConfig();
 const sideBySideInstance = resolveSideBySideInstance(
   process.argv,
   process.env,
@@ -98,7 +100,6 @@ function createWindow(appStateStore: AppStateStore): BrowserWindow {
   const windowIconPath = resolveWindowIconPath();
   const persistedPaneState = appStateStore.getPaneState();
   const persistedWindowState = appStateStore.getWindowState();
-  const isMac = process.platform === "darwin";
   const windowBackgroundColor = persistedPaneState?.theme === "dark" ? "#1e2028" : "#f5f5f7";
 
   const windowOptions = {
@@ -109,12 +110,7 @@ function createWindow(appStateStore: AppStateStore): BrowserWindow {
     minWidth: 1120,
     minHeight: 680,
     title: `Code Trail${sideBySideInstance?.titleSuffix ?? ""}`,
-    ...(isMac
-      ? {
-          titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 14, y: 16 },
-        }
-      : {}),
+    ...mainPlatform.windowChromeOptions,
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -278,9 +274,11 @@ if (hasSingleInstanceLock) {
     if (sideBySideInstance) {
       writeDebugLog("side-by-side instance enabled", sideBySideInstance, { force: true });
     }
-    const appStateStore = createAppStateStore(join(app.getPath("userData"), "ui-state.json"));
+    const appStateStore = createAppStateStore(join(app.getPath("userData"), "ui-state.json"), {
+      platform: mainPlatform.platform,
+    });
     const dockIconPath = resolveWindowIconPath();
-    if (dockIconPath && process.platform === "darwin") {
+    if (dockIconPath && mainPlatform.shouldSetDockIcon) {
       const icon = nativeImage.createFromPath(dockIconPath);
       if (!icon.isEmpty()) {
         app.dock.setIcon(icon);
@@ -320,6 +318,7 @@ if (hasSingleInstanceLock) {
         Menu.buildFromTemplate(
           buildAppMenuTemplate({
             appName: APP_NAME,
+            platform: mainPlatform.platform,
             isDevelopment: !app.isPackaged,
             dispatchAppCommand,
             reloadFocusedWindow: () => {
@@ -386,8 +385,8 @@ if (hasSingleInstanceLock) {
   }
 
   app.on("window-all-closed", () => {
-    writeDebugLog("window-all-closed", { platform: process.platform });
-    if (process.platform !== "darwin") {
+    writeDebugLog("window-all-closed", { platform: mainPlatform.platform });
+    if (mainPlatform.shouldQuitWhenAllWindowsClosed) {
       app.quit();
     }
   });

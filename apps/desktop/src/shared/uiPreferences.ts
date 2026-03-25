@@ -26,6 +26,7 @@ export {
   createKnownToolId,
   createRoleToolIdFromCustomTool,
   getEnabledExternalTools,
+  getExternalAppOptions,
   getExternalAppLabel,
   getExternalToolById,
   getPreferredExternalToolId,

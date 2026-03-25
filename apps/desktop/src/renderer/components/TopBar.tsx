@@ -20,7 +20,8 @@ import {
 } from "../../shared/uiPreferences";
 import { REFRESH_STRATEGY_OPTIONS, type RefreshStrategy } from "../app/autoRefresh";
 import { useClickOutside } from "../hooks/useClickOutside";
-import { formatTooltip } from "../lib/tooltipText";
+import { useShortcutRegistry } from "../lib/shortcutRegistry";
+import { useTooltipFormatter } from "../lib/tooltipText";
 import { ToolbarIcon } from "./ToolbarIcon";
 
 function wrapMenuIndex(index: number, count: number): number {
@@ -239,6 +240,8 @@ function RefreshStrategyDropdown({
   statusTone: "queued" | "running" | null;
   statusTooltip: string | null;
 }) {
+  const shortcuts = useShortcutRegistry();
+  const formatTooltipLabel = useTooltipFormatter();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const selectedLabel = REFRESH_STRATEGY_OPTIONS.find((o) => o.value === value)?.label ?? "Off";
@@ -256,7 +259,10 @@ function RefreshStrategyDropdown({
         aria-label="Auto-refresh strategy"
         aria-haspopup="menu"
         aria-expanded={open}
-        title={formatTooltip(`Auto-refresh: ${selectedLabel}`, "Cmd+Shift+R")}
+        title={formatTooltipLabel(
+          `Auto-refresh: ${selectedLabel}`,
+          shortcuts.actions.toggleAutoRefresh,
+        )}
       >
         <ToolbarIcon name="refresh" />
         {selectedLabel}
@@ -615,6 +621,8 @@ export function TopBar({
   onToggleHelp: () => void;
   onToggleSettings: () => void;
 }) {
+  const shortcuts = useShortcutRegistry();
+  const formatTooltipLabel = useTooltipFormatter();
   const activeTitleSuffix =
     mainView === "search"
       ? "Search"
@@ -644,8 +652,8 @@ export function TopBar({
           aria-label="Search"
           title={
             mainView === "search"
-              ? formatTooltip("Return to History", "Esc")
-              : formatTooltip("Open Search", "Cmd+Shift+F")
+              ? formatTooltipLabel("Return to History", "Esc")
+              : formatTooltipLabel("Open Search", shortcuts.actions.openGlobalSearch)
           }
         >
           <ToolbarIcon name="search" />
@@ -657,7 +665,11 @@ export function TopBar({
           onClick={onIncrementalRefresh}
           disabled={indexing}
           aria-label={indexing ? "Indexing in progress" : "Incremental refresh"}
-          title={indexing ? "Indexing in progress" : formatTooltip("Refresh now", "Cmd+R")}
+          title={
+            indexing
+              ? "Indexing in progress"
+              : formatTooltipLabel("Refresh now", shortcuts.actions.refreshNow)
+          }
         >
           <ToolbarIcon name="refresh" />
           {indexing ? "Indexing..." : "Refresh"}
@@ -677,8 +689,8 @@ export function TopBar({
           aria-label={focusMode ? "Exit focus mode" : "Enter focus mode"}
           title={
             focusMode
-              ? formatTooltip("Exit Focus mode", "Cmd+Shift+M")
-              : formatTooltip("Enter Focus mode", "Cmd+Shift+M")
+              ? formatTooltipLabel("Exit Focus mode", shortcuts.actions.toggleFocusMode)
+              : formatTooltipLabel("Enter Focus mode", shortcuts.actions.toggleFocusMode)
           }
         >
           <ToolbarIcon name={focusMode ? "closeFocus" : "focus"} />
@@ -691,8 +703,8 @@ export function TopBar({
           aria-label={mainView === "help" ? "Return to history view" : "Open help"}
           title={
             mainView === "help"
-              ? formatTooltip("Return to History", "Esc")
-              : formatTooltip("Open Help", "?")
+              ? formatTooltipLabel("Return to History", "Esc")
+              : formatTooltipLabel("Open Help", "?")
           }
         >
           <ToolbarIcon name="help" />
@@ -719,8 +731,8 @@ export function TopBar({
           aria-label={mainView === "settings" ? "Return to history view" : "Open settings"}
           title={
             mainView === "settings"
-              ? formatTooltip("Return to History", "Esc")
-              : formatTooltip("Open Settings", "Cmd+,")
+              ? formatTooltipLabel("Return to History", "Esc")
+              : formatTooltipLabel("Open Settings", shortcuts.actions.openSettings)
           }
         >
           <ToolbarIcon name="settings" />

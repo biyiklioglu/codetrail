@@ -28,6 +28,8 @@ import {
   toChangedFilesIndexingConfig,
   toIncrementalIndexingConfig,
 } from "./indexingRequestConfig";
+import { normalizeDesktopPlatform } from "../shared/desktopPlatform";
+import { getCurrentMainPlatformConfig, shouldUseBundledIndexingWorker } from "./platformConfig";
 
 export type RefreshJobRequest = {
   force: boolean;
@@ -514,18 +516,12 @@ export function shouldUseIndexingWorker(options: IndexingWorkerRuntimeOptions = 
     return false;
   }
 
-  const platform = options.platform ?? process.platform;
+  const platform = options.platform
+    ? normalizeDesktopPlatform(options.platform)
+    : getCurrentMainPlatformConfig().platform;
   const electronVersion = options.electronVersion ?? process.versions.electron;
-  if (!electronVersion) {
-    return true;
-  }
-
-  const majorVersion = Number.parseInt(electronVersion.split(".")[0] ?? "", 10);
-  if (!Number.isFinite(majorVersion)) {
-    return true;
-  }
-
-  // Electron 35 on macOS can SIGTRAP while booting this bundled worker. Falling back to
-  // in-process indexing preserves startup correctness at the cost of some responsiveness.
-  return !(platform === "darwin" && majorVersion >= 35);
+  return shouldUseBundledIndexingWorker({
+    platform,
+    electronVersion,
+  });
 }

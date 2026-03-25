@@ -3,6 +3,7 @@ import { vi } from "vitest";
 import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core/browser";
 
 import type { AppCommand } from "../../shared/appCommands";
+import type { DesktopPlatform } from "../../shared/desktopPlatform";
 import type { HistoryExportProgressPayload } from "../../shared/historyExport";
 import type { CodetrailClient } from "../lib/codetrailClient";
 
@@ -30,5 +31,10 @@ export function createMockCodetrailClient(): MockCodetrailClient {
     () => () => undefined,
   );
 
-  return { invoke, onHistoryExportProgress, onAppCommand };
+  return {
+    platform: "darwin" satisfies DesktopPlatform,
+    invoke,
+    onHistoryExportProgress,
+    onAppCommand,
+  };
 }

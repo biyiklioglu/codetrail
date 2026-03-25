@@ -16,7 +16,6 @@ import type {
   ViewerWrapMode,
 } from "../../shared/uiPreferences";
 import {
-  createDefaultExternalTools,
   getPreferredExternalToolId,
   getThemeFamily,
   resolveShikiThemeForFamily,
@@ -26,6 +25,7 @@ import { MONO_FONT_STACKS, REGULAR_FONT_STACKS } from "../app/constants";
 import type { PaneStateSnapshot, SettingsInfoResponse } from "../app/types";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { useCodetrailClient } from "../lib/codetrailClient";
+import { useExternalToolPolicy } from "../lib/externalToolPolicy";
 import { applyDocumentAppearance } from "../lib/theme";
 import { toErrorMessage } from "../lib/viewUtils";
 import {
@@ -64,6 +64,7 @@ export function useAppearanceController({
   logError: (context: string, error: unknown) => void;
 }) {
   const codetrail = useCodetrailClient();
+  const { defaultExternalTools } = useExternalToolPolicy();
   const initialTheme = initialPaneState?.theme ?? "dark";
   const [theme, setThemeState] = useState<ThemeMode>(initialTheme);
   const [darkShikiTheme, setDarkShikiTheme] = useState<ShikiThemeId>(
@@ -102,7 +103,6 @@ export function useAppearanceController({
   const [defaultDiffViewMode, setDefaultDiffViewMode] = useState<DiffViewMode>(
     initialPaneState?.defaultDiffViewMode ?? "unified",
   );
-  const defaultExternalTools = useMemo(() => createDefaultExternalTools(), []);
   const [externalTools, setExternalTools] = useState<ExternalToolConfig[]>(
     initialPaneState?.externalTools ?? defaultExternalTools,
   );

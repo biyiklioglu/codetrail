@@ -10,6 +10,7 @@ import {
   getPreferredExternalToolId,
 } from "../shared/uiPreferences";
 import type { PaneState } from "./appStateStore";
+import { getCurrentMainPlatformConfig } from "./platformConfig";
 import type {
   EditorDependencies,
   EditorId,
@@ -21,6 +22,7 @@ import type {
 } from "./editorDefinitions";
 import { resolveConfiguredToolInfo } from "./editorDetection";
 import { buildLaunchCommand } from "./editorLaunch";
+import { createEditorPlatformConfig } from "./editorPlatform";
 
 const execFileAsync = promisify(execFile);
 const DETECTION_CACHE_TTL_MS = 30_000;
@@ -71,14 +73,19 @@ async function listAvailableEditorsUncached(
   paneState: Partial<PaneState> | null | undefined,
   resolvedDependencies: ResolvedEditorDependencies,
 ): Promise<IpcResponse<"editor:listAvailable">> {
+  const platform = getCurrentMainPlatformConfig().platform;
   const editorTools = getConfiguredTools("editor", paneState);
   const diffTools = getConfiguredTools("diff", paneState);
   return {
     editors: await Promise.all(
-      editorTools.map((tool) => resolveConfiguredToolInfo(tool, resolvedDependencies, "editor")),
+      editorTools.map((tool) =>
+        resolveConfiguredToolInfo(tool, resolvedDependencies, "editor", platform),
+      ),
     ),
     diffTools: await Promise.all(
-      diffTools.map((tool) => resolveConfiguredToolInfo(tool, resolvedDependencies, "diff")),
+      diffTools.map((tool) =>
+        resolveConfiguredToolInfo(tool, resolvedDependencies, "diff", platform),
+      ),
     ),
   };
 }
@@ -126,10 +133,11 @@ export async function openInEditor(
   }
 
   try {
+    const platform = getCurrentMainPlatformConfig().platform;
     const child = resolvedDependencies.spawn(launch.command, launch.args, {
       detached: true,
       stdio: "ignore",
-      shell: process.platform === "win32",
+      shell: createEditorPlatformConfig(platform).spawnWithShell,
     });
     child.unref();
     return { ok: true, error: null };
@@ -149,23 +157,31 @@ function resolveToolRole(request: EditorOpenRequest): ToolRole {
 }
 
 function getConfiguredTools(role: ToolRole, paneState: Partial<PaneState> | null | undefined) {
-  return buildRoleToolsFromCatalog(role, paneState?.externalTools ?? createDefaultExternalTools());
+  const platform = getCurrentMainPlatformConfig().platform;
+  return buildRoleToolsFromCatalog(
+    role,
+    paneState?.externalTools ?? createDefaultExternalTools(platform),
+    platform,
+  );
 }
 
 function getPreferredId(
   role: ToolRole,
   paneState: Partial<PaneState> | null | undefined,
 ): EditorId {
+  const platform = getCurrentMainPlatformConfig().platform;
   return role === "diff"
     ? getPreferredExternalToolId(
-        paneState?.externalTools ?? createDefaultExternalTools(),
+        paneState?.externalTools ?? createDefaultExternalTools(platform),
         paneState?.preferredExternalDiffTool ?? null,
         "diff",
+        platform,
       )
     : getPreferredExternalToolId(
-        paneState?.externalTools ?? createDefaultExternalTools(),
+        paneState?.externalTools ?? createDefaultExternalTools(platform),
         paneState?.preferredExternalEditor ?? null,
         "editor",
+        platform,
       );
 }
 

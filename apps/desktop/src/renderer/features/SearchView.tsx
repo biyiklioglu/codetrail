@@ -3,7 +3,7 @@ import type { Dispatch, ReactNode, SetStateAction } from "react";
 
 import type { MessageCategory, Provider } from "@codetrail/core/browser";
 
-import { CATEGORIES, HISTORY_CATEGORY_SHORTCUTS } from "../app/constants";
+import { CATEGORIES } from "../app/constants";
 import type { ProjectSummary } from "../app/types";
 import { AdvancedSearchToggleButton } from "../components/AdvancedSearchToggleButton";
 import { ToolbarIcon } from "../components/ToolbarIcon";
@@ -16,7 +16,8 @@ import {
   getSearchQueryPlaceholder,
   getSearchQueryTooltip,
 } from "../lib/searchLabels";
-import { formatTooltip } from "../lib/tooltipText";
+import { useShortcutRegistry } from "../lib/shortcutRegistry";
+import { useTooltipFormatter } from "../lib/tooltipText";
 import {
   compactPath,
   formatDate,
@@ -44,6 +45,8 @@ export function SearchView({
   setAdvancedSearchEnabled: Dispatch<SetStateAction<boolean>>;
   onSelectResult: (result: SearchResult) => void;
 }) {
+  const shortcuts = useShortcutRegistry();
+  const formatTooltipLabel = useTooltipFormatter();
   const [controlsCollapsed, setControlsCollapsed] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const projectMenuRef = useRef<HTMLDivElement | null>(null);
@@ -292,14 +295,21 @@ export function SearchView({
                           className={`msg-filter search-filter-chip search-filter-chip-category search-filter-chip-category-${category}${
                             search.historyCategories.includes(category) ? " is-active" : ""
                           }`}
-                          title={getSearchCategoryTooltip(category)}
+                          title={getSearchCategoryTooltip(
+                            category,
+                            shortcuts.historyCategoryShortcuts,
+                            formatTooltipLabel,
+                          )}
                           onClick={() => {
                             search.setHistoryCategories((value) => toggleValue(value, category));
                             search.setSearchPage(0);
                           }}
                         >
                           <span className="filter-shortcut" aria-hidden="true">
-                            {getSearchCategoryShortcutDigit(category)}
+                            {getSearchCategoryShortcutDigit(
+                              category,
+                              shortcuts.historyCategoryShortcuts,
+                            )}
                           </span>
                           <span className="filter-label">
                             {prettyCategory(category)}
@@ -385,7 +395,7 @@ export function SearchView({
                       tabIndex={-1}
                       onClick={search.goToPreviousSearchPage}
                       disabled={!search.canGoToPreviousSearchPage}
-                      title={formatTooltip("Previous page", "Cmd+Left")}
+                      title={formatTooltipLabel("Previous page", shortcuts.actions.previousPage)}
                       aria-label="Previous search page"
                     >
                       Prev
@@ -396,15 +406,13 @@ export function SearchView({
                       tabIndex={-1}
                       onClick={search.goToNextSearchPage}
                       disabled={!search.canGoToNextSearchPage}
-                      title={formatTooltip("Next page", "Cmd+Right")}
+                      title={formatTooltipLabel("Next page", shortcuts.actions.nextPage)}
                       aria-label="Next search page"
                     >
                       Next
                     </button>
                   </div>
-                  <span className="search-footer-shortcut">
-                    Cmd+Left/Right • Cmd+Up/Down • Ctrl+D/U • Page Up/Down
-                  </span>
+                  <span className="search-footer-shortcut">{shortcuts.searchNavigationHint}</span>
                 </div>
               ) : null}
             </div>
@@ -445,14 +453,21 @@ function formatResultCount(value: number): string {
   return `${formatInteger(value)} ${value === 1 ? "match" : "matches"}`;
 }
 
-function getSearchCategoryShortcutDigit(category: MessageCategory): string {
-  const match = HISTORY_CATEGORY_SHORTCUTS[category].match(/\d$/);
+function getSearchCategoryShortcutDigit(
+  category: MessageCategory,
+  historyCategoryShortcuts: Record<MessageCategory, string>,
+): string {
+  const match = historyCategoryShortcuts[category].match(/\d$/);
   return match?.[0] ?? "";
 }
 
-function getSearchCategoryTooltip(category: MessageCategory): string {
+function getSearchCategoryTooltip(
+  category: MessageCategory,
+  historyCategoryShortcuts: Record<MessageCategory, string>,
+  formatTooltipLabel: (action: string, shortcut?: string | null) => string,
+): string {
   const label = prettyCategory(category);
-  return formatTooltip(`Show or hide ${label} results`, HISTORY_CATEGORY_SHORTCUTS[category]);
+  return formatTooltipLabel(`Show or hide ${label} results`, historyCategoryShortcuts[category]);
 }
 
 function compareProjectsByNameThenProvider(a: ProjectSummary, b: ProjectSummary): number {

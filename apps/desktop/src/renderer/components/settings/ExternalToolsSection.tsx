@@ -6,12 +6,12 @@ import type {
   KnownExternalAppId,
 } from "../../../shared/uiPreferences";
 import {
-  EXTERNAL_APP_OPTIONS,
   createCustomExternalTool,
   createKnownToolId,
   getEnabledExternalTools,
   supportsKnownToolRole,
 } from "../../../shared/uiPreferences";
+import { useExternalToolPolicy } from "../../lib/externalToolPolicy";
 import { browseExternalToolCommand } from "../../lib/pathActions";
 import { compactPath, toErrorMessage } from "../../lib/viewUtils";
 import {
@@ -99,6 +99,7 @@ export function ExternalToolsSection({
     () => new Map(availableDiffTools.map((tool) => [tool.id, tool])),
     [availableDiffTools],
   );
+  const { externalAppOptions, terminalAppSetting } = useExternalToolPolicy();
   const [expandedCustomToolIds, setExpandedCustomToolIds] = useState<Set<string>>(() => new Set());
   const [addFormOpen, setAddFormOpen] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -116,7 +117,9 @@ export function ExternalToolsSection({
         tool.kind === "known" && tool.appId !== null,
     )
     .map((tool) => {
-      const option = EXTERNAL_APP_OPTIONS.find((candidate) => candidate.value === tool.appId);
+      const option = externalAppOptions.find(
+        (candidate: { value: KnownExternalAppId }) => candidate.value === tool.appId,
+      );
       const toolId = createKnownToolId(tool.appId);
       const info = diffInfoById.get(toolId) ?? editorInfoById.get(toolId) ?? null;
       return {
@@ -230,37 +233,36 @@ export function ExternalToolsSection({
           </div>
         </div>
 
-        <div className="settings-tool-detail-field full">
-          <label className="settings-tool-detail-label" htmlFor="terminal-app-command">
-            Terminal app (macOS)
-          </label>
-          <div className="settings-tool-command-row">
-            <input
-              id="terminal-app-command"
-              className="settings-tool-detail-input"
-              type="text"
-              value={terminalAppCommand}
-              placeholder="Terminal or /Applications/iTerm.app"
-              onChange={(event) => onTerminalAppCommandChange(event.target.value)}
-            />
-            <button
-              type="button"
-              className="settings-tool-secondary-button compact"
-              onClick={() =>
-                void browseForCommand(
-                  (path) => onTerminalAppCommandChange(path),
-                  "Choose terminal app",
-                )
-              }
-            >
-              Browse
-            </button>
+        {terminalAppSetting.visible ? (
+          <div className="settings-tool-detail-field full">
+            <label className="settings-tool-detail-label" htmlFor="terminal-app-command">
+              {terminalAppSetting.label}
+            </label>
+            <div className="settings-tool-command-row">
+              <input
+                id="terminal-app-command"
+                className="settings-tool-detail-input"
+                type="text"
+                value={terminalAppCommand}
+                placeholder={terminalAppSetting.placeholder}
+                onChange={(event) => onTerminalAppCommandChange(event.target.value)}
+              />
+              <button
+                type="button"
+                className="settings-tool-secondary-button compact"
+                onClick={() =>
+                  void browseForCommand(
+                    (path) => onTerminalAppCommandChange(path),
+                    terminalAppSetting.browseContext,
+                  )
+                }
+              >
+                Browse
+              </button>
+            </div>
+            <span className="settings-tool-detail-hint">{terminalAppSetting.hint}</span>
           </div>
-          <span className="settings-tool-detail-hint">
-            Used when launching terminal-based tools like Neovim on macOS. Leave empty to use
-            Terminal.
-          </span>
-        </div>
+        ) : null}
       </div>
 
       <div className="settings-tools-legend" aria-hidden>

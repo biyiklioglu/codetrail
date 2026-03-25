@@ -2,7 +2,8 @@ import { useRef, useState } from "react";
 
 import type { ProjectSortField, ProjectViewMode } from "../../app/types";
 import { useClickOutside } from "../../hooks/useClickOutside";
-import { formatTooltip } from "../../lib/tooltipText";
+import { useShortcutRegistry } from "../../lib/shortcutRegistry";
+import { useTooltipFormatter } from "../../lib/tooltipText";
 import { ToolbarIcon } from "../ToolbarIcon";
 import {
   ProjectPaneFolderIcon,
@@ -95,6 +96,8 @@ export function ProjectPaneHeader({
   onOpenProjectLocation,
   onDeleteProject,
 }: ProjectPaneHeaderProps) {
+  const shortcuts = useShortcutRegistry();
+  const formatTooltipLabel = useTooltipFormatter();
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const overflowMenuRef = useRef<HTMLDivElement | null>(null);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
@@ -328,7 +331,10 @@ export function ProjectPaneHeader({
           className="collapse-btn pane-collapse-btn"
           onClick={onToggleCollapsed}
           aria-label={collapsed ? "Expand Projects pane" : "Collapse Projects pane"}
-          title={formatTooltip(collapsed ? "Expand Projects" : "Collapse Projects", "Cmd+B")}
+          title={formatTooltipLabel(
+            collapsed ? "Expand Projects" : "Collapse Projects",
+            shortcuts.actions.toggleProjectPane,
+          )}
         >
           <ToolbarIcon name="chevronLeft" />
         </button>

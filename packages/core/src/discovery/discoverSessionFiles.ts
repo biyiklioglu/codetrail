@@ -1,6 +1,3 @@
-import { homedir, platform } from "node:os";
-import { join } from "node:path";
-
 import { PROVIDER_VALUES, type Provider } from "../contracts/canonical";
 import {
   PROVIDER_METADATA,
@@ -13,36 +10,18 @@ import {
   getDiscoveryPath,
   resolveDiscoveryDependencies,
 } from "./shared";
+import {
+  createDefaultDiscoveryConfig,
+  getCurrentDiscoveryPlatform,
+} from "./platformDiscoveryDefaults";
 import type { DiscoveredSessionFile, DiscoveryConfig, ResolvedDiscoveryConfig } from "./types";
 
 export type { DiscoveryDependencies, DiscoveryFileSystem } from "./shared";
 
-function defaultCopilotRoot(): string {
-  const os = platform();
-  if (os === "darwin") {
-    return join(homedir(), "Library", "Application Support", "Code", "User", "workspaceStorage");
-  }
-  if (os === "win32") {
-    return join(
-      process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"),
-      "Code",
-      "User",
-      "workspaceStorage",
-    );
-  }
-  return join(homedir(), ".config", "Code", "User", "workspaceStorage");
-}
-
 export const DEFAULT_DISCOVERY_CONFIG: DiscoveryConfig = {
-  claudeRoot: join(homedir(), ".claude", "projects"),
-  codexRoot: join(homedir(), ".codex", "sessions"),
-  geminiRoot: join(homedir(), ".gemini", "tmp"),
-  geminiHistoryRoot: join(homedir(), ".gemini", "history"),
-  geminiProjectsPath: join(homedir(), ".gemini", "projects.json"),
-  cursorRoot: join(homedir(), ".cursor", "projects"),
-  copilotRoot: defaultCopilotRoot(),
-  includeClaudeSubagents: false,
-  enabledProviders: [...PROVIDER_VALUES],
+  ...createDefaultDiscoveryConfig(getCurrentDiscoveryPlatform(), {
+    appDataDir: process.env.APPDATA ?? null,
+  }),
 };
 
 export function resolveDiscoveryConfig(

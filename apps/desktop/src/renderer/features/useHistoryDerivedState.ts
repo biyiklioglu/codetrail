@@ -8,8 +8,6 @@ import {
   CATEGORIES,
   COLLAPSED_PANE_WIDTH,
   EMPTY_CATEGORY_COUNTS,
-  HISTORY_CATEGORY_EXPAND_SHORTCUTS,
-  HISTORY_CATEGORY_SHORTCUTS,
   PROJECT_ALL_NAV_ID,
 } from "../app/constants";
 import type {
@@ -23,6 +21,7 @@ import type {
   SortDirection,
 } from "../app/types";
 import { formatInteger } from "../lib/numberFormatting";
+import { useShortcutRegistry } from "../lib/shortcutRegistry";
 import {
   compareRecent,
   countProviders,
@@ -88,6 +87,7 @@ export function useHistoryDerivedState({
   sessionPaneCollapsed: boolean;
   sessionPaneWidth: number;
 }) {
+  const shortcuts = useShortcutRegistry();
   const bookmarkMessages = useMemo(() => {
     const next = bookmarksResponse.results.map((entry) => entry.message);
     next.sort((left, right) => {
@@ -336,8 +336,8 @@ export function useHistoryDerivedState({
             "bookmarked messages",
           )
         : formatSelectedSummaryMessageCount(filteredMessageCount, totalMessageCount, "messages"),
-    historyCategoryExpandShortcutMap: HISTORY_CATEGORY_EXPAND_SHORTCUTS,
-    historyCategoriesShortcutMap: HISTORY_CATEGORY_SHORTCUTS,
+    historyCategoryExpandShortcutMap: shortcuts.historyCategoryExpandShortcuts,
+    historyCategoriesShortcutMap: shortcuts.historyCategoryShortcuts,
     prettyCategory,
     prettyProvider,
     formatDate,

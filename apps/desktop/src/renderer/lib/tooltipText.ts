@@ -1,3 +1,8 @@
+import { useCallback } from "react";
+
+import { type DesktopPlatform, isMacPlatform } from "../../shared/desktopPlatform";
+import { useDesktopPlatform } from "./codetrailClient";
+
 const MODIFIER_SYMBOLS = {
   Cmd: "⌘",
   Ctrl: "⌃",
@@ -33,13 +38,40 @@ function formatShortcutSequence(sequence: string): string {
     .join("");
 }
 
-export function formatShortcutDisplay(shortcut: string): string {
-  return formatShortcutSequence(shortcut);
+function formatShortcutSequencePlainText(sequence: string): string {
+  const trimmed = sequence.trim().replace(/\+\+$/u, "+Plus");
+  if (trimmed.length === 0) {
+    return "";
+  }
+  return trimmed
+    .split("+")
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0)
+    .map((token) => (token === "Plus" ? "+" : token))
+    .join("+");
 }
 
-export function formatTooltip(action: string, shortcut?: string | null): string {
+export function formatShortcutDisplay(shortcut: string, platform: DesktopPlatform): string {
+  return isMacPlatform(platform)
+    ? formatShortcutSequence(shortcut)
+    : formatShortcutSequencePlainText(shortcut);
+}
+
+export function formatTooltip(
+  action: string,
+  shortcut: string | null | undefined,
+  platform: DesktopPlatform,
+): string {
   if (!shortcut) {
     return action;
   }
-  return `${action}  ${formatShortcutDisplay(shortcut)}`;
+  return `${action}  ${formatShortcutDisplay(shortcut, platform)}`;
+}
+
+export function useTooltipFormatter(): (action: string, shortcut?: string | null) => string {
+  const desktopPlatform = useDesktopPlatform();
+  return useCallback(
+    (action: string, shortcut?: string | null) => formatTooltip(action, shortcut, desktopPlatform),
+    [desktopPlatform],
+  );
 }

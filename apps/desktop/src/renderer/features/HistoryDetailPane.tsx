@@ -21,7 +21,8 @@ import {
   getSearchQueryPlaceholder,
   getSearchQueryTooltip,
 } from "../lib/searchLabels";
-import { formatTooltip } from "../lib/tooltipText";
+import { useShortcutRegistry } from "../lib/shortcutRegistry";
+import { useTooltipFormatter } from "../lib/tooltipText";
 import { toggleValue } from "../lib/viewUtils";
 import type { useHistoryController } from "./useHistoryController";
 
@@ -35,13 +36,14 @@ function getHistoryCategoryShortcutDigit(
   return match?.[0] ?? "";
 }
 
-function getHistoryCategoryTooltip(history: HistoryController, category: MessageCategory): string {
+function getHistoryCategoryTooltip(
+  history: HistoryController,
+  category: MessageCategory,
+  formatTooltipLabel: ReturnType<typeof useTooltipFormatter>,
+): string {
   const label = history.prettyCategory(category);
   const count = formatInteger(history.historyCategoryCounts[category]);
-  return formatTooltip(
-    `Show or hide ${label} messages (${count})`,
-    history.historyCategoriesShortcutMap[category],
-  );
+  return formatTooltipLabel(`Show or hide ${label} messages (${count})`, history.historyCategoriesShortcutMap[category]);
 }
 
 function getHistoryCategoryAriaLabel(
@@ -56,13 +58,11 @@ function getHistoryCategoryAriaLabel(
 function getHistoryCategoryExpansionDefaultTooltip(
   history: HistoryController,
   category: MessageCategory,
+  formatTooltipLabel: ReturnType<typeof useTooltipFormatter>,
 ): string {
   const label = history.prettyCategory(category);
   const nextAction = history.expandedByDefaultCategories.includes(category) ? "Collapse" : "Expand";
-  return formatTooltip(
-    `${nextAction} ${label} messages`,
-    history.historyCategoryExpandShortcutMap[category],
-  );
+  return formatTooltipLabel(`${nextAction} ${label} messages`, history.historyCategoryExpandShortcutMap[category]);
 }
 
 function formatHistoryCategorySelection(history: HistoryController): string {
@@ -128,6 +128,8 @@ export function HistoryDetailPane({
   liveSessions?: WatchLiveStatusResponse["sessions"];
   liveRowHasBackground?: boolean;
 }) {
+  const shortcuts = useShortcutRegistry();
+  const formatTooltipLabel = useTooltipFormatter();
   const exportAllPagesCount =
     history.historyMode === "bookmarks"
       ? history.bookmarksResponse.filteredCount
@@ -322,7 +324,10 @@ export function HistoryDetailPane({
                   history.focusMessagePane();
                 }}
                 aria-label={`${history.globalExpandCollapseLabel} all messages`}
-                title={formatTooltip(`${history.globalExpandCollapseLabel} all messages`, "Cmd+E")}
+                title={formatTooltipLabel(
+                  `${history.globalExpandCollapseLabel} all messages`,
+                  shortcuts.actions.toggleAllMessagesExpanded,
+                )}
               >
                 <ToolbarIcon name={history.areAllMessagesExpanded ? "collapseAll" : "expandAll"} />
                 {history.globalExpandCollapseLabel}
@@ -335,7 +340,7 @@ export function HistoryDetailPane({
                 onClick={() => void applyZoomAction("out")}
                 disabled={!canZoomOut}
                 aria-label="Zoom out"
-                title={formatTooltip("Zoom out", "Cmd+-")}
+                title={formatTooltipLabel("Zoom out", shortcuts.actions.zoomOut)}
               >
                 <ToolbarIcon name="zoomOut" />
               </button>
@@ -343,7 +348,7 @@ export function HistoryDetailPane({
                 value={zoomPercent}
                 onCommit={(percent) => void setZoomPercent(percent)}
                 ariaLabel="Zoom percentage"
-                title={formatTooltip("Zoom level", "Cmd+0")}
+                title={formatTooltipLabel("Zoom level", shortcuts.actions.zoomReset)}
                 wrapperClassName="zoom-level-control"
                 inputClassName="zoom-level-input"
               />
@@ -353,7 +358,7 @@ export function HistoryDetailPane({
                 onClick={() => void applyZoomAction("in")}
                 disabled={!canZoomIn}
                 aria-label="Zoom in"
-                title={formatTooltip("Zoom in", "Cmd++")}
+                title={formatTooltipLabel("Zoom in", shortcuts.actions.zoomIn)}
               >
                 <ToolbarIcon name="zoomIn" />
               </button>
@@ -400,7 +405,7 @@ export function HistoryDetailPane({
               type="button"
               className="msg-filter-main"
               aria-label={getHistoryCategoryAriaLabel(history, category)}
-              title={getHistoryCategoryTooltip(history, category)}
+              title={getHistoryCategoryTooltip(history, category, formatTooltipLabel)}
               onClick={() => {
                 history.setHistoryCategories((value) =>
                   toggleValue<MessageCategory>(value, category),
@@ -422,8 +427,16 @@ export function HistoryDetailPane({
             <button
               type="button"
               className="msg-filter-expand-toggle"
-              aria-label={getHistoryCategoryExpansionDefaultTooltip(history, category)}
-              title={getHistoryCategoryExpansionDefaultTooltip(history, category)}
+              aria-label={getHistoryCategoryExpansionDefaultTooltip(
+                history,
+                category,
+                formatTooltipLabel,
+              )}
+              title={getHistoryCategoryExpansionDefaultTooltip(
+                history,
+                category,
+                formatTooltipLabel,
+              )}
               onClick={() => {
                 history.handleToggleCategoryDefaultExpansion(category);
                 history.focusMessagePane();
@@ -569,7 +582,7 @@ export function HistoryDetailPane({
               history.focusMessagePane();
             }}
             disabled={!history.canGoToPreviousHistoryPage}
-            title={formatTooltip("Previous page", "Cmd+Left")}
+            title={formatTooltipLabel("Previous page", shortcuts.actions.previousPage)}
             aria-label="Previous page"
           >
             <ToolbarIcon name="chevronLeft" />
@@ -618,7 +631,7 @@ export function HistoryDetailPane({
               history.focusMessagePane();
             }}
             disabled={!history.canGoToNextHistoryPage}
-            title={formatTooltip("Next page", "Cmd+Right")}
+            title={formatTooltipLabel("Next page", shortcuts.actions.nextPage)}
             aria-label="Next page"
           >
             <ToolbarIcon name="chevronRight" />

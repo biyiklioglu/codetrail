@@ -8,6 +8,7 @@ import {
   createProviderRecord,
 } from "@codetrail/core";
 
+import { DEFAULT_DESKTOP_PLATFORM, type DesktopPlatform } from "../shared/desktopPlatform";
 import {
   type DiffViewMode,
   type ExternalEditorId,
@@ -75,6 +76,7 @@ type AppStateStoreTimer = {
 export type AppStateStoreDependencies = {
   fs?: AppStateStoreFileSystem;
   timer?: AppStateStoreTimer;
+  platform?: DesktopPlatform;
   onPersistError?: (error: unknown) => void;
 };
 
@@ -130,6 +132,7 @@ export class AppStateStore {
   private readonly filePath: string;
   private readonly fileSystem: AppStateStoreFileSystem;
   private readonly timer: AppStateStoreTimer;
+  private readonly platform: DesktopPlatform;
   private readonly onPersistError: (error: unknown) => void;
   private state: AppState;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -138,12 +141,13 @@ export class AppStateStore {
     this.filePath = filePath;
     this.fileSystem = dependencies.fs ?? DEFAULT_FILE_SYSTEM;
     this.timer = dependencies.timer ?? DEFAULT_TIMER;
+    this.platform = dependencies.platform ?? DEFAULT_DESKTOP_PLATFORM;
     this.onPersistError =
       dependencies.onPersistError ??
       ((error) => {
         console.error("[codetrail] failed persisting app state", error);
       });
-    this.state = readState(filePath, this.fileSystem);
+    this.state = readState(filePath, this.fileSystem, this.platform);
   }
 
   getFilePath(): string {
@@ -169,6 +173,7 @@ export class AppStateStore {
         ...value,
       },
       this.state.indexing?.enabledProviders,
+      this.platform,
     );
     if (!pane) {
       return;
@@ -242,7 +247,11 @@ export function createAppStateStore(
   return new AppStateStore(filePath, dependencies);
 }
 
-function readState(filePath: string, fileSystem: AppStateStoreFileSystem): AppState {
+function readState(
+  filePath: string,
+  fileSystem: AppStateStoreFileSystem,
+  platform: DesktopPlatform,
+): AppState {
   if (!fileSystem.existsSync(filePath)) {
     return {};
   }
@@ -257,7 +266,7 @@ function readState(filePath: string, fileSystem: AppStateStoreFileSystem): AppSt
     const record = parsed as Record<string, unknown>;
     // Sanitize each subtree independently so one malformed section does not discard the other.
     const indexing = sanitizeIndexingState(record.indexing);
-    const pane = sanitizePaneState(record.pane, indexing?.enabledProviders);
+    const pane = sanitizePaneState(record.pane, indexing?.enabledProviders, platform);
     const window = sanitizeWindowState(record.window);
     return {
       ...(pane ? { pane } : {}),
@@ -286,6 +295,7 @@ function persistState(
 function sanitizePaneState(
   value: unknown,
   enabledProviderScope: Provider[] | undefined = undefined,
+  platform: DesktopPlatform = DEFAULT_DESKTOP_PLATFORM,
 ): PaneState | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -338,16 +348,19 @@ function sanitizePaneState(
   const defaultDiffViewMode =
     sanitizeStringValue(record.defaultDiffViewMode, DIFF_VIEW_MODE_VALUES) ?? "unified";
   const externalTools =
-    sanitizeExternalToolConfigs(record.externalTools) ?? createDefaultExternalTools();
+    sanitizeExternalToolConfigs(record.externalTools, platform) ??
+    createDefaultExternalTools(platform);
   const preferredExternalEditor = sanitizePreferredExternalToolId(
     record.preferredExternalEditor,
     externalTools,
     "editor",
+    platform,
   );
   const preferredExternalDiffTool = sanitizePreferredExternalToolId(
     record.preferredExternalDiffTool,
     externalTools,
     "diff",
+    platform,
   );
   const terminalAppCommand = sanitizeOptionalString(record.terminalAppCommand);
   const selectedProjectId = sanitizeOptionalNonEmptyString(record.selectedProjectId);
@@ -596,7 +609,10 @@ function sanitizeOptionalStringArray(value: unknown): string[] | null {
   return result;
 }
 
-function sanitizeExternalToolConfigs(value: unknown): ExternalToolConfig[] | null {
+function sanitizeExternalToolConfigs(
+  value: unknown,
+  platform: DesktopPlatform = DEFAULT_DESKTOP_PLATFORM,
+): ExternalToolConfig[] | null {
   if (!Array.isArray(value)) {
     return null;
   }
@@ -639,18 +655,19 @@ function sanitizeExternalToolConfigs(value: unknown): ExternalToolConfig[] | nul
     });
   }
 
-  return normalizeExternalTools(result);
+  return normalizeExternalTools(result, platform);
 }
 
 function sanitizePreferredExternalToolId(
   value: unknown,
   tools: ExternalToolConfig[] | null,
   role: "editor" | "diff",
+  platform: DesktopPlatform = DEFAULT_DESKTOP_PLATFORM,
 ): string | null {
   if (!tools || tools.length === 0 || typeof value !== "string" || value.length === 0) {
     return null;
   }
-  const enabledTools = getEnabledExternalTools(role, tools);
+  const enabledTools = getEnabledExternalTools(role, tools, platform);
   if (enabledTools.some((tool) => tool.id === value)) {
     return value;
   }

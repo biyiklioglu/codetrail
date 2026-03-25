@@ -2,6 +2,7 @@ import type { MessageCategory } from "@codetrail/core/browser";
 import { type KeyboardEvent, type MouseEvent, type Ref, memo, useMemo } from "react";
 
 import { copyTextToClipboard } from "../../lib/clipboard";
+import { useShortcutRegistry } from "../../lib/shortcutRegistry";
 import { compactPath, formatDate, prettyCategory } from "../../lib/viewUtils";
 
 import { MessageContent } from "./MessageContent";
@@ -48,6 +49,7 @@ function MessageCardComponent({
   onPreservePaneFocus,
   cardRef,
 }: MessageCardProps) {
+  const shortcuts = useShortcutRegistry();
   const parsedToolPayload = useMemo(
     () => parseMessageToolPayload(message.category, message.content),
     [message.category, message.content],
@@ -72,7 +74,7 @@ function MessageCardComponent({
   const toggleCategoryExpanded = () => onToggleCategoryExpanded?.(message.category);
 
   const handleExpansionToggleClick = (event: MouseEvent<HTMLElement>) => {
-    if (event.metaKey && onToggleCategoryExpanded) {
+    if (shortcuts.matches.isCategoryExpansionClick(event) && onToggleCategoryExpanded) {
       toggleCategoryExpanded();
       onPreservePaneFocus?.();
       return;

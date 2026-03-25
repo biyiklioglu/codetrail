@@ -13,6 +13,7 @@ import {
 describe("codetrailClient", () => {
   it("prefers provider value over window fallback", async () => {
     const providedClient: CodetrailClient = {
+      platform: "darwin",
       invoke: vi.fn(async () => ({ ok: true }) as never),
       onHistoryExportProgress: vi.fn(() => () => undefined),
       onAppCommand: vi.fn(() => () => undefined),
@@ -30,6 +31,7 @@ describe("codetrailClient", () => {
     Object.defineProperty(window, "codetrail", {
       configurable: true,
       get: () => ({
+        platform: "darwin",
         invoke: vi.fn(async () => ({ ok: true }) as never),
         onHistoryExportProgress: vi.fn(() => () => undefined),
         onAppCommand: vi.fn(() => () => undefined),

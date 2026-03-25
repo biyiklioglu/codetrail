@@ -3,9 +3,14 @@ import { createContext, useContext, useRef } from "react";
 import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core/browser";
 
 import type { AppCommand } from "../../shared/appCommands";
+import {
+  type DesktopPlatform,
+  normalizeDesktopPlatform,
+} from "../../shared/desktopPlatform";
 import type { HistoryExportProgressPayload } from "../../shared/historyExport";
 
 export type CodetrailClient = {
+  platform: DesktopPlatform;
   invoke<C extends IpcChannel>(channel: C, payload: IpcRequestInput<C>): Promise<IpcResponse<C>>;
   onHistoryExportProgress(listener: (payload: HistoryExportProgressPayload) => void): () => void;
   onAppCommand(listener: (command: AppCommand) => void): () => void;
@@ -15,6 +20,7 @@ const MISSING_PRELOAD_ERROR =
   "Codetrail preload bridge is unavailable. Ensure the preload script exposed window.codetrail.";
 
 const MISSING_CLIENT: CodetrailClient = {
+  platform: "darwin",
   invoke: async () => {
     throw new Error(MISSING_PRELOAD_ERROR);
   },
@@ -26,6 +32,8 @@ function isCodetrailClient(value: unknown): value is CodetrailClient {
   return (
     typeof value === "object" &&
     value !== null &&
+    "platform" in value &&
+    typeof (value as { platform?: unknown }).platform === "string" &&
     "invoke" in value &&
     typeof (value as { invoke?: unknown }).invoke === "function" &&
     "onHistoryExportProgress" in value &&
@@ -77,6 +85,10 @@ export function useCodetrailClient(): CodetrailClient {
 
 export function getCodetrailClient(): CodetrailClient {
   return getDefaultClient();
+}
+
+export function useDesktopPlatform(): DesktopPlatform {
+  return useCodetrailClient().platform;
 }
 
 export function isMissingCodetrailClient(client: CodetrailClient): boolean {

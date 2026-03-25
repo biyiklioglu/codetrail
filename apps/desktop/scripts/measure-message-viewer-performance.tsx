@@ -25,6 +25,7 @@ Object.assign(globalThis, {
 });
 
 window.codetrail = {
+  platform: "darwin",
   invoke: async <C extends IpcChannel>(
     channel: C,
     _payload: IpcRequestInput<C>,

@@ -71,6 +71,7 @@ vi.mock("../../lib/pathActions", () => ({
 
 vi.mock("../../lib/codetrailClient", () => ({
   getCodetrailClient: () => ({
+    platform: "darwin",
     invoke: vi.fn(async (channel: string) => {
       if (channel === "ui:getPaneState") {
         return paneStateMock;

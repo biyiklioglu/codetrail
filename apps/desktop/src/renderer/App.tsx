@@ -21,7 +21,6 @@ import {
   ADVANCED_SYNTAX_ITEMS,
   COMMON_SYNTAX_ITEMS,
   PROVIDERS,
-  SHORTCUT_ITEMS,
 } from "./app/constants";
 import type { MainView, PaneStateSnapshot, WatchStatsResponse } from "./app/types";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -47,6 +46,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useReconcileProviderSelection } from "./hooks/useReconcileProviderSelection";
 import { useCodetrailClient } from "./lib/codetrailClient";
 import { findSessionSummaryById } from "./lib/historySessionLookup";
+import { useShortcutRegistry } from "./lib/shortcutRegistry";
 import { toErrorMessage } from "./lib/viewUtils";
 import { ViewerExternalAppsProvider } from "./lib/viewerExternalAppsContext";
 
@@ -140,6 +140,7 @@ export function App({
     ),
   );
 
+  const shortcuts = useShortcutRegistry();
   const isHistoryLayout = mainView === "history" && !focusMode;
   const searchMode: SearchMode = advancedSearchEnabled ? "advanced" : "simple";
   const logError = useCallback((context: string, error: unknown) => {
@@ -946,8 +947,8 @@ export function App({
             />
           ) : mainView === "help" ? (
             <section className="pane content-pane">
-              <ShortcutsDialog
-                shortcutItems={[...SHORTCUT_ITEMS]}
+                <ShortcutsDialog
+                shortcutItems={[...shortcuts.shortcutItems]}
                 commonSyntaxItems={[...COMMON_SYNTAX_ITEMS]}
                 advancedSyntaxItems={[...ADVANCED_SYNTAX_ITEMS]}
               />

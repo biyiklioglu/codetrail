@@ -2,11 +2,13 @@ import type { MessageCategory } from "@codetrail/core/browser";
 import { type RefObject, useEffect, useRef } from "react";
 
 import type { MainView } from "../app/types";
+import { type ShortcutRegistry, useShortcutRegistry } from "../lib/shortcutRegistry";
 
 type HistoryPane = "project" | "session" | "message";
 type ShortcutArgs = Parameters<typeof useKeyboardShortcuts>[0];
 type MessagePageOptions = { preserveFocus?: boolean };
 type ShortcutContext = ShortcutArgs & {
+  shortcuts: ShortcutRegistry;
   event: KeyboardEvent;
   shortcutTarget: HTMLElement | null;
   focusedPane: HistoryPane | null;
@@ -76,6 +78,7 @@ export function useKeyboardShortcuts(args: {
   triggerIncrementalRefresh: () => void;
   togglePeriodicRefresh: () => void;
 }): void {
+  const shortcuts = useShortcutRegistry();
   const latestArgs = useRef(args);
 
   useEffect(() => {
@@ -94,7 +97,7 @@ export function useKeyboardShortcuts(args: {
               message: args.messageListRef.current,
             })
           : null;
-      const command = event.metaKey;
+      const command = shortcuts.matches.isPrimaryModifierPressed(event);
       const shift = event.shiftKey;
       const key = event.key.toLowerCase();
       const code = event.code;
@@ -102,6 +105,7 @@ export function useKeyboardShortcuts(args: {
         args.mainView === "history" && !shift && !isEditableTarget(shortcutTarget);
       const context: ShortcutContext = {
         ...args,
+        shortcuts,
         event,
         shortcutTarget,
         focusedPane,
@@ -147,7 +151,7 @@ export function useKeyboardShortcuts(args: {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, []);
+  }, [shortcuts]);
 }
 
 type ShortcutHandler = (context: ShortcutContext) => boolean;
@@ -389,9 +393,8 @@ function handleHistoryNavigationShortcut(context: ShortcutContext): boolean {
   }
   if (historySearchInputTarget) {
     if (
-      context.event.metaKey &&
+      context.shortcuts.matches.isPrimaryModifierPressed(context.event) &&
       !context.event.altKey &&
-      !context.event.ctrlKey &&
       !context.shift &&
       context.event.key === "ArrowUp"
     ) {
@@ -400,9 +403,8 @@ function handleHistoryNavigationShortcut(context: ShortcutContext): boolean {
       return true;
     }
     if (
-      context.event.metaKey &&
+      context.shortcuts.matches.isPrimaryModifierPressed(context.event) &&
       !context.event.altKey &&
-      !context.event.ctrlKey &&
       !context.shift &&
       context.event.key === "ArrowDown"
     ) {
@@ -444,33 +446,21 @@ function handleHistoryNavigationShortcut(context: ShortcutContext): boolean {
     }
     return true;
   }
-  if (
-    context.event.metaKey &&
-    !context.event.ctrlKey &&
-    !context.event.altKey &&
-    context.shift &&
-    context.event.key === "ArrowUp"
-  ) {
+  const isPrimaryModifier = context.shortcuts.matches.isPrimaryModifierPressed(context.event);
+  if (context.shortcuts.matches.isPageTraversalShortcut(context.event, "up")) {
     context.event.preventDefault();
     pageUp();
     return true;
   }
-  if (
-    context.event.metaKey &&
-    !context.event.ctrlKey &&
-    !context.event.altKey &&
-    context.shift &&
-    context.event.key === "ArrowDown"
-  ) {
+  if (context.shortcuts.matches.isPageTraversalShortcut(context.event, "down")) {
     context.event.preventDefault();
     pageDown();
     return true;
   }
   if (context.mainView === "search") {
     if (
-      context.event.metaKey &&
+      isPrimaryModifier &&
       !context.event.altKey &&
-      !context.event.ctrlKey &&
       !context.shift &&
       context.event.key === "ArrowUp"
     ) {
@@ -479,9 +469,8 @@ function handleHistoryNavigationShortcut(context: ShortcutContext): boolean {
       return true;
     }
     if (
-      context.event.metaKey &&
+      isPrimaryModifier &&
       !context.event.altKey &&
-      !context.event.ctrlKey &&
       !context.shift &&
       context.event.key === "ArrowDown"
     ) {
@@ -494,7 +483,7 @@ function handleHistoryNavigationShortcut(context: ShortcutContext): boolean {
   if (!context.isHistoryArrowNavigation) {
     return false;
   }
-  if (context.event.metaKey && !context.event.altKey && !context.event.ctrlKey) {
+  if (isPrimaryModifier && !context.event.altKey && !context.shift) {
     if (context.event.key === "ArrowUp") {
       context.event.preventDefault();
       context.focusPreviousHistoryMessage();
@@ -518,17 +507,31 @@ function handleHistoryNavigationShortcut(context: ShortcutContext): boolean {
       return true;
     }
   }
-  if (context.event.ctrlKey && !context.event.metaKey && !context.event.altKey) {
-    if (context.event.key === "ArrowUp") {
-      context.event.preventDefault();
-      context.selectPreviousProject();
-      return true;
-    }
-    if (context.event.key === "ArrowDown") {
-      context.event.preventDefault();
-      context.selectNextProject();
-      return true;
-    }
+  if (
+    context.shortcuts.matches.isProjectNavigationShortcut(context.event) &&
+    context.event.key === "ArrowUp"
+  ) {
+    context.event.preventDefault();
+    context.selectPreviousProject();
+    return true;
+  }
+  if (
+    context.shortcuts.matches.isProjectNavigationShortcut(context.event) &&
+    context.event.key === "ArrowDown"
+  ) {
+    context.event.preventDefault();
+    context.selectNextProject();
+    return true;
+  }
+  if (context.shortcuts.matches.isPageTraversalShortcut(context.event, "up")) {
+    context.event.preventDefault();
+    pageUp();
+    return true;
+  }
+  if (context.shortcuts.matches.isPageTraversalShortcut(context.event, "down")) {
+    context.event.preventDefault();
+    pageDown();
+    return true;
   }
   return false;
 }

@@ -1,6 +1,6 @@
 # Code Trail
 
-A local desktop app for browsing, searching, and revisiting your AI coding session history across **Claude**, **Codex**, **Gemini**, **Cursor**, and **VS Code Copilot** — all from one interface.
+A local desktop app for browsing, searching, and revisiting your AI coding session history across **Claude**, **Codex**, **Gemini**, **Cursor**, and **VS Code Copilot** from one interface.
 
 Code Trail discovers session files from each provider's local directory, parses them into a unified format, indexes everything into SQLite, and gives you fast full-text search with filtering by provider, project, and message type.
 
@@ -8,39 +8,68 @@ Code Trail discovers session files from each provider's local directory, parses 
 
 ## Features
 
-- **Multi-provider support** — Claude Code, Codex CLI, Gemini CLI, Cursor, and VS Code Copilot sessions in one place.
-- **Full-text search** — BM25-ranked search across all messages with highlighted snippets.
-- **Project and session browser** — Navigate sessions grouped by project, with deep links to individual messages.
-- **Category filters** — Filter by User, Assistant, Tool Use, Write (edits), Tool Result, Thinking, and System messages.
-- **Incremental indexing** — Only re-indexes files that changed (based on size + mtime).
-
-## Prerequisites
-
-- **[Bun](https://bun.sh/)** v1.1+ — used as the package manager and script runner.
-- **Node.js** v20+ — required by Electron and native modules.
-- **macOS, Linux, or Windows** — macOS is the primary development target. The `.app` packaging script is macOS-only, but the dev workflow works on all platforms.
-
-## Getting Started
-
-```bash
-# Clone the repository
-git clone https://github.com/anthropics/codetrail.git
-cd codetrail
-
-# Install dependencies
-bun install
-
-# Build and launch the desktop app
-bun run desktop:start
-```
-
-`desktop:start` runs the build step automatically before launching Electron.
+- **Multi-provider support** - Claude Code, Codex CLI, Gemini CLI, Cursor, and VS Code Copilot sessions in one place.
+- **Full-text search** - BM25-ranked search across all messages with highlighted snippets.
+- **Project and session browser** - Navigate sessions grouped by project, with deep links to individual messages.
+- **Category filters** - Filter by User, Assistant, Tool Use, Write (edits), Tool Result, Thinking, and System messages.
+- **Incremental indexing** - Only re-indexes files that changed based on size and mtime.
 
 ## Development
 
+### Prerequisites
+
+- **[Bun](https://bun.sh/)** v1.1+ for package management and scripts
+- **Node.js** v20 or v22 LTS
+- **macOS, Linux, or Windows** for day-to-day development
+
+### Mac
+
+Prerequisites:
+
+- Install Xcode Command Line Tools if needed:
+
+```bash
+xcode-select --install
+```
+
+Setup and run:
+
+```bash
+git clone https://github.com/mdemirhan/codetrail.git
+cd codetrail
+bun install
+bun run desktop:start
+```
+
+### Windows
+
+Use **Node.js 22 LTS** on a clean machine for the smoothest native-module setup.
+
+Prerequisites:
+
+- **Python 3**
+- A supported Windows C++ toolchain:
+  - **Visual Studio 2026** with the **Desktop development with C++** workload when the install is using `node-gyp` 12+
+  - or **Visual Studio Build Tools 2022** with the **Desktop development with C++** workload
+
+Setup and run:
+
+```powershell
+git clone https://github.com/mdemirhan/codetrail.git
+cd codetrail
+bun install
+bun run desktop:start
+```
+
+If `better-sqlite3` fails during install or Electron reports a native ABI mismatch, run:
+
+```powershell
+bun run --cwd apps/desktop fix:native
+```
+
 ### Project Structure
 
-```
+```text
 codetrail/
   packages/core/       Core library: discovery, parsing, indexing, search
   apps/desktop/        Electron app: main process, preload, React renderer
@@ -59,14 +88,17 @@ bun run desktop:start
 bun run ci
 
 # Run individual checks
-bun run lint          # Biome lint
-bun run format        # Biome format (auto-fix)
-bun run typecheck     # TypeScript strict check
-bun run test          # Vitest unit tests
-bun run test:watch    # Vitest in watch mode
+bun run lint
+bun run format
+bun run typecheck
+bun run test
+bun run test:watch
 
 # Build desktop app without launching
 bun run desktop:build
+
+# Check platform boundary rules
+bun run check:platform-boundaries
 ```
 
 ### Environment Variables
@@ -75,49 +107,62 @@ bun run desktop:build
 |---|---|
 | `CODETRAIL_OPEN_DEVTOOLS=1` | Opens Chrome DevTools on launch |
 | `CODETRAIL_DEBUG_RENDERER=1` | Logs renderer lifecycle events to the terminal |
-| `CODETRAIL_RENDERER_URL=http://...` | Loads the renderer from a URL instead of the local build (useful for hot-reload dev servers) |
+| `CODETRAIL_RENDERER_URL=http://...` | Loads the renderer from a URL instead of the local build |
 
-### Native Module Rebuilding
+## Build Release Binaries
 
-Code Trail uses `better-sqlite3`, which requires a native binary matching the Electron ABI. The build script handles this automatically, but if you see ABI mismatch errors:
+### Install
+
+Prebuilt binaries are published on [GitHub Releases](https://github.com/mdemirhan/codetrail/releases).
+
+- **macOS**: download the macOS zip from Releases, extract it, and open `Code Trail.app`. Because builds are ad-hoc signed and not notarized, Gatekeeper may require Finder `Open` or:
 
 ```bash
-cd apps/desktop
-bun run fix:native
+xattr -dr com.apple.quarantine "/Applications/Code Trail.app"
 ```
 
-This verifies the current binary and rebuilds it if needed.
+- **Windows**: download either `CodeTrailSetup.exe` or the portable `.zip` from Releases.
 
-## Building a macOS App
+### Mac
 
-To produce a standalone `.app` bundle and `.zip` archive:
+Build your own macOS release artifacts on macOS:
 
 ```bash
-# Build for your current architecture (auto-detected)
+# Current architecture
 bun run desktop:make:mac
 
-# Build for a specific architecture
-bun run desktop:make:mac:arm64   # Apple Silicon
-bun run desktop:make:mac:x64     # Intel
+# Specific architecture
+bun run desktop:make:mac:arm64
+bun run desktop:make:mac:x64
 ```
 
-The output is written to `apps/desktop/out/`. The script:
+Artifacts are written to `apps/desktop/out/`.
+
+The macOS release flow:
 
 1. Builds the TypeScript bundles
-2. Verifies/rebuilds the native SQLite binary
+2. Verifies and rebuilds native Electron modules when needed
 3. Materializes dependencies for Electron Forge
 4. Generates the `.icns` icon
-5. Packages the `.app` bundle, re-signs the final bundle ad-hoc, verifies it, writes an `INSTALL.txt`, and compresses everything into a `.zip`
+5. Produces a `.app` bundle plus a `.zip`
 
-> The macOS packaging script requires macOS. It uses `ditto` and `PlistBuddy` which are macOS-only tools.
->
-> The current release flow does **not** use Apple Developer ID signing or notarization. That means downloaded builds can still be blocked by Gatekeeper and may require Finder `Open` or:
->
-> ```bash
-> xattr -dr com.apple.quarantine "/Applications/Code Trail.app"
-> ```
+### Windows
 
-For end-user install steps and source-build instructions, see [docs/MACOS_DISTRIBUTION.md](/Users/tcmudemirhan/src/tsproj/codetrail/docs/MACOS_DISTRIBUTION.md).
+Build your own Windows release artifacts on Windows:
+
+```powershell
+bun run desktop:make:win
+```
+
+Artifacts are written to `apps/desktop/out/`.
+
+The Windows release flow:
+
+1. Builds the TypeScript bundles
+2. Verifies and rebuilds native Electron modules when needed
+3. Generates the `.ico` icon
+4. Materializes runtime dependencies for Electron Forge
+5. Produces `CodeTrailSetup.exe` and a portable `.zip`
 
 ## How It Works
 
@@ -131,15 +176,15 @@ Code Trail reads session files from the default provider directories:
 | Cursor | `~/.cursor/projects/` |
 | VS Code Copilot | `.../Code/User/workspaceStorage/*/chatSessions/` |
 
-Each session file is parsed into a canonical message format, indexed into a local SQLite database with FTS5 for full-text search, and made available through the UI. The database and settings are stored in the Electron `userData` directory (typically `~/Library/Application Support/Code Trail/` on macOS).
+Each session file is parsed into a canonical message format, indexed into a local SQLite database with FTS5 for full-text search, and made available through the UI. The database and settings are stored in the Electron `userData` directory, typically `~/Library/Application Support/Code Trail/` on macOS or `%APPDATA%\Code Trail\` on Windows.
 
 No data leaves your machine. Everything is local.
 
 ## Tech Stack
 
-- **Electron 35** + **React 19** + **TypeScript** (strict mode)
-- **SQLite** via `better-sqlite3` with FTS5 full-text search and WAL mode
-- **Zod** for runtime schema validation on all IPC contracts
+- **Electron 35** + **React 19** + **TypeScript**
+- **SQLite** via `better-sqlite3` with FTS5 and WAL mode
+- **Zod** for runtime schema validation on IPC contracts
 - **Bun** workspaces for monorepo management
 - **Biome** for linting and formatting
 - **Vitest** for unit and integration tests

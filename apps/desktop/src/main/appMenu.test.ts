@@ -22,6 +22,7 @@ describe("buildAppMenuTemplate", () => {
   it("replaces the default View menu with app-owned actions", () => {
     const template = buildAppMenuTemplate({
       appName: "Code Trail",
+      platform: "darwin",
       isDevelopment: false,
       dispatchAppCommand: vi.fn(),
       reloadFocusedWindow: vi.fn(),
@@ -52,6 +53,7 @@ describe("buildAppMenuTemplate", () => {
   it("shows developer-only reload tooling outside the View menu", () => {
     const template = buildAppMenuTemplate({
       appName: "Code Trail",
+      platform: "darwin",
       isDevelopment: true,
       dispatchAppCommand: vi.fn(),
       reloadFocusedWindow: vi.fn(),
@@ -79,6 +81,7 @@ describe("buildAppMenuTemplate", () => {
   it("shows accelerators for app-owned items without registering duplicate native handlers", () => {
     const template = buildAppMenuTemplate({
       appName: "Code Trail",
+      platform: "darwin",
       isDevelopment: false,
       dispatchAppCommand: vi.fn(),
       reloadFocusedWindow: vi.fn(),
@@ -94,5 +97,35 @@ describe("buildAppMenuTemplate", () => {
       accelerator: "CommandOrControl+R",
       registerAccelerator: false,
     });
+  });
+
+  it("uses a standard File menu on Windows without macOS-only roles", () => {
+    const template = buildAppMenuTemplate({
+      appName: "Code Trail",
+      platform: "win32",
+      isDevelopment: false,
+      dispatchAppCommand: vi.fn(),
+      reloadFocusedWindow: vi.fn(),
+      forceReloadFocusedWindow: vi.fn(),
+      toggleFocusedWindowDevTools: vi.fn(),
+    });
+
+    expect(getTopLevelMenu(template, "Code Trail")).toBeUndefined();
+    const fileMenu = getTopLevelMenu(template, "File");
+    expect(fileMenu).toBeDefined();
+    const fileItems = getSubmenuItems(fileMenu).map((item) =>
+      "label" in item ? item.label : item.role,
+    );
+    expect(fileItems).toContain("Settings…");
+    expect(fileItems).not.toContain("services");
+    expect(fileItems).not.toContain("hideOthers");
+
+    const windowMenu = getTopLevelMenu(template, { role: "windowMenu" });
+    const windowItems = getSubmenuItems(windowMenu).map((item) =>
+      "label" in item ? item.label : item.role,
+    );
+    expect(windowItems).toContain("minimize");
+    expect(windowItems).toContain("close");
+    expect(windowItems).not.toContain("front");
   });
 });

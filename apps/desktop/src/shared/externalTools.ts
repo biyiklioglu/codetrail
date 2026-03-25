@@ -1,5 +1,7 @@
 import { KNOWN_EXTERNAL_APP_VALUES, type KnownExternalAppId } from "@codetrail/core/browser";
 
+import { type DesktopPlatform, isMacPlatform, isWindowsPlatform } from "./desktopPlatform";
+
 export { KNOWN_EXTERNAL_APP_VALUES };
 export type { KnownExternalAppId };
 export type ExternalToolId = string;
@@ -51,6 +53,25 @@ export const EXTERNAL_APP_OPTIONS = [
 
 const KNOWN_TOOL_PREFIX = "tool:";
 const CUSTOM_TOOL_PREFIX = "custom:";
+
+export function isKnownExternalAppSupported(
+  platform: DesktopPlatform,
+  appId: KnownExternalAppId,
+): boolean {
+  if (isMacPlatform(platform)) {
+    return true;
+  }
+  if (isWindowsPlatform(platform)) {
+    return appId !== "text_edit" && appId !== "neovim";
+  }
+  return appId !== "text_edit";
+}
+
+export function getExternalAppOptions(platform: DesktopPlatform) {
+  return EXTERNAL_APP_OPTIONS.filter((option) =>
+    isKnownExternalAppSupported(platform, option.value),
+  );
+}
 
 export function getExternalAppLabel(appId: KnownExternalAppId): string {
   return EXTERNAL_APP_OPTIONS.find((option) => option.value === appId)?.label ?? appId;
@@ -154,15 +175,16 @@ export function buildRoleToolFromCustomTool(
   };
 }
 
-export function createDefaultExternalTools(): ExternalToolConfig[] {
-  return KNOWN_EXTERNAL_APP_VALUES.map((appId) => createKnownExternalTool(appId));
+export function createDefaultExternalTools(platform: DesktopPlatform = "darwin"): ExternalToolConfig[] {
+  return getExternalAppOptions(platform).map((option) => createKnownExternalTool(option.value));
 }
 
 export function normalizeExternalTools(
   tools: ExternalToolConfig[] | null | undefined,
+  platform: DesktopPlatform = "darwin",
 ): ExternalToolConfig[] {
   const defaultKnownTools = new Map(
-    createDefaultExternalTools().map(
+    createDefaultExternalTools(platform).map(
       (tool) => [tool.id, tool] satisfies [string, ExternalToolConfig],
     ),
   );
@@ -173,6 +195,9 @@ export function normalizeExternalTools(
 
   for (const tool of tools ?? []) {
     if (tool.kind === "known" && tool.appId) {
+      if (!isKnownExternalAppSupported(platform, tool.appId)) {
+        continue;
+      }
       const knownId = createKnownToolId(tool.appId);
       if (seenIds.has(knownId)) {
         continue;
@@ -209,7 +234,7 @@ export function normalizeExternalTools(
     ...orderedKnownToolIds
       .map((toolId) => normalizedKnownTools.get(toolId))
       .filter((tool): tool is ExternalToolConfig => tool !== undefined),
-    ...KNOWN_EXTERNAL_APP_VALUES.map((appId) => createKnownToolId(appId))
+    ...getExternalAppOptions(platform).map((option) => createKnownToolId(option.value))
       .filter((toolId) => !orderedKnownToolIds.includes(toolId))
       .map((toolId) => normalizedKnownTools.get(toolId) ?? defaultKnownTools.get(toolId))
       .filter((tool): tool is ExternalToolConfig => tool !== undefined),
@@ -240,8 +265,9 @@ export function buildRoleToolFromCatalog(
 export function buildRoleToolsFromCatalog(
   role: ExternalToolRole,
   tools: ExternalToolConfig[] | null | undefined,
+  platform: DesktopPlatform = "darwin",
 ): ExternalRoleToolConfig[] {
-  return normalizeExternalTools(tools)
+  return normalizeExternalTools(tools, platform)
     .map((tool) => buildRoleToolFromCatalog(tool, role))
     .filter((tool): tool is ExternalRoleToolConfig => tool !== null);
 }
@@ -249,8 +275,9 @@ export function buildRoleToolsFromCatalog(
 export function getEnabledExternalTools(
   role: ExternalToolRole,
   tools: ExternalToolConfig[] | null | undefined,
+  platform: DesktopPlatform = "darwin",
 ): ExternalToolConfig[] {
-  return normalizeExternalTools(tools).filter((tool) =>
+  return normalizeExternalTools(tools, platform).filter((tool) =>
     role === "editor"
       ? tool.enabledForEditor
       : tool.enabledForDiff && (tool.appId === null || supportsKnownToolRole(tool.appId, role)),
@@ -260,19 +287,21 @@ export function getEnabledExternalTools(
 export function getExternalToolById(
   tools: ExternalToolConfig[] | null | undefined,
   id: string | null | undefined,
+  platform: DesktopPlatform = "darwin",
 ): ExternalToolConfig | null {
   if (!id) {
     return null;
   }
-  return normalizeExternalTools(tools).find((tool) => tool.id === id) ?? null;
+  return normalizeExternalTools(tools, platform).find((tool) => tool.id === id) ?? null;
 }
 
 export function getPreferredExternalToolId(
   tools: ExternalToolConfig[] | null | undefined,
   preferredId: string | null | undefined,
   role: ExternalToolRole,
+  platform: DesktopPlatform = "darwin",
 ): ExternalToolId {
-  const enabledTools = getEnabledExternalTools(role, tools);
+  const enabledTools = getEnabledExternalTools(role, tools, platform);
   if (enabledTools.some((tool) => tool.id === preferredId)) {
     return preferredId ?? "";
   }

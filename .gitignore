@@ -3,6 +3,7 @@ bun.lock
 .DS_Store
 .vscode/
 .idea/
+.claude/
 coverage
 .vitest
 playwright-report

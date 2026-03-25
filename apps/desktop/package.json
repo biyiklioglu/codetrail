@@ -6,9 +6,10 @@
   "main": "dist/main/main.js",
   "scripts": {
     "build": "bun run ./scripts/build.ts",
+    "build:icons": "node ./scripts/build-app-icons.mjs",
     "bench:message-viewer": "bun ./scripts/measure-message-viewer-performance.tsx",
     "verify:native": "ELECTRON_RUN_AS_NODE=1 electron -e \"const Database=require('better-sqlite3'); const db=new Database(':memory:'); db.prepare('select 1').get(); db.close(); require('@parcel/watcher'); console.log('native modules ABI OK')\"",
-    "rebuild:native": "HOME=./.home npm_config_devdir=./.electron-gyp electron-rebuild -f -w better-sqlite3,@parcel/watcher",
+    "rebuild:native": "bun ./scripts/rebuild-native.ts",
     "fix:native": "bun run verify:native || bun run rebuild:native",
     "prestart": "bun run build && bun run fix:native",
     "prestart:compare": "bun run prestart",
@@ -23,7 +24,8 @@
     "dev:compare": "electron . --instance=compare",
     "make:mac": "./scripts/make-macos-app.sh",
     "make:mac:x64": "./scripts/make-macos-app.sh x64",
-    "make:mac:arm64": "./scripts/make-macos-app.sh arm64"
+    "make:mac:arm64": "./scripts/make-macos-app.sh arm64",
+    "make:win": "node ./scripts/make-windows-app.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
@@ -41,6 +43,7 @@
     "@codetrail/core": "workspace:*",
     "@electron-forge/cli": "^7.8.1",
     "@electron-forge/maker-dmg": "^7.8.1",
+    "@electron-forge/maker-squirrel": "^7.8.1",
     "@electron-forge/maker-zip": "^7.8.1",
     "@electron-forge/plugin-auto-unpack-natives": "^7.8.1",
     "@electron/rebuild": "^4.0.3",

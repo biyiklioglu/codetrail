@@ -1,4 +1,5 @@
 import type { ExternalRoleToolConfig, KnownExternalAppId } from "../shared/uiPreferences";
+import type { DesktopPlatform } from "../shared/desktopPlatform";
 import {
   EDITOR_DEFINITIONS,
   type EditorDefinition,
@@ -7,6 +8,7 @@ import {
   type ToolRole,
   defaultCapabilitiesForRole,
 } from "./editorDefinitions";
+import { createEditorPlatformConfig } from "./editorPlatform";
 import { isExplicitCommandPath, isMacAppBundleCommand } from "./editorMacos";
 
 function expandUserPath(value: string): string {
@@ -16,10 +18,12 @@ function expandUserPath(value: string): string {
 export async function findCommandOnPath(
   command: string,
   runExecFile: ResolvedEditorDependencies["execFile"],
+  platform: DesktopPlatform,
 ): Promise<string | null> {
   try {
-    const locator = process.platform === "win32" ? "where" : "which";
-    const result = await runExecFile(locator, [command]);
+    const result = await runExecFile(createEditorPlatformConfig(platform).pathLocatorCommand, [
+      command,
+    ]);
     const firstLine = result.stdout
       .split(/\r?\n/)
       .map((line) => line.trim())
@@ -33,15 +37,16 @@ export async function findCommandOnPath(
 export async function resolveKnownCommandPath(
   definition: EditorDefinition,
   dependencies: ResolvedEditorDependencies,
+  platform: DesktopPlatform,
 ): Promise<string | null> {
   for (const command of definition.commands) {
-    const located = await findCommandOnPath(command, dependencies.execFile);
+    const located = await findCommandOnPath(command, dependencies.execFile, platform);
     if (located) {
       return located;
     }
   }
 
-  const knownPaths = definition.knownPaths[process.platform] ?? [];
+  const knownPaths = definition.knownPaths[platform] ?? [];
   for (const candidate of knownPaths) {
     const expanded = expandUserPath(candidate);
     try {
@@ -55,6 +60,7 @@ export async function resolveKnownCommandPath(
 export async function resolveCustomCommandPath(
   command: string,
   dependencies: ResolvedEditorDependencies,
+  platform: DesktopPlatform,
 ): Promise<string | null> {
   const trimmed = command.trim();
   if (trimmed.length === 0) {
@@ -68,17 +74,20 @@ export async function resolveCustomCommandPath(
       return null;
     }
   }
-  return findCommandOnPath(trimmed, dependencies.execFile);
+  return findCommandOnPath(trimmed, dependencies.execFile, platform);
 }
 
 export async function resolveConfiguredToolInfo(
   tool: ExternalRoleToolConfig,
   dependencies: ResolvedEditorDependencies,
   role: ToolRole,
+  platform: DesktopPlatform,
 ): Promise<EditorInfo> {
   if (tool.kind === "known" && tool.appId) {
     const definition = EDITOR_DEFINITIONS.find((candidate) => candidate.id === tool.appId) ?? null;
-    const command = definition ? await resolveKnownCommandPath(definition, dependencies) : null;
+    const command = definition
+      ? await resolveKnownCommandPath(definition, dependencies, platform)
+      : null;
     return {
       id: tool.id,
       kind: tool.kind,
@@ -92,7 +101,7 @@ export async function resolveConfiguredToolInfo(
   }
 
   const command = tool.command.trim();
-  const resolvedCommand = await resolveCustomCommandPath(command, dependencies);
+  const resolvedCommand = await resolveCustomCommandPath(command, dependencies, platform);
   return {
     id: tool.id,
     kind: tool.kind,

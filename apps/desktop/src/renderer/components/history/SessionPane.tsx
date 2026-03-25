@@ -4,7 +4,8 @@ import type { SessionSummary } from "../../app/types";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { useVirtualListWindow } from "../../hooks/useVirtualListWindow";
 import { formatCompactInteger, formatInteger } from "../../lib/numberFormatting";
-import { formatTooltip } from "../../lib/tooltipText";
+import { useShortcutRegistry } from "../../lib/shortcutRegistry";
+import { useTooltipFormatter } from "../../lib/tooltipText";
 import { deriveSessionTitle, formatDate, sessionActivityOf } from "../../lib/viewUtils";
 import {
   SIDEBAR_LIST_OVERSCAN,
@@ -69,6 +70,8 @@ export function SessionPane({
   onSelectSession: (sessionId: string) => void;
   listRef?: Ref<HTMLDivElement>;
 }) {
+  const shortcuts = useShortcutRegistry();
+  const formatTooltipLabel = useTooltipFormatter();
   const [selectedSessionElement, setSelectedSessionElement] = useState<HTMLButtonElement | null>(
     null,
   );
@@ -222,9 +225,9 @@ export function SessionPane({
             className="collapse-btn pane-collapse-btn"
             onClick={onToggleCollapsed}
             aria-label={collapsed ? "Expand Sessions pane" : "Collapse Sessions pane"}
-            title={formatTooltip(
+            title={formatTooltipLabel(
               collapsed ? "Expand Sessions" : "Collapse Sessions",
-              "Cmd+Shift+B",
+              shortcuts.actions.toggleSessionPane,
             )}
           >
             <ToolbarIcon name="chevronLeft" />
