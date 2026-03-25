@@ -118,7 +118,7 @@ async function bootRenderer(): Promise<void> {
       import("./App"),
     ]);
     applyInitialTheme(
-      initialPaneState?.theme ?? "light",
+      initialPaneState?.theme ?? "dark",
       initialPaneState?.darkShikiTheme ?? null,
       initialPaneState?.lightShikiTheme ?? null,
     );

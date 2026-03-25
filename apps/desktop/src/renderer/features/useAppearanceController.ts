@@ -64,7 +64,7 @@ export function useAppearanceController({
   logError: (context: string, error: unknown) => void;
 }) {
   const codetrail = useCodetrailClient();
-  const initialTheme = initialPaneState?.theme ?? "light";
+  const initialTheme = initialPaneState?.theme ?? "dark";
   const [theme, setThemeState] = useState<ThemeMode>(initialTheme);
   const [darkShikiTheme, setDarkShikiTheme] = useState<ShikiThemeId>(
     resolveShikiThemeForFamily("dark", initialPaneState?.darkShikiTheme),
