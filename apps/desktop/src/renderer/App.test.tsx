@@ -155,6 +155,12 @@ describe("App shell", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Investigate markdown rendering").length).toBeGreaterThan(0);
     });
+    await waitFor(() => {
+      expect(container.querySelector(".all-sessions-item.active")).toHaveTextContent(
+        "All Sessions",
+      );
+    });
+    expect(container.querySelector(".session-item:not(.all-sessions-item).active")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Open settings" }));
     await waitFor(() => {

@@ -439,24 +439,34 @@ export function useHistoryDataEffects({
       return;
     }
 
-    // Search navigation is a two-step handshake: first move to the right project, then once that
-    // project's sessions are loaded, reveal the specific session/message target.
+    // Search navigation is a two-step handshake: first move to the right project, then reveal the
+    // target in either project-wide or session-scoped history once the required data is available.
     if (pendingSearchNavigation.projectId !== selectedProjectId) {
-      setHistorySelection((selectionState) =>
-        setHistorySelectionProjectId(selectionState, pendingSearchNavigation.projectId),
-      );
+      if (pendingSearchNavigation.targetMode === "project_all") {
+        setHistorySelection(
+          createHistorySelection("project_all", pendingSearchNavigation.projectId),
+        );
+      } else {
+        setHistorySelection((selectionState) =>
+          setHistorySelectionProjectId(selectionState, pendingSearchNavigation.projectId),
+        );
+      }
       return;
     }
 
-    if (!sortedSessions.some((session) => session.id === pendingSearchNavigation.sessionId)) {
-      return;
-    }
+    if (pendingSearchNavigation.targetMode === "session") {
+      if (!sortedSessions.some((session) => session.id === pendingSearchNavigation.sessionId)) {
+        return;
+      }
 
-    setHistorySelection({
-      mode: "session",
-      projectId: pendingSearchNavigation.projectId,
-      sessionId: pendingSearchNavigation.sessionId,
-    });
+      setHistorySelection({
+        mode: "session",
+        projectId: pendingSearchNavigation.projectId,
+        sessionId: pendingSearchNavigation.sessionId,
+      });
+    } else {
+      setHistorySelection(createHistorySelection("project_all", pendingSearchNavigation.projectId));
+    }
     setSessionQueryInput("");
     setHistoryCategories([...pendingSearchNavigation.historyCategories]);
     setSessionPage(0);

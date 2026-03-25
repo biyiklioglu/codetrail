@@ -24,6 +24,17 @@ function countCalls(
   }).length;
 }
 
+function countProjectHistoryLoads(
+  client: ReturnType<typeof createAppClient>,
+  projectId: string,
+): number {
+  return (
+    countCalls(client, "sessions:list", (payload) => payload.projectId === projectId) +
+    countCalls(client, "bookmarks:listProject", (payload) => payload.projectId === projectId) +
+    countCalls(client, "projects:getCombinedDetail", (payload) => payload.projectId === projectId)
+  );
+}
+
 async function advanceTimers(ms: number) {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
@@ -165,23 +176,17 @@ describe("App history selection debounce", () => {
 
     fireEvent.keyDown(window, { key: "ArrowDown" });
 
-    expect(countCalls(client, "sessions:list")).toBe(0);
-    expect(countCalls(client, "bookmarks:listProject")).toBe(0);
-    expect(countCalls(client, "projects:getCombinedDetail")).toBe(0);
+    expect(countProjectHistoryLoads(client, "project_2")).toBe(0);
 
     await advanceTimers(99);
 
-    expect(countCalls(client, "sessions:list")).toBe(0);
-    expect(countCalls(client, "bookmarks:listProject")).toBe(0);
-    expect(countCalls(client, "projects:getCombinedDetail")).toBe(0);
+    expect(countProjectHistoryLoads(client, "project_2")).toBe(0);
 
     fireEvent.keyUp(window, { key: "ArrowDown" });
 
     await advanceTimers(99);
 
-    expect(countCalls(client, "sessions:list")).toBe(0);
-    expect(countCalls(client, "bookmarks:listProject")).toBe(0);
-    expect(countCalls(client, "projects:getCombinedDetail")).toBe(0);
+    expect(countProjectHistoryLoads(client, "project_2")).toBe(0);
 
     await advanceTimers(1);
 
@@ -316,17 +321,23 @@ describe("App history selection debounce", () => {
 
     fireEvent.keyDown(window, { key: "ArrowDown" });
 
-    expect(countCalls(client, "sessions:getDetail")).toBe(0);
+    expect(
+      countCalls(client, "sessions:getDetail", (payload) => payload.sessionId === "session_2"),
+    ).toBe(0);
 
     await advanceTimers(40);
 
-    expect(countCalls(client, "sessions:getDetail")).toBe(0);
+    expect(
+      countCalls(client, "sessions:getDetail", (payload) => payload.sessionId === "session_2"),
+    ).toBe(0);
 
     fireEvent.keyUp(window, { key: "ArrowDown" });
 
     await advanceTimers(34);
 
-    expect(countCalls(client, "sessions:getDetail")).toBe(0);
+    expect(
+      countCalls(client, "sessions:getDetail", (payload) => payload.sessionId === "session_2"),
+    ).toBe(0);
 
     await advanceTimers(1);
 
@@ -498,9 +509,8 @@ describe("App history selection debounce", () => {
 
     await advanceTimers(50);
 
-    expect(countCalls(client, "sessions:list")).toBe(0);
-    expect(countCalls(client, "bookmarks:listProject")).toBe(0);
-    expect(countCalls(client, "projects:getCombinedDetail")).toBe(0);
+    expect(countProjectHistoryLoads(client, "project_2")).toBe(0);
+    expect(countProjectHistoryLoads(client, "project_3")).toBe(0);
 
     await act(async () => {
       fireEvent.keyDown(projectList, { key: "ArrowDown" });
@@ -516,9 +526,8 @@ describe("App history selection debounce", () => {
 
     await advanceTimers(50);
 
-    expect(countCalls(client, "sessions:list")).toBe(0);
-    expect(countCalls(client, "bookmarks:listProject")).toBe(0);
-    expect(countCalls(client, "projects:getCombinedDetail")).toBe(0);
+    expect(countProjectHistoryLoads(client, "project_2")).toBe(0);
+    expect(countProjectHistoryLoads(client, "project_3")).toBe(0);
 
     await act(async () => {
       fireEvent.keyDown(projectList, { key: "ArrowDown" });
@@ -532,15 +541,13 @@ describe("App history selection debounce", () => {
 
     await advanceTimers(99);
 
-    expect(countCalls(client, "sessions:list")).toBe(0);
-    expect(countCalls(client, "bookmarks:listProject")).toBe(0);
-    expect(countCalls(client, "projects:getCombinedDetail")).toBe(0);
+    expect(countProjectHistoryLoads(client, "project_2")).toBe(0);
+    expect(countProjectHistoryLoads(client, "project_3")).toBe(0);
 
     await advanceTimers(1);
 
-    expect(countCalls(client, "sessions:list")).toBe(0);
-    expect(countCalls(client, "bookmarks:listProject")).toBe(0);
-    expect(countCalls(client, "projects:getCombinedDetail")).toBe(0);
+    expect(countProjectHistoryLoads(client, "project_2")).toBe(0);
+    expect(countProjectHistoryLoads(client, "project_3")).toBe(0);
     expect(screen.getByText("Project one message")).toBeInTheDocument();
   });
 });

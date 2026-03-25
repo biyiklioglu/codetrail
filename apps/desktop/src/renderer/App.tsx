@@ -932,6 +932,7 @@ export function App({
               setAdvancedSearchEnabled={setAdvancedSearchEnabled}
               onSelectResult={(result) => {
                 history.navigateFromSearchResult({
+                  targetMode: "project_all",
                   projectId: result.projectId,
                   sessionId: result.sessionId,
                   messageId: result.messageId,

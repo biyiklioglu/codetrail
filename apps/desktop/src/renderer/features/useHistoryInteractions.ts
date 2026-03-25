@@ -352,6 +352,7 @@ export function useHistoryInteractions({
         }
         requestTreeReveal(bookmarked.projectId, bookmarked.sessionId);
         setPendingSearchNavigation({
+          targetMode: "session",
           projectId: bookmarked.projectId,
           sessionId: bookmarked.sessionId,
           messageId,
@@ -368,6 +369,7 @@ export function useHistoryInteractions({
         }
         requestTreeReveal(selectedProjectId, projectMessage.sessionId);
         setPendingSearchNavigation({
+          targetMode: "session",
           projectId: selectedProjectId,
           sessionId: projectMessage.sessionId,
           messageId,
@@ -1099,6 +1101,10 @@ export function useHistoryInteractions({
       setProjectProviders((value) => (value.length === PROVIDERS.length ? value : [...PROVIDERS]));
       setProjectQueryInput("");
       setPendingSearchNavigation(navigation);
+      if (navigation.targetMode === "project_all") {
+        setHistorySelection(createHistorySelection("project_all", navigation.projectId));
+        return;
+      }
       setHistorySelection((selectionState) =>
         setHistorySelectionProjectId(selectionState, navigation.projectId),
       );
