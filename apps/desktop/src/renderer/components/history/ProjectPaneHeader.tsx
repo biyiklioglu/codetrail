@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 
 import type { ProjectSortField, ProjectViewMode } from "../../app/types";
 import { useClickOutside } from "../../hooks/useClickOutside";
+import { formatTooltip } from "../../lib/tooltipText";
 import { ToolbarIcon } from "../ToolbarIcon";
 import {
   ProjectPaneFolderIcon,
@@ -21,21 +22,21 @@ const PROJECT_SORT_COPY: Record<
 > = {
   last_active: {
     asc: {
-      tooltip: "Oldest activity first (projects). Click to switch to newest first.",
+      tooltip: "Oldest first",
       ariaLabel: "Oldest activity first (projects). Switch to newest first",
     },
     desc: {
-      tooltip: "Newest activity first (projects). Click to switch to oldest first.",
+      tooltip: "Newest first",
       ariaLabel: "Newest activity first (projects). Switch to oldest first",
     },
   },
   name: {
     asc: {
-      tooltip: "A to Z (projects). Click to switch to Z to A.",
+      tooltip: "A to Z",
       ariaLabel: "A to Z (projects). Switch to Z to A",
     },
     desc: {
-      tooltip: "Z to A (projects). Click to switch to A to Z.",
+      tooltip: "Z to A",
       ariaLabel: "Z to A (projects). Switch to A to Z",
     },
   },
@@ -49,6 +50,7 @@ type ProjectPaneHeaderProps = {
   viewMode: ProjectViewMode;
   singleClickFoldersExpand: boolean;
   singleClickProjectsExpand: boolean;
+  hideSessionsPaneInTreeView: boolean;
   allVisibleFoldersExpanded: boolean;
   canCopyProjectDetails: boolean;
   canOpenProjectLocation: boolean;
@@ -58,6 +60,7 @@ type ProjectPaneHeaderProps = {
   onToggleSortDirection: () => void;
   onToggleSessionSortDirection: () => void;
   onToggleViewMode: () => void;
+  onToggleHideSessionsPaneInTreeView: () => void;
   onToggleAllFolders: () => void;
   onToggleSingleClickFoldersExpand: () => void;
   onToggleSingleClickProjectsExpand: () => void;
@@ -74,6 +77,7 @@ export function ProjectPaneHeader({
   viewMode,
   singleClickFoldersExpand,
   singleClickProjectsExpand,
+  hideSessionsPaneInTreeView,
   allVisibleFoldersExpanded,
   canCopyProjectDetails,
   canOpenProjectLocation,
@@ -83,6 +87,7 @@ export function ProjectPaneHeader({
   onToggleSortDirection,
   onToggleSessionSortDirection,
   onToggleViewMode,
+  onToggleHideSessionsPaneInTreeView,
   onToggleAllFolders,
   onToggleSingleClickFoldersExpand,
   onToggleSingleClickProjectsExpand,
@@ -109,6 +114,19 @@ export function ProjectPaneHeader({
       <div className="pane-head-controls">
         {!collapsed ? (
           <>
+            {viewMode === "tree" ? (
+              <button
+                type="button"
+                className="collapse-btn"
+                onClick={onToggleAllFolders}
+                aria-label={
+                  allVisibleFoldersExpanded ? "Collapse all folders" : "Expand all folders"
+                }
+                title={allVisibleFoldersExpanded ? "Collapse" : "Expand"}
+              >
+                <ToolbarIcon name={allVisibleFoldersExpanded ? "collapseAll" : "expandAll"} />
+              </button>
+            ) : null}
             <div className="project-pane-sort-group" ref={sortMenuRef}>
               <button
                 type="button"
@@ -116,7 +134,7 @@ export function ProjectPaneHeader({
                 aria-haspopup="menu"
                 aria-expanded={sortMenuOpen}
                 aria-label={`Project sort field: ${sortLabel}`}
-                title={`Sort field: ${sortLabel}. Click to choose a different sort field.`}
+                title={`Sort by ${sortLabel}`}
                 onClick={() => setSortMenuOpen((value) => !value)}
               >
                 <ProjectPaneSortFieldIcon />
@@ -164,31 +182,10 @@ export function ProjectPaneHeader({
               }`}
               onClick={onToggleViewMode}
               aria-label={viewMode === "list" ? "Switch to By Folder" : "Switch to List"}
-              title={
-                viewMode === "list"
-                  ? "List view enabled. Click to switch to By Folder."
-                  : "By Folder view enabled. Click to switch to List."
-              }
+              title={viewMode === "list" ? "Switch to Folder view" : "Switch to List view"}
             >
               {viewMode === "list" ? <ProjectPaneListIcon /> : <ProjectPaneFolderIcon />}
             </button>
-            {viewMode === "tree" ? (
-              <button
-                type="button"
-                className="collapse-btn"
-                onClick={onToggleAllFolders}
-                aria-label={
-                  allVisibleFoldersExpanded ? "Collapse all folders" : "Expand all folders"
-                }
-                title={
-                  allVisibleFoldersExpanded
-                    ? "Collapse all visible folders"
-                    : "Expand all visible folders"
-                }
-              >
-                <ToolbarIcon name={allVisibleFoldersExpanded ? "collapseAll" : "expandAll"} />
-              </button>
-            ) : null}
             <div className="tb-dropdown project-pane-overflow-dropdown" ref={overflowMenuRef}>
               <button
                 type="button"
@@ -209,6 +206,22 @@ export function ProjectPaneHeader({
                 >
                   {viewMode === "tree" ? (
                     <>
+                      <button
+                        type="button"
+                        className={`tb-dropdown-item tb-dropdown-item-checkable${
+                          hideSessionsPaneInTreeView ? " selected" : ""
+                        }`}
+                        onClick={() => {
+                          onToggleHideSessionsPaneInTreeView();
+                          setOverflowMenuOpen(false);
+                        }}
+                      >
+                        <span>Hide Sessions pane in tree view</span>
+                        {hideSessionsPaneInTreeView ? (
+                          <span className="tb-dropdown-check">✓</span>
+                        ) : null}
+                      </button>
+                      <div className="tb-dropdown-separator" />
                       <button
                         type="button"
                         className={`tb-dropdown-item tb-dropdown-item-checkable${
@@ -315,7 +328,7 @@ export function ProjectPaneHeader({
           className="collapse-btn pane-collapse-btn"
           onClick={onToggleCollapsed}
           aria-label={collapsed ? "Expand Projects pane" : "Collapse Projects pane"}
-          title={collapsed ? "Expand Projects (Cmd/Ctrl+B)" : "Collapse Projects (Cmd/Ctrl+B)"}
+          title={formatTooltip(collapsed ? "Expand Projects" : "Collapse Projects", "Cmd+B")}
         >
           <ToolbarIcon name="chevronLeft" />
         </button>

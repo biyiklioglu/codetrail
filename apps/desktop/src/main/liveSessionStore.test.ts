@@ -1,0 +1,678 @@
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
+import type { DiscoveryConfig, IpcResponse } from "@codetrail/core";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { QueryService } from "./data/queryService";
+import type {
+  FileWatcherBatch,
+  FileWatcherOptions,
+  FileWatcherService,
+} from "./fileWatcherService";
+import { LiveSessionStore } from "./liveSessionStore";
+
+function makeConfig(dir: string): DiscoveryConfig {
+  return {
+    claudeRoot: join(dir, ".claude", "projects"),
+    codexRoot: join(dir, ".codex", "sessions"),
+    geminiRoot: join(dir, ".gemini", "tmp"),
+    geminiHistoryRoot: join(dir, ".gemini", "history"),
+    geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+    cursorRoot: join(dir, ".cursor", "projects"),
+    copilotRoot: join(dir, "copilot-workspace"),
+    includeClaudeSubagents: false,
+    enabledProviders: ["claude", "codex"],
+  };
+}
+
+function createCodexTranscript(filePath: string): void {
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(
+    filePath,
+    `${JSON.stringify({
+      type: "session_meta",
+      payload: { id: "codex-session", cwd: "/workspace/codetrail" },
+    })}\n`,
+    "utf8",
+  );
+}
+
+function createClaudeTranscript(filePath: string): void {
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(
+    filePath,
+    `${JSON.stringify({
+      sessionId: "claude-session",
+      cwd: "/workspace/codetrail",
+      type: "user",
+      message: { content: [{ type: "text", text: "Start" }] },
+    })}\n`,
+    "utf8",
+  );
+}
+
+function makeBatch(path: string): FileWatcherBatch {
+  return {
+    changedPaths: [path],
+    requiresFullScan: false,
+  };
+}
+
+type WatcherRecord = {
+  roots: string[];
+  callback: (batch: FileWatcherBatch) => void | Promise<void>;
+  options: FileWatcherOptions | undefined;
+  watcher: Pick<FileWatcherService, "start" | "stop">;
+};
+
+function createWatcherFactory() {
+  const records: WatcherRecord[] = [];
+  const createFileWatcher = vi.fn(
+    (
+      roots: string[],
+      callback: (batch: FileWatcherBatch) => void | Promise<void>,
+      options?: FileWatcherOptions,
+    ) => {
+      const watcher = {
+        start: vi.fn(async () => undefined),
+        stop: vi.fn(async () => undefined),
+      } satisfies Pick<FileWatcherService, "start" | "stop">;
+      records.push({ roots, callback, options, watcher });
+      return watcher as unknown as FileWatcherService;
+    },
+  );
+  return { createFileWatcher, records };
+}
+
+function getSingleSession(
+  store: LiveSessionStore,
+): IpcResponse<"watcher:getLiveStatus">["sessions"][number] {
+  const session = store.snapshot().sessions[0];
+  if (!session) {
+    throw new Error("Expected a live session");
+  }
+  return session;
+}
+
+describe("LiveSessionStore", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("tails Codex files incrementally, including partial appended lines", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "03", "24", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+    });
+
+    await store.start({ discoveryConfig: config });
+
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "task_started", title: "Live status" },
+      })}\n`,
+      "utf8",
+    );
+    await store.handleWatcherBatch(makeBatch(filePath));
+    expect(getSingleSession(store).statusKind).toBe("working");
+
+    appendFileSync(
+      filePath,
+      JSON.stringify({
+        timestamp: "2026-03-24T09:00:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          arguments: { cmd: "bun run typec" },
+        },
+      }).slice(0, -4),
+      "utf8",
+    );
+    await store.handleWatcherBatch(makeBatch(filePath));
+    expect(getSingleSession(store).statusKind).toBe("working");
+
+    appendFileSync(filePath, `heck" } } }\n`, "utf8");
+    await store.handleWatcherBatch(makeBatch(filePath));
+
+    const session = getSingleSession(store);
+    expect(session.statusKind).toBe("running_tool");
+    expect(session.detailText).toBe("bun run typecheck");
+  });
+
+  it("drains prefetched indexing chunks destructively", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-prefetch-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "03", "24", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+    });
+
+    await store.start({ discoveryConfig: config });
+
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "task_started", title: "Live status" },
+      })}\n`,
+      "utf8",
+    );
+    await store.handleWatcherBatch(makeBatch(filePath));
+
+    const firstTake = store.takeIndexingPrefetchedJsonlChunks([filePath]);
+    expect(firstTake).toHaveLength(1);
+    expect(Buffer.from(firstTake[0]?.bytes ?? []).toString("utf8")).toContain('"task_started"');
+
+    const secondTake = store.takeIndexingPrefetchedJsonlChunks([filePath]);
+    expect(secondTake).toEqual([]);
+  });
+
+  it("resets on truncation and marks the session best-effort", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-truncate-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "03", "24", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+    });
+
+    await store.start({ discoveryConfig: config });
+
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "task_started" },
+      })}\n`,
+      "utf8",
+    );
+    await store.handleWatcherBatch(makeBatch(filePath));
+    expect(getSingleSession(store).bestEffort).toBe(false);
+
+    truncateSync(filePath, 0);
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:10.000Z",
+        type: "event_msg",
+        payload: { type: "task_complete" },
+      })}\n`,
+      "utf8",
+    );
+    await store.handleWatcherBatch(makeBatch(filePath));
+
+    const session = getSingleSession(store);
+    expect(session.statusKind).toBe("idle");
+    expect(session.bestEffort).toBe(true);
+  });
+
+  it("seeds recent sessions from indexed files on start", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-seed-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "03", "24", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", text: "Seeded activity" },
+      })}\n`,
+      "utf8",
+    );
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => [
+          {
+            filePath,
+            provider: "codex" as const,
+            fileMtimeMs: Date.parse("2026-03-24T09:00:00.000Z"),
+          },
+        ]),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+    });
+
+    await store.start({ discoveryConfig: config });
+
+    expect(getSingleSession(store).statusKind).toBe("working");
+    expect(getSingleSession(store).detailText).toBe("Seeded activity");
+  });
+
+  it("updates Claude sessions from the dedicated hook watcher", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-hooks-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const transcriptPath = join(config.claudeRoot, "project-a", "claude-session.jsonl");
+    createClaudeTranscript(transcriptPath);
+    const homeDir = join(dir, "home");
+    const userDataDir = join(dir, "user-data");
+    const settingsPath = join(homeDir, ".claude", "settings.json");
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        hooks: {
+          Notification: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    'CODETRAIL_CLAUDE_HOOK=1 /bin/sh -lc \'mkdir -p "$1" && cat >> "$2" && printf "\\n" >> "$2"\'',
+                  async: true,
+                },
+              ],
+            },
+          ],
+          SessionStart: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    'CODETRAIL_CLAUDE_HOOK=1 /bin/sh -lc \'mkdir -p "$1" && cat >> "$2" && printf "\\n" >> "$2"\'',
+                  async: true,
+                },
+              ],
+            },
+          ],
+          UserPromptSubmit: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    'CODETRAIL_CLAUDE_HOOK=1 /bin/sh -lc \'mkdir -p "$1" && cat >> "$2" && printf "\\n" >> "$2"\'',
+                  async: true,
+                },
+              ],
+            },
+          ],
+          PreToolUse: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    'CODETRAIL_CLAUDE_HOOK=1 /bin/sh -lc \'mkdir -p "$1" && cat >> "$2" && printf "\\n" >> "$2"\'',
+                  async: true,
+                },
+              ],
+            },
+          ],
+          PostToolUse: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    'CODETRAIL_CLAUDE_HOOK=1 /bin/sh -lc \'mkdir -p "$1" && cat >> "$2" && printf "\\n" >> "$2"\'',
+                  async: true,
+                },
+              ],
+            },
+          ],
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    'CODETRAIL_CLAUDE_HOOK=1 /bin/sh -lc \'mkdir -p "$1" && cat >> "$2" && printf "\\n" >> "$2"\'',
+                  async: true,
+                },
+              ],
+            },
+          ],
+          SessionEnd: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    'CODETRAIL_CLAUDE_HOOK=1 /bin/sh -lc \'mkdir -p "$1" && cat >> "$2" && printf "\\n" >> "$2"\'',
+                  async: true,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      "utf8",
+    );
+
+    const { createFileWatcher, records } = createWatcherFactory();
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir,
+      homeDir,
+      createFileWatcher,
+    });
+
+    await store.start({ discoveryConfig: config });
+    expect(records).toHaveLength(1);
+    await store.handleWatcherBatch(makeBatch(transcriptPath));
+    expect(getSingleSession(store).provider).toBe("claude");
+
+    const hookLogPath = join(userDataDir, "live-status", "claude-hooks.jsonl");
+    mkdirSync(dirname(hookLogPath), { recursive: true });
+    writeFileSync(
+      hookLogPath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:00.000Z",
+        hook_event_name: "Notification",
+        notification_type: "permission_prompt",
+        transcript_path: transcriptPath,
+        message: "Allow editing package.json",
+      })}\n`,
+      "utf8",
+    );
+
+    await records[0]!.callback(makeBatch(hookLogPath));
+
+    const session = getSingleSession(store);
+    expect(session.provider).toBe("claude");
+    expect(session.statusKind).toBe("waiting_for_approval");
+    expect(session.sourcePrecision).toBe("hook");
+    expect(records[0]!.roots[0]).toBe(join(userDataDir, "live-status"));
+  });
+
+  it("reuses cached snapshots until the next semantic invalidation point", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-cache-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "03", "24", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+    let nowMs = Date.parse("2026-03-24T09:00:00.000Z");
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      now: () => nowMs,
+    });
+
+    await store.start({ discoveryConfig: config });
+
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "request_user_input", prompt: "Need confirmation" },
+      })}\n`,
+      "utf8",
+    );
+    await store.handleWatcherBatch(makeBatch(filePath));
+
+    const firstSnapshot = store.snapshot();
+    nowMs += 15_000;
+    const secondSnapshot = store.snapshot();
+
+    expect(secondSnapshot).toBe(firstSnapshot);
+    expect(secondSnapshot.updatedAt).toBe(firstSnapshot.updatedAt);
+  });
+
+  it("prunes stale sessions from the backing cursor map", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-prune-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "03", "24", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+    let nowMs = Date.parse("2026-03-24T09:00:00.000Z");
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      now: () => nowMs,
+    });
+
+    await store.start({ discoveryConfig: config });
+
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "task_started" },
+      })}\n`,
+      "utf8",
+    );
+    await store.handleWatcherBatch(makeBatch(filePath));
+    expect((store as unknown as { sessionCursors: Map<string, unknown> }).sessionCursors.size).toBe(
+      1,
+    );
+
+    nowMs += 4 * 60_000;
+    expect(store.snapshot().sessions).toEqual([]);
+    expect((store as unknown as { sessionCursors: Map<string, unknown> }).sessionCursors.size).toBe(
+      0,
+    );
+  });
+
+  it("installs, repairs, and removes managed Claude hooks without touching unrelated hooks", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-install-"));
+    tempDirs.push(dir);
+    const homeDir = join(dir, "home");
+    const userDataDir = join(dir, "user-data");
+    const settingsPath = join(homeDir, ".claude", "settings.json");
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        hooks: {
+          SessionStart: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: "CODETRAIL_CLAUDE_HOOK=1 /bin/sh -lc 'old managed command'",
+                  async: true,
+                },
+              ],
+            },
+          ],
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: "echo keep-me",
+                  async: true,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      "utf8",
+    );
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir,
+      homeDir,
+    });
+
+    const installed = await store.installClaudeHooks();
+    expect(installed.installed).toBe(true);
+    expect(installed.managedEventNames).toHaveLength(7);
+
+    const installedSettings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
+      hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>;
+    };
+    const installedCommands = Object.values(installedSettings.hooks ?? {})
+      .flat()
+      .flatMap((entry) => entry.hooks ?? [])
+      .map((hook) => hook.command ?? "");
+    expect(installedCommands.some((command) => command.includes("exit 0"))).toBe(true);
+    expect(installedCommands).toContain("echo keep-me");
+
+    const removed = await store.removeClaudeHooks();
+    expect(removed.installed).toBe(false);
+    expect(removed.managed).toBe(false);
+
+    const removedSettings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
+      hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>;
+    };
+    const remainingCommands = Object.values(removedSettings.hooks ?? {})
+      .flat()
+      .flatMap((entry) => entry.hooks ?? [])
+      .map((hook) => hook.command ?? "");
+    expect(remainingCommands).toEqual(["echo keep-me"]);
+  });
+
+  it("creates the hooks object on first install when Claude settings has no hooks key", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-first-install-"));
+    tempDirs.push(dir);
+    const homeDir = join(dir, "home");
+    const userDataDir = join(dir, "user-data");
+    const settingsPath = join(homeDir, ".claude", "settings.json");
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }), "utf8");
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir,
+      homeDir,
+    });
+
+    const installed = await store.installClaudeHooks();
+    expect(installed.installed).toBe(true);
+
+    const nextSettings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
+      theme?: string;
+      hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>;
+    };
+    expect(nextSettings.theme).toBe("dark");
+    expect(Object.keys(nextSettings.hooks ?? {})).toHaveLength(7);
+    expect(
+      Object.values(nextSettings.hooks ?? {})
+        .flat()
+        .flatMap((entry) => entry.hooks ?? [])
+        .some((hook) => typeof hook.command === "string" && hook.command.includes("exit 0")),
+    ).toBe(true);
+  });
+
+  it("fails cleanly when the existing Claude settings file is invalid JSON", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-invalid-json-"));
+    tempDirs.push(dir);
+    const homeDir = join(dir, "home");
+    const userDataDir = join(dir, "user-data");
+    const settingsPath = join(homeDir, ".claude", "settings.json");
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, "{ invalid json", "utf8");
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir,
+      homeDir,
+    });
+
+    await expect(store.installClaudeHooks()).rejects.toThrow();
+  });
+
+  it("fails cleanly when Claude settings cannot be written", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-write-fail-"));
+    tempDirs.push(dir);
+    const homeDir = join(dir, "home");
+    const userDataDir = join(dir, "user-data");
+    mkdirSync(homeDir, { recursive: true });
+    writeFileSync(join(homeDir, ".claude"), "not a directory", "utf8");
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir,
+      homeDir,
+    });
+
+    await expect(store.installClaudeHooks()).rejects.toThrow();
+  });
+
+  it("prepares the Claude hook log directory and rotates the previous log once on app start", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-hook-log-"));
+    tempDirs.push(dir);
+    const homeDir = join(dir, "home");
+    const userDataDir = join(dir, "user-data");
+    const logPath = join(userDataDir, "live-status", "claude-hooks.jsonl");
+    mkdirSync(dirname(logPath), { recursive: true });
+    writeFileSync(logPath, '{"event":"old"}\n', "utf8");
+
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir,
+      homeDir,
+    });
+
+    await store.prepareClaudeHookLogForAppStart();
+
+    expect(readFileSync(`${logPath}.1`, "utf8")).toBe('{"event":"old"}\n');
+    expect(() => readFileSync(logPath, "utf8")).toThrow();
+
+    await store.prepareClaudeHookLogForAppStart();
+    expect(readFileSync(`${logPath}.1`, "utf8")).toBe('{"event":"old"}\n');
+  });
+});

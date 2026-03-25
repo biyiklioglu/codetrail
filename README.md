@@ -107,9 +107,17 @@ The output is written to `apps/desktop/out/`. The script:
 2. Verifies/rebuilds the native SQLite binary
 3. Materializes dependencies for Electron Forge
 4. Generates the `.icns` icon
-5. Packages the `.app` bundle and compresses it into a `.zip`
+5. Packages the `.app` bundle, re-signs the final bundle ad-hoc, verifies it, writes an `INSTALL.txt`, and compresses everything into a `.zip`
 
 > The macOS packaging script requires macOS. It uses `ditto` and `PlistBuddy` which are macOS-only tools.
+>
+> The current release flow does **not** use Apple Developer ID signing or notarization. That means downloaded builds can still be blocked by Gatekeeper and may require Finder `Open` or:
+>
+> ```bash
+> xattr -dr com.apple.quarantine "/Applications/Code Trail.app"
+> ```
+
+For end-user install steps and source-build instructions, see [docs/MACOS_DISTRIBUTION.md](/Users/tcmudemirhan/src/tsproj/codetrail/docs/MACOS_DISTRIBUTION.md).
 
 ## How It Works
 

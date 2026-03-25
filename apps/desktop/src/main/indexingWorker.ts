@@ -8,6 +8,7 @@ import {
 } from "@codetrail/core";
 import {
   type IndexingWorkerRequest,
+  normalizePrefetchedJsonlChunks,
   toChangedFilesIndexingConfig,
   toIncrementalIndexingConfig,
 } from "./indexingRequestConfig";
@@ -50,8 +51,13 @@ function postMessage(message: IndexingWorkerMessage): void {
   throw new Error("Indexing worker started without a parent communication channel.");
 }
 
-function makeDependencies() {
+function makeDependencies(request: IndexingWorkerRequest) {
+  const prefetchedJsonlChunks =
+    request.kind === "changedFiles"
+      ? normalizePrefetchedJsonlChunks(request.prefetchedJsonlChunks)
+      : undefined;
   return {
+    ...(prefetchedJsonlChunks ? { prefetchedJsonlChunks } : {}),
     onFileIssue: (issue: IndexingFileIssue) => {
       postMessage({
         type: "file-issue",
@@ -76,10 +82,10 @@ function handleRequest(request: IndexingWorkerRequest): void {
       indexChangedFiles(
         toChangedFilesIndexingConfig(request),
         request.changedFilePaths,
-        makeDependencies(),
+        makeDependencies(request),
       );
     } else {
-      runIncrementalIndexing(toIncrementalIndexingConfig(request), makeDependencies());
+      runIncrementalIndexing(toIncrementalIndexingConfig(request), makeDependencies(request));
     }
     postMessage({ type: "result", ok: true });
   } catch (error) {

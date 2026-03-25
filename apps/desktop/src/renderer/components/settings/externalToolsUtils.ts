@@ -100,6 +100,11 @@ export function moveToolById(
     return tools;
   }
   const next = [...tools];
-  [next[currentIndex], next[targetIndex]] = [next[targetIndex], next[currentIndex]];
+  const targetTool = next[targetIndex];
+  if (!targetTool) {
+    return tools;
+  }
+  next[targetIndex] = currentTool;
+  next[currentIndex] = targetTool;
   return next;
 }

@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProjectSummary, SessionSummary } from "../../app/types";
+import { useVirtualListWindow } from "../../hooks/useVirtualListWindow";
 import { getProjectGroupId } from "../../lib/projectTree";
 import { SEARCH_PLACEHOLDERS } from "../../lib/searchLabels";
 import { compactPath, deriveSessionTitle, formatDate, prettyProvider } from "../../lib/viewUtils";
+import {
+  SIDEBAR_LIST_OVERSCAN,
+  SIDEBAR_LIST_ROW_HEIGHT,
+  SIDEBAR_LIST_VIRTUALIZATION_THRESHOLD,
+} from "../../lib/virtualList";
 import { ToolbarIcon } from "../ToolbarIcon";
 import { HistoryListContextMenu } from "./HistoryListContextMenu";
 import type { ProjectPaneContextMenuState, ProjectPaneProps } from "./ProjectPane.types";
 import { ProjectPaneHeader } from "./ProjectPaneHeader";
 import { ProjectPaneChevron, ProjectPaneFolderIcon } from "./ProjectPaneIcons";
-import { useProjectPaneTreeState } from "./useProjectPaneTreeState";
 
 function getProjectLabel(project: ProjectSummary): string {
   return project.name || project.path || "(no project path)";
@@ -58,9 +63,7 @@ export function ProjectPane({
   const {
     sortedProjects,
     selectedProjectId,
-    selectedSessionId = "",
     viewMode,
-    updateSource,
     historyMode = "project_all",
     collapsed,
     projectQueryInput,
@@ -70,10 +73,19 @@ export function ProjectPane({
     projectUpdates,
     treeProjectSessionsByProjectId = {},
     treeProjectSessionsLoadingByProjectId = {},
+    folderGroups = [],
+    expandedFolderIdSet = new Set<string>(),
+    expandedProjectIds = [],
+    allVisibleFoldersExpanded = false,
+    treeFocusedRow = null,
     listRef,
   } = data;
   const { sortField, sortDirection, sessionSortDirection = "desc" } = sorting;
-  const { singleClickFoldersExpand = true, singleClickProjectsExpand = false } = preferences;
+  const {
+    singleClickFoldersExpand = true,
+    singleClickProjectsExpand = false,
+    hideSessionsPaneInTreeView = false,
+  } = preferences;
   const { canCopyProjectDetails, canOpenProjectLocation, canDeleteProject } = capabilities;
   const {
     onToggleCollapsed,
@@ -83,6 +95,7 @@ export function ProjectPane({
     onToggleSortDirection,
     onToggleSessionSortDirection = () => {},
     onToggleViewMode,
+    onToggleHideSessionsPaneInTreeView,
     onToggleSingleClickFoldersExpand,
     onToggleSingleClickProjectsExpand,
     onCopyProjectDetails,
@@ -92,7 +105,10 @@ export function ProjectPane({
     onSelectProjectBookmarks = () => {},
     consumeFocusSelectionBehavior = () => ({ commitMode: "immediate", waitForKeyboardIdle: false }),
     onQueueProjectTreeNoopCommit = () => {},
-    onEnsureTreeProjectSessionsLoaded = () => {},
+    onSetTreeFocusedRow = () => {},
+    onToggleFolder = () => {},
+    onToggleAllFolders = () => {},
+    onToggleProjectExpansion = () => {},
     onOpenProjectLocation,
     onOpenSessionLocation,
     onDeleteProject,
@@ -101,7 +117,10 @@ export function ProjectPane({
   const projectListContainerRef = useRef<HTMLDivElement | null>(null);
   const selectedProjectRef = useRef<HTMLButtonElement | null>(null);
   const [contextMenu, setContextMenu] = useState<ProjectPaneContextMenuState>(null);
-  const projectProviderKey = useMemo(() => projectProviders.join(","), [projectProviders]);
+  const flatProjectActiveIndex = useMemo(
+    () => sortedProjects.findIndex((project) => project.id === selectedProjectId),
+    [selectedProjectId, sortedProjects],
+  );
 
   const setProjectListRefs = useCallback(
     (element: HTMLDivElement | null) => {
@@ -117,6 +136,22 @@ export function ProjectPane({
     },
     [listRef],
   );
+  const {
+    setContainerRef,
+    handleScroll,
+    startIndex: flatListStartIndex,
+    endIndex: flatListEndIndex,
+    topSpacerHeight: flatListTopSpacerHeight,
+    bottomSpacerHeight: flatListBottomSpacerHeight,
+    isVirtualized: isFlatListVirtualized,
+  } = useVirtualListWindow({
+    itemCount: sortedProjects.length,
+    itemHeight: SIDEBAR_LIST_ROW_HEIGHT,
+    overscan: SIDEBAR_LIST_OVERSCAN,
+    activeIndex: flatProjectActiveIndex,
+    enabled: viewMode === "list" && sortedProjects.length > SIDEBAR_LIST_VIRTUALIZATION_THRESHOLD,
+    externalRef: setProjectListRefs,
+  });
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -124,43 +159,19 @@ export function ProjectPane({
     }
     selectedProjectRef.current?.scrollIntoView?.({ block: "nearest" });
   }, [selectedProjectId]);
-  const {
-    folderGroups,
-    expandedFolderIdSet,
-    expandedProjectIds,
-    allVisibleFoldersExpanded,
-    treeFocusedRow,
-    setTreeFocusedRow,
-    handleToggleFolder: toggleFolder,
-    handleToggleAllFolders: toggleAllFolders,
-    handleToggleProjectExpansion: toggleProjectExpansion,
-  } = useProjectPaneTreeState({
-    sortedProjects,
-    selectedProjectId,
-    selectedSessionId,
-    sortField,
-    sortDirection,
-    viewMode,
-    updateSource,
-    historyMode,
-    projectProvidersKey: projectProviderKey,
-    projectQueryInput,
-    onEnsureTreeProjectSessionsLoaded,
-  });
-
   const handleToggleFolder = (folderId: string) => {
     setContextMenu(null);
-    toggleFolder(folderId);
+    onToggleFolder(folderId);
   };
 
   const handleToggleAllFolders = () => {
     setContextMenu(null);
-    toggleAllFolders();
+    onToggleAllFolders();
   };
 
   const handleToggleProjectExpansion = (projectId: string) => {
     setContextMenu(null);
-    toggleProjectExpansion(projectId);
+    onToggleProjectExpansion(projectId);
   };
 
   const getFolderUpdateDelta = (projects: ProjectSummary[]): number =>
@@ -263,17 +274,17 @@ export function ProjectPane({
         data-project-id={project.id}
         className={`project-tree-session-row${isActive ? " active" : ""}`}
         onFocus={() => {
-          setTreeFocusedRow({ kind: "session", id: session.id, projectId: project.id });
+          onSetTreeFocusedRow({ kind: "session", id: session.id, projectId: project.id });
           handleSessionFocusSelection(project.id, session.id);
         }}
         onClick={() => {
           setContextMenu(null);
-          setTreeFocusedRow({ kind: "session", id: session.id, projectId: project.id });
+          onSetTreeFocusedRow({ kind: "session", id: session.id, projectId: project.id });
           onSelectProjectSession(project.id, session.id);
         }}
         onContextMenu={(event) => {
           event.preventDefault();
-          setTreeFocusedRow({ kind: "session", id: session.id, projectId: project.id });
+          onSetTreeFocusedRow({ kind: "session", id: session.id, projectId: project.id });
           onSelectProjectSession(project.id, session.id);
           setContextMenu({
             kind: "session",
@@ -311,7 +322,7 @@ export function ProjectPane({
     const bookmarkButtonActive = historyMode === "bookmarks" && selectedProjectId === project.id;
     const selectProjectRow = () => {
       setContextMenu(null);
-      setTreeFocusedRow({ kind: "project", id: project.id });
+      onSetTreeFocusedRow({ kind: "project", id: project.id });
       onSelectProject(project.id);
     };
     return (
@@ -386,7 +397,7 @@ export function ProjectPane({
             ref={project.id === selectedProjectId ? selectedProjectRef : null}
             className={`project-tree-select-btn${isActive ? " active" : ""}`}
             onFocus={() => {
-              setTreeFocusedRow({ kind: "project", id: project.id });
+              onSetTreeFocusedRow({ kind: "project", id: project.id });
               handleProjectFocusSelection(project.id);
             }}
             onClick={() => {
@@ -446,7 +457,7 @@ export function ProjectPane({
                 className={`project-tree-bookmark-btn${bookmarkButtonActive ? " active" : ""}`}
                 onClick={(event) => {
                   event.stopPropagation();
-                  setTreeFocusedRow({ kind: "project", id: project.id });
+                  onSetTreeFocusedRow({ kind: "project", id: project.id });
                   onSelectProjectBookmarks(project.id);
                 }}
                 title={
@@ -493,6 +504,7 @@ export function ProjectPane({
         viewMode={viewMode}
         singleClickFoldersExpand={singleClickFoldersExpand}
         singleClickProjectsExpand={singleClickProjectsExpand}
+        hideSessionsPaneInTreeView={hideSessionsPaneInTreeView}
         allVisibleFoldersExpanded={allVisibleFoldersExpanded}
         canCopyProjectDetails={canCopyProjectDetails}
         canOpenProjectLocation={canOpenProjectLocation}
@@ -502,6 +514,7 @@ export function ProjectPane({
         onToggleSortDirection={onToggleSortDirection}
         onToggleSessionSortDirection={onToggleSessionSortDirection}
         onToggleViewMode={onToggleViewMode}
+        onToggleHideSessionsPaneInTreeView={onToggleHideSessionsPaneInTreeView}
         onToggleAllFolders={handleToggleAllFolders}
         onToggleSingleClickFoldersExpand={onToggleSingleClickFoldersExpand}
         onToggleSingleClickProjectsExpand={onToggleSingleClickProjectsExpand}
@@ -538,11 +551,32 @@ export function ProjectPane({
       </div>
       <div
         className={`list-scroll project-list${viewMode === "tree" ? " project-list-tree" : ""}`}
-        ref={setProjectListRefs}
+        ref={setContainerRef}
         tabIndex={-1}
+        onScroll={viewMode === "list" ? handleScroll : undefined}
       >
         {viewMode === "list"
-          ? sortedProjects.map((project) => renderFlatProjectRow(project))
+          ? [
+              isFlatListVirtualized && flatListTopSpacerHeight > 0 ? (
+                <div
+                  key="top-spacer"
+                  aria-hidden
+                  className="virtual-list-spacer"
+                  style={{ height: `${flatListTopSpacerHeight}px` }}
+                />
+              ) : null,
+              ...sortedProjects
+                .slice(flatListStartIndex, flatListEndIndex)
+                .map((project) => renderFlatProjectRow(project)),
+              isFlatListVirtualized && flatListBottomSpacerHeight > 0 ? (
+                <div
+                  key="bottom-spacer"
+                  aria-hidden
+                  className="virtual-list-spacer"
+                  style={{ height: `${flatListBottomSpacerHeight}px` }}
+                />
+              ) : null,
+            ]
           : folderGroups.map((group) => {
               const isExpanded = expandedFolderIdSet.has(group.id);
               const folderUpdateDelta = getFolderUpdateDelta(group.projects);
@@ -563,13 +597,13 @@ export function ProjectPane({
                     }${isExpanded && folderUpdateDelta > 0 ? " expanded-with-updates" : ""}`}
                     onFocus={() => {
                       handleFolderFocusSelection();
-                      setTreeFocusedRow({ kind: "folder", id: group.id });
+                      onSetTreeFocusedRow({ kind: "folder", id: group.id });
                     }}
                     onClick={(event) => {
                       // Mouse selection on folders should win immediately over any in-flight
                       // keyboard debounce so we never commit a stale project after a click.
                       onQueueProjectTreeNoopCommit();
-                      setTreeFocusedRow({ kind: "folder", id: group.id });
+                      onSetTreeFocusedRow({ kind: "folder", id: group.id });
                       if (
                         event.target instanceof HTMLElement &&
                         event.target.closest(".project-folder-toggle-hit")

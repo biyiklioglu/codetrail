@@ -41,6 +41,7 @@ window.codetrail = {
     return { ok: true } as IpcResponse<C>;
   },
   onHistoryExportProgress: () => () => undefined,
+  onAppCommand: () => () => undefined,
 };
 
 type Sample = {

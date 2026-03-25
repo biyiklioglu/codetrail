@@ -102,24 +102,28 @@ export function getProjectNavigationTargetFromElement(
   element: HTMLElement | null,
 ): ProjectNavigationTarget | null {
   const navElement = element?.closest<HTMLElement>(PROJECT_NAV_SELECTOR) ?? null;
-  if (!navElement) {
-    return null;
+  if (navElement) {
+    if (navElement.dataset.projectNavKind === "project") {
+      const projectId = navElement.dataset.projectNavId ?? "";
+      return projectId ? { kind: "project", id: projectId } : null;
+    }
+
+    if (navElement.dataset.projectNavKind === "folder") {
+      const folderId = navElement.dataset.folderId ?? "";
+      return folderId ? { kind: "folder", id: folderId } : null;
+    }
+
+    if (navElement.dataset.projectNavKind === "session") {
+      const sessionId = navElement.dataset.sessionId ?? "";
+      const projectId = navElement.dataset.projectId ?? "";
+      return sessionId && projectId ? { kind: "session", id: sessionId, projectId } : null;
+    }
   }
 
-  if (navElement.dataset.projectNavKind === "project") {
-    const projectId = navElement.dataset.projectNavId ?? "";
-    return projectId ? { kind: "project", id: projectId } : null;
-  }
-
-  if (navElement.dataset.projectNavKind === "folder") {
-    const folderId = navElement.dataset.folderId ?? "";
-    return folderId ? { kind: "folder", id: folderId } : null;
-  }
-
-  if (navElement.dataset.projectNavKind === "session") {
-    const sessionId = navElement.dataset.sessionId ?? "";
-    const projectId = navElement.dataset.projectId ?? "";
-    return sessionId && projectId ? { kind: "session", id: sessionId, projectId } : null;
+  const expandToggle = element?.closest<HTMLElement>("[data-project-expand-toggle-for]") ?? null;
+  const toggledProjectId = expandToggle?.dataset.projectExpandToggleFor ?? "";
+  if (toggledProjectId) {
+    return { kind: "project", id: toggledProjectId };
   }
 
   return null;

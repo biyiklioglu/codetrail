@@ -559,6 +559,22 @@ export function applyTheme(theme: ThemeMode): void {
   }
 }
 
+export function applyDocumentAppearance(
+  theme: ThemeMode,
+  shikiTheme: string | null | undefined,
+): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  applyTheme(theme);
+  if (typeof shikiTheme === "string" && shikiTheme.length > 0) {
+    document.documentElement.dataset.shikiTheme = shikiTheme;
+    return;
+  }
+  delete document.documentElement.dataset.shikiTheme;
+}
+
 function getThemeVariantCssOverridesFromVariant(
   variant: ThemeVariantDefinition,
 ): Record<string, string> {

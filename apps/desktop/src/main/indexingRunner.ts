@@ -7,6 +7,7 @@ import {
   type IndexingDependencies,
   type IndexingFileIssue,
   type IndexingNotice,
+  type PrefetchedJsonlChunk,
   type Provider,
   type SystemMessageRegexRuleOverrides,
   clearProvidersData,
@@ -273,7 +274,7 @@ export class WorkerIndexingRunner {
 
   async enqueueChangedFiles(
     changedFilePaths: string[],
-    options: { source?: IndexingJobSource } = {},
+    options: { source?: IndexingJobSource; prefetchedJsonlChunks?: PrefetchedJsonlChunk[] } = {},
   ): Promise<RefreshJobResponse> {
     if (changedFilePaths.length === 0) {
       return { jobId: `changed-${++this.sequence}-noop` };
@@ -286,6 +287,9 @@ export class WorkerIndexingRunner {
       kind: "changedFiles",
       dbPath: this.dbPath,
       changedFilePaths,
+      ...(options.prefetchedJsonlChunks && options.prefetchedJsonlChunks.length > 0
+        ? { prefetchedJsonlChunks: options.prefetchedJsonlChunks }
+        : {}),
       ...buildSharedIndexingRequestSettings({
         enabledProviders,
         removeMissingSessionsDuringIncrementalIndexing,
@@ -374,7 +378,12 @@ function runInProcess(
   deps: IndexingDependencies,
 ): void {
   if (request.kind === "changedFiles") {
-    fns.indexChangedFiles?.(toChangedFilesIndexingConfig(request), request.changedFilePaths, deps);
+    fns.indexChangedFiles?.(toChangedFilesIndexingConfig(request), request.changedFilePaths, {
+      ...deps,
+      ...(request.prefetchedJsonlChunks
+        ? { prefetchedJsonlChunks: request.prefetchedJsonlChunks }
+        : {}),
+    });
     return;
   }
   fns.runIncrementalIndexing?.(toIncrementalIndexingConfig(request), deps);

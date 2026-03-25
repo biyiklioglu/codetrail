@@ -2,11 +2,13 @@ import { createContext, useContext, useRef } from "react";
 
 import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core/browser";
 
+import type { AppCommand } from "../../shared/appCommands";
 import type { HistoryExportProgressPayload } from "../../shared/historyExport";
 
 export type CodetrailClient = {
   invoke<C extends IpcChannel>(channel: C, payload: IpcRequestInput<C>): Promise<IpcResponse<C>>;
   onHistoryExportProgress(listener: (payload: HistoryExportProgressPayload) => void): () => void;
+  onAppCommand(listener: (command: AppCommand) => void): () => void;
 };
 
 const MISSING_PRELOAD_ERROR =
@@ -17,6 +19,7 @@ const MISSING_CLIENT: CodetrailClient = {
     throw new Error(MISSING_PRELOAD_ERROR);
   },
   onHistoryExportProgress: () => () => undefined,
+  onAppCommand: () => () => undefined,
 };
 
 function isCodetrailClient(value: unknown): value is CodetrailClient {
@@ -26,7 +29,10 @@ function isCodetrailClient(value: unknown): value is CodetrailClient {
     "invoke" in value &&
     typeof (value as { invoke?: unknown }).invoke === "function" &&
     "onHistoryExportProgress" in value &&
-    typeof (value as { onHistoryExportProgress?: unknown }).onHistoryExportProgress === "function"
+    typeof (value as { onHistoryExportProgress?: unknown }).onHistoryExportProgress ===
+      "function" &&
+    "onAppCommand" in value &&
+    typeof (value as { onAppCommand?: unknown }).onAppCommand === "function"
   );
 }
 

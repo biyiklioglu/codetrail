@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { type IpcResponse, indexerConfigBaseSchema, paneStateBaseSchema } from "@codetrail/core";
-import { createSettingsInfoFixture } from "@codetrail/core/testing";
+import {
+  createClaudeHookStateFixture,
+  createLiveStatusFixture,
+  createSettingsInfoFixture,
+} from "@codetrail/core/testing";
 
 import { registerIpcHandlers } from "./ipc";
 
@@ -24,9 +28,17 @@ const settingsInfo = createSettingsInfoFixture({
   },
 });
 
+function createClaudeHookState(input: { installed: boolean }) {
+  return createClaudeHookStateFixture({
+    logPath: "/tmp/codetrail/live-status/claude-hooks.jsonl",
+    installed: input.installed,
+  });
+}
+
 describe("registerIpcHandlers", () => {
   it("validates request payloads before invoking handlers", async () => {
     const registry = new Map<string, (event: unknown, payload: unknown) => Promise<unknown>>();
+    const onValidationError = vi.fn();
 
     registerIpcHandlers(
       {
@@ -36,6 +48,7 @@ describe("registerIpcHandlers", () => {
       },
       {
         "app:getHealth": () => ({ status: "ok", version: "0.1.0" }),
+        "app:flushState": () => ({ ok: true }),
         "app:getSettingsInfo": () => settingsInfo,
         "db:getSchemaVersion": () => ({ schemaVersion: 1 }),
         "indexer:refresh": (payload) => ({ jobId: payload.force ? "force-1" : "normal-1" }),
@@ -195,15 +208,41 @@ describe("registerIpcHandlers", () => {
           },
           lastRun: null,
         }),
+        "watcher:getLiveStatus": () => ({
+          ...createLiveStatusFixture(),
+          claudeHookState: createClaudeHookState({ installed: false }),
+        }),
         "watcher:stop": () => ({ ok: true }),
+        "claudeHooks:install": () => ({
+          ok: true,
+          state: createClaudeHookState({ installed: true }),
+        }),
+        "claudeHooks:remove": () => ({
+          ok: true,
+          state: createClaudeHookState({ installed: false }),
+        }),
+      },
+      {
+        onValidationError,
       },
     );
 
     const invalidCall = registry.get("indexer:refresh");
     await expect(invalidCall?.({}, { force: "wrong" })).rejects.toThrowError("Invalid payload");
+    expect(onValidationError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "indexer:refresh",
+        stage: "request",
+      }),
+    );
 
     const validCall = registry.get("app:getHealth");
     await expect(validCall?.({}, {})).resolves.toEqual({ status: "ok", version: "0.1.0" });
+
+    const paneStatePatchCall = registry.get("ui:setPaneState");
+    await expect(
+      paneStatePatchCall?.({}, { currentAutoRefreshStrategy: "watch-3s" }),
+    ).resolves.toEqual({ ok: true });
   });
 
   it("validates handler responses against the contract schema", async () => {
@@ -217,6 +256,7 @@ describe("registerIpcHandlers", () => {
       },
       {
         "app:getHealth": () => ({ status: "ok", version: "0.1.0" }),
+        "app:flushState": () => ({ ok: true }),
         "app:getSettingsInfo": () => settingsInfo,
         "db:getSchemaVersion": () => ({ schemaVersion: 1 }),
         "indexer:refresh": () => ({ jobId: "refresh-1" }),
@@ -357,7 +397,19 @@ describe("registerIpcHandlers", () => {
           },
           lastRun: null,
         }),
+        "watcher:getLiveStatus": () => ({
+          ...createLiveStatusFixture(),
+          claudeHookState: createClaudeHookState({ installed: false }),
+        }),
         "watcher:stop": () => ({ ok: true }),
+        "claudeHooks:install": () => ({
+          ok: true,
+          state: createClaudeHookState({ installed: true }),
+        }),
+        "claudeHooks:remove": () => ({
+          ok: true,
+          state: createClaudeHookState({ installed: false }),
+        }),
       },
     );
 

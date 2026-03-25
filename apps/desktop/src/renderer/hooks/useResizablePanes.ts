@@ -25,11 +25,17 @@ export function useResizablePanes(args: {
   } = args;
   const [projectPaneWidth, setProjectPaneWidth] = useState(initialProjectPaneWidth);
   const [sessionPaneWidth, setSessionPaneWidth] = useState(initialSessionPaneWidth);
+  const widthStateRef = useRef({
+    projectPaneWidth: initialProjectPaneWidth,
+    sessionPaneWidth: initialSessionPaneWidth,
+  });
+  const pendingFrameRef = useRef<number | null>(null);
   const resizeState = useRef<{
     pane: Pane;
     startX: number;
     projectPaneWidth: number;
     sessionPaneWidth: number;
+    handleElement: HTMLDivElement;
   } | null>(null);
 
   const beginResize = useCallback(
@@ -38,15 +44,17 @@ export function useResizablePanes(args: {
         return;
       }
       event.preventDefault();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
       resizeState.current = {
         pane,
         startX: event.clientX,
-        projectPaneWidth,
-        sessionPaneWidth,
+        projectPaneWidth: widthStateRef.current.projectPaneWidth,
+        sessionPaneWidth: widthStateRef.current.sessionPaneWidth,
+        handleElement: event.currentTarget,
       };
       document.body.classList.add("resizing-panels");
     },
-    [isHistoryLayout, projectPaneWidth, sessionPaneWidth],
+    [isHistoryLayout],
   );
 
   useEffect(() => {
@@ -57,26 +65,75 @@ export function useResizablePanes(args: {
       }
 
       const delta = event.clientX - active.startX;
+      let previewOffset = 0;
       if (active.pane === "project") {
-        setProjectPaneWidth(clamp(active.projectPaneWidth + delta, projectMin, projectMax));
+        const nextProjectPaneWidth = clamp(active.projectPaneWidth + delta, projectMin, projectMax);
+        previewOffset = nextProjectPaneWidth - active.projectPaneWidth;
+        widthStateRef.current = {
+          projectPaneWidth: nextProjectPaneWidth,
+          sessionPaneWidth: active.sessionPaneWidth,
+        };
+      } else {
+        const nextSessionPaneWidth = clamp(active.sessionPaneWidth + delta, sessionMin, sessionMax);
+        previewOffset = nextSessionPaneWidth - active.sessionPaneWidth;
+        widthStateRef.current = {
+          projectPaneWidth: active.projectPaneWidth,
+          sessionPaneWidth: nextSessionPaneWidth,
+        };
+      }
+
+      if (pendingFrameRef.current !== null) {
         return;
       }
 
-      setSessionPaneWidth(clamp(active.sessionPaneWidth + delta, sessionMin, sessionMax));
+      pendingFrameRef.current = window.requestAnimationFrame(() => {
+        pendingFrameRef.current = null;
+        active.handleElement.style.transform = `translateX(${Math.round(previewOffset)}px)`;
+      });
     };
 
-    const onPointerUp = () => {
+    const finishResize = () => {
+      if (!resizeState.current) {
+        return;
+      }
+      const active = resizeState.current;
+      if (pendingFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingFrameRef.current);
+        pendingFrameRef.current = null;
+      }
+      active.handleElement.style.transform = "";
+
+      if (active.pane === "project") {
+        setProjectPaneWidth(widthStateRef.current.projectPaneWidth);
+      } else {
+        setSessionPaneWidth(widthStateRef.current.sessionPaneWidth);
+      }
       resizeState.current = null;
       document.body.classList.remove("resizing-panels");
     };
 
     window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointerup", finishResize);
+    window.addEventListener("pointercancel", finishResize);
     return () => {
       window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointerup", finishResize);
+      window.removeEventListener("pointercancel", finishResize);
+      if (pendingFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingFrameRef.current);
+        pendingFrameRef.current = null;
+      }
+      resizeState.current?.handleElement.style.setProperty("transform", "");
+      document.body.classList.remove("resizing-panels");
     };
   }, [projectMax, projectMin, sessionMax, sessionMin]);
+
+  useEffect(() => {
+    if (resizeState.current) {
+      return;
+    }
+    widthStateRef.current = { projectPaneWidth, sessionPaneWidth };
+  }, [projectPaneWidth, sessionPaneWidth]);
 
   return {
     projectPaneWidth,

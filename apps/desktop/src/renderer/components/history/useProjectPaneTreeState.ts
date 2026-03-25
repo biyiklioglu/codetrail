@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ProjectSortField, ProjectSummary, ProjectViewMode } from "../../app/types";
+import type {
+  ProjectSortField,
+  ProjectSummary,
+  ProjectViewMode,
+  TreeAutoRevealSessionRequest,
+} from "../../app/types";
 import { buildProjectFolderGroups } from "../../lib/projectTree";
 import { mergeStableProjectOrder } from "../../lib/projectUpdates";
 import type { ProjectPaneHistoryMode, ProjectPaneTreeFocusedRow } from "./ProjectPane.types";
@@ -17,6 +22,8 @@ type UseProjectPaneTreeStateArgs = {
   projectProvidersKey: string;
   projectQueryInput: string;
   onEnsureTreeProjectSessionsLoaded: (projectId: string) => void;
+  autoRevealSessionRequest: TreeAutoRevealSessionRequest | null;
+  onConsumeAutoRevealSessionRequest: () => void;
 };
 
 export function useProjectPaneTreeState({
@@ -31,6 +38,8 @@ export function useProjectPaneTreeState({
   projectProvidersKey,
   projectQueryInput,
   onEnsureTreeProjectSessionsLoaded,
+  autoRevealSessionRequest,
+  onConsumeAutoRevealSessionRequest,
 }: UseProjectPaneTreeStateArgs) {
   const folderOrderControlKeyRef = useRef("");
   const folderExpansionResetKeyRef = useRef<string | null>(null);
@@ -87,6 +96,51 @@ export function useProjectPaneTreeState({
     folderExpansionResetKeyRef.current = folderExpansionResetKey;
     seenFolderIdsRef.current.clear();
   }, [folderExpansionResetKey, viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== "tree" || !autoRevealSessionRequest) {
+      return;
+    }
+
+    onEnsureTreeProjectSessionsLoaded(autoRevealSessionRequest.projectId);
+    setExpandedProjectIds((current) =>
+      current.includes(autoRevealSessionRequest.projectId)
+        ? current
+        : [...current, autoRevealSessionRequest.projectId],
+    );
+  }, [autoRevealSessionRequest, onEnsureTreeProjectSessionsLoaded, viewMode]);
+
+  useEffect(() => {
+    if (
+      viewMode !== "tree" ||
+      !autoRevealSessionRequest ||
+      !expandedProjectIds.includes(autoRevealSessionRequest.projectId)
+    ) {
+      return;
+    }
+
+    onEnsureTreeProjectSessionsLoaded(autoRevealSessionRequest.projectId);
+    const sessionRow = document.querySelector<HTMLElement>(
+      `[data-project-nav-kind="session"][data-session-id="${CSS.escape(autoRevealSessionRequest.sessionId)}"]`,
+    );
+    if (!sessionRow) {
+      return;
+    }
+
+    setTreeFocusedRow({
+      kind: "session",
+      id: autoRevealSessionRequest.sessionId,
+      projectId: autoRevealSessionRequest.projectId,
+    });
+    sessionRow.scrollIntoView?.({ block: "nearest" });
+    onConsumeAutoRevealSessionRequest();
+  }, [
+    autoRevealSessionRequest,
+    expandedProjectIds,
+    onConsumeAutoRevealSessionRequest,
+    onEnsureTreeProjectSessionsLoaded,
+    viewMode,
+  ]);
 
   useEffect(() => {
     if (

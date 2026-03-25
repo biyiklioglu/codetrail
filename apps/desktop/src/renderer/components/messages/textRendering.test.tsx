@@ -486,7 +486,13 @@ describe("theme-aware Shiki rendering", () => {
     document.documentElement.dataset.defaultDiffViewMode = "split";
     render(
       <DiffBlock
-        codeValue={["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -1,2000 +1,2000 @@", ...lines].join("\n")}
+        codeValue={[
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,2000 +1,2000 @@",
+          ...lines,
+        ].join("\n")}
         filePath="/Users/acme/repo/a.ts"
       />,
     );
@@ -814,7 +820,23 @@ describe("CodeBlock", () => {
           },
         },
       ],
-      diffTools: [],
+      diffTools: [
+        {
+          id: "diff:zed",
+          kind: "known",
+          label: "Zed",
+          appId: "zed",
+          detected: true,
+          command: "/usr/local/bin/zed",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
     } as never);
     openContentInEditorMock.mockClear();
 
@@ -879,7 +901,23 @@ describe("CodeBlock", () => {
           },
         },
       ],
-      diffTools: [],
+      diffTools: [
+        {
+          id: "diff:zed",
+          kind: "known",
+          label: "Zed",
+          appId: "zed",
+          detected: true,
+          command: "/usr/local/bin/zed",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
     } as never);
     openContentInEditorMock.mockClear();
 
@@ -944,7 +982,23 @@ describe("CodeBlock", () => {
           },
         },
       ],
-      diffTools: [],
+      diffTools: [
+        {
+          id: "diff:zed",
+          kind: "known",
+          label: "Zed",
+          appId: "zed",
+          detected: true,
+          command: "/usr/local/bin/zed",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
     } as never);
     openContentInEditorMock.mockClear();
 
@@ -1082,8 +1136,11 @@ describe("CodeBlock", () => {
     });
   });
 
-  it("does not expose Open for relative diff header paths", async () => {
+  it("resolves relative diff header paths into actionable viewer controls", async () => {
     resetContentViewerCachesForTests();
+    openFileInEditorMock.mockClear();
+    openDiffInEditorMock.mockClear();
+    openPathMock.mockClear();
     paneStateMock.externalTools = [];
     listAvailableEditorsMock.mockResolvedValue({
       editors: [
@@ -1103,7 +1160,23 @@ describe("CodeBlock", () => {
           },
         },
       ],
-      diffTools: [],
+      diffTools: [
+        {
+          id: "diff:zed",
+          kind: "known",
+          label: "Zed",
+          appId: "zed",
+          detected: true,
+          command: "/usr/local/bin/zed",
+          args: [],
+          capabilities: {
+            openFile: true,
+            openAtLineColumn: true,
+            openContent: true,
+            openDiff: true,
+          },
+        },
+      ],
     } as never);
 
     render(
@@ -1123,7 +1196,28 @@ describe("CodeBlock", () => {
     await waitFor(() => {
       expect(screen.getByText("src/a.ts")).toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: "Open" })).toBeNull();
+    await screen.findByRole("button", { name: "Diff" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    fireEvent.click(screen.getByRole("button", { name: "Diff" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+
+    await waitFor(() => {
+      expect(openFileInEditorMock).toHaveBeenCalledWith(
+        "/Users/acme/repo/src/a.ts",
+        expect.objectContaining({ editorId: "editor:vscode" }),
+      );
+      expect(openDiffInEditorMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filePath: "/Users/acme/repo/src/a.ts",
+          title: "src/a.ts",
+        }),
+      );
+      expect(openPathMock).toHaveBeenCalledWith("/Users/acme/repo/src/a.ts");
+    });
+
+    expect(screen.getByRole("button", { name: "Open With" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reveal" })).toBeInTheDocument();
   });
 
   it("orders Open With menu items using the saved external tool order", async () => {

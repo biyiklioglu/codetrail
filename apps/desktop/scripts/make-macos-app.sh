@@ -59,6 +59,49 @@ APP_BUNDLE="${OUT_DIR}/${APP_NAME}.app"
 ELECTRON_APP="${APP_DIR}/node_modules/electron/dist/Electron.app"
 RESOURCES_APP="${APP_BUNDLE}/Contents/Resources/app"
 ICON_ICNS="${APP_DIR}/assets/icons/build/codetrail.icns"
+APP_BUNDLE_ID="com.codetrail.desktop"
+INSTALL_NOTES_PATH="${OUT_DIR}/INSTALL.txt"
+PACKAGE_STAGING_ROOT=""
+PACKAGE_DIR=""
+
+sign_app_bundle() {
+  local bundle_path="$1"
+  echo "[5a/5] Re-signing final app bundle ad-hoc..."
+  codesign \
+    --force \
+    --deep \
+    --sign - \
+    --timestamp=none \
+    --identifier "${APP_BUNDLE_ID}" \
+    "${bundle_path}"
+
+  echo "[5b/5] Verifying final app bundle..."
+  codesign --verify --deep --strict --verbose=2 "${bundle_path}"
+}
+
+write_install_notes() {
+  cat > "${INSTALL_NOTES_PATH}" <<'EOF'
+Code Trail macOS install notes
+==============================
+
+1. Move "Code Trail.app" to /Applications if you want.
+2. Try opening it normally.
+3. If macOS blocks it, right-click the app in Finder and choose "Open".
+4. If you still need to allow it manually, run:
+
+   xattr -dr com.apple.quarantine "/Applications/Code Trail.app"
+
+If you did not move it to /Applications, use the app's current path instead.
+EOF
+}
+
+cleanup_package_staging() {
+  if [[ -n "${PACKAGE_STAGING_ROOT}" && -d "${PACKAGE_STAGING_ROOT}" ]]; then
+    rm -rf "${PACKAGE_STAGING_ROOT}"
+  fi
+}
+
+trap cleanup_package_staging EXIT
 
 if [[ ! -d "${ELECTRON_APP}" ]]; then
   echo "Missing Electron app template at ${ELECTRON_APP}" >&2
@@ -74,7 +117,7 @@ PLIST="${APP_BUNDLE}/Contents/Info.plist"
 if [[ -f "${PLIST}" ]]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleName ${APP_NAME}" "${PLIST}" >/dev/null 2>&1 || true
   /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${APP_NAME}" "${PLIST}" >/dev/null 2>&1 || true
-  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.codetrail.desktop" "${PLIST}" >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${APP_BUNDLE_ID}" "${PLIST}" >/dev/null 2>&1 || true
 fi
 
 if [[ -f "${ICON_ICNS}" ]]; then
@@ -97,8 +140,20 @@ for dep in better-sqlite3 @parcel/watcher "${PARCEL_WATCHER_PLATFORM}" react rea
   fi
 done
 
+sign_app_bundle "${APP_BUNDLE}"
+write_install_notes
+
 ZIP_PATH="${OUT_DIR}/${APP_SLUG}-${ARCH}.zip"
-ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${ZIP_PATH}"
+PACKAGE_STAGING_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/${APP_SLUG}-${ARCH}-XXXXXX")"
+PACKAGE_DIR="${PACKAGE_STAGING_ROOT}/${APP_SLUG}-${ARCH}"
+mkdir -p "${PACKAGE_DIR}"
+ditto "${APP_BUNDLE}" "${PACKAGE_DIR}/${APP_NAME}.app"
+cp "${INSTALL_NOTES_PATH}" "${PACKAGE_DIR}/INSTALL.txt"
+ditto -c -k --sequesterRsrc --keepParent "${PACKAGE_DIR}" "${ZIP_PATH}"
 
 echo "Done. Open artifacts in:"
 echo "  ${APP_DIR}/out"
+echo
+echo "This build is ad-hoc signed only. Users who download the zip from the internet may still"
+echo "need to use Finder Open or remove quarantine with:"
+echo "  xattr -dr com.apple.quarantine \"${APP_NAME}.app\""

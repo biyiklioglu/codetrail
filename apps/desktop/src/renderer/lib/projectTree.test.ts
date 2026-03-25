@@ -1,48 +1,66 @@
 import { describe, expect, it } from "vitest";
 
+import type { ProjectSummary } from "../app/types";
 import { buildProjectFolderGroups } from "./projectTree";
 
-const projects = [
-  {
+function createProjectSummary(
+  overrides: Partial<ProjectSummary> & Pick<ProjectSummary, "id" | "provider" | "name" | "path">,
+): ProjectSummary {
+  const { id, provider, name, path, ...rest } = overrides;
+  return {
+    id,
+    provider,
+    name,
+    path,
+    providerProjectKey: null,
+    repositoryUrl: null,
+    resolutionState: null,
+    resolutionSource: null,
+    sessionCount: 1,
+    messageCount: 0,
+    bookmarkCount: 0,
+    lastActivity: null,
+    ...rest,
+  };
+}
+
+const projects: ProjectSummary[] = [
+  createProjectSummary({
     id: "project_1",
-    provider: "claude" as const,
+    provider: "claude",
     name: "Alpha",
     path: "/Users/test/src/alpha",
     sessionCount: 2,
     messageCount: 12,
-    bookmarkCount: 0,
     lastActivity: "2026-03-01T12:00:00.000Z",
-  },
-  {
+  }),
+  createProjectSummary({
     id: "project_2",
-    provider: "codex" as const,
+    provider: "codex",
     name: "Beta",
     path: "/Users/test/src/beta",
     sessionCount: 9,
     messageCount: 36,
-    bookmarkCount: 0,
     lastActivity: "2026-03-01T13:00:00.000Z",
-  },
-  {
+  }),
+  createProjectSummary({
     id: "project_3",
-    provider: "gemini" as const,
+    provider: "gemini",
     name: "Gamma",
     path: "/tmp/gamma",
     sessionCount: 3,
     messageCount: 14,
-    bookmarkCount: 0,
     lastActivity: "2026-03-01T10:00:00.000Z",
-  },
-  {
+  }),
+  createProjectSummary({
     id: "project_4",
-    provider: "claude" as const,
+    provider: "claude",
     name: "Loose",
     path: "",
     sessionCount: 1,
     messageCount: 2,
-    bookmarkCount: 0,
     lastActivity: null,
-  },
+  }),
 ];
 
 describe("buildProjectFolderGroups", () => {
@@ -80,16 +98,15 @@ describe("buildProjectFolderGroups", () => {
     const groups = buildProjectFolderGroups(
       [
         ...projects,
-        {
+        createProjectSummary({
           id: "project_5",
-          provider: "cursor" as const,
+          provider: "cursor",
           name: "Alpha Two",
           path: "/Users/test/src/alpha",
           sessionCount: 4,
           messageCount: 18,
-          bookmarkCount: 0,
           lastActivity: "2026-03-01T14:00:00.000Z",
-        },
+        }),
       ],
       "last_active",
       "desc",

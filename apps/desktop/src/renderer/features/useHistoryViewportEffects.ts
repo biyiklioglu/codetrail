@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from "react";
 
 import type { HistoryMessage, PendingMessagePageNavigation } from "../app/types";
 import { getEdgeItemId } from "../lib/historyNavigation";
+import { scheduleHistoryAutoFollowScroll } from "./historyAutoFollowScroll";
 import {
   getMessageListFingerprint,
   scrollFocusedHistoryMessageIntoView,
@@ -68,6 +69,15 @@ export function useHistoryViewportEffects({
     referenceOffsetTop: number;
   } | null>;
 }) {
+  const autoFollowScrollCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      autoFollowScrollCleanupRef.current?.();
+      autoFollowScrollCleanupRef.current = null;
+    };
+  }, []);
+
   useEffect(() => {
     if (!messageListRef.current) {
       return;
@@ -81,7 +91,7 @@ export function useHistoryViewportEffects({
     }
 
     const refreshCtx = refreshContextRef.current;
-    if (refreshCtx?.autoScroll) {
+    if (refreshCtx?.followEligible) {
       pendingAutoScrollRef.current = true;
       prevMessageIdsRef.current = refreshCtx.prevMessageIds;
       refreshContextRef.current = null;
@@ -156,7 +166,12 @@ export function useHistoryViewportEffects({
 
     messageListRef.current.focus({ preventScroll: true });
     setPendingMessageAreaFocus(false);
-  }, [messageListRef, pendingMessageAreaFocus, setPendingMessageAreaFocus, visibleFocusedMessageId]);
+  }, [
+    messageListRef,
+    pendingMessageAreaFocus,
+    setPendingMessageAreaFocus,
+    visibleFocusedMessageId,
+  ]);
 
   useEffect(() => {
     if (!pendingMessagePageNavigation) {
@@ -192,11 +207,13 @@ export function useHistoryViewportEffects({
     const refreshCtx = refreshContextRef.current;
     if (refreshCtx !== null) {
       refreshContextRef.current = null;
-      if (refreshCtx.autoScroll) {
+      if (refreshCtx.followEligible) {
         const currentFingerprint = getMessageListFingerprint(activeHistoryMessages);
         if (currentFingerprint !== refreshCtx.prevMessageIds) {
-          window.requestAnimationFrame(() => {
-            container.scrollTop = activeMessageSortDirection === "asc" ? container.scrollHeight : 0;
+          autoFollowScrollCleanupRef.current?.();
+          autoFollowScrollCleanupRef.current = scheduleHistoryAutoFollowScroll({
+            container,
+            sortDirection: activeMessageSortDirection,
           });
         }
         return;
@@ -220,8 +237,10 @@ export function useHistoryViewportEffects({
       const currentFingerprint = getMessageListFingerprint(activeHistoryMessages);
       if (currentFingerprint !== prevMessageIdsRef.current) {
         prevMessageIdsRef.current = currentFingerprint;
-        window.requestAnimationFrame(() => {
-          container.scrollTop = activeMessageSortDirection === "asc" ? container.scrollHeight : 0;
+        autoFollowScrollCleanupRef.current?.();
+        autoFollowScrollCleanupRef.current = scheduleHistoryAutoFollowScroll({
+          container,
+          sortDirection: activeMessageSortDirection,
         });
       }
       return;

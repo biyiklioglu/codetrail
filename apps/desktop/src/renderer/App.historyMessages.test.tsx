@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -12,6 +13,18 @@ import {
 import { renderWithClient } from "./test/renderWithClient";
 
 describe("App history messages", () => {
+  const dispatchWindowShortcut = async (init: KeyboardEventInit) => {
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", init));
+    });
+  };
+
+  const dispatchElementShortcut = async (target: EventTarget, init: KeyboardEventInit) => {
+    await act(async () => {
+      target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ...init }));
+    });
+  };
+
   it("focuses visible messages with Cmd+Up/Down", async () => {
     installScrollIntoViewMock();
 
@@ -23,19 +36,19 @@ describe("App history messages", () => {
       expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
     });
 
-    fireEvent.keyDown(window, { key: "ArrowDown", metaKey: true });
+    await dispatchWindowShortcut({ key: "ArrowDown", metaKey: true });
     await waitFor(() => {
       expect(getFocusedHistoryMessageId(container)).toBe("m1");
       expect(document.activeElement).toBe(messageList());
     });
 
-    fireEvent.keyDown(window, { key: "ArrowDown", metaKey: true });
+    await dispatchWindowShortcut({ key: "ArrowDown", metaKey: true });
     await waitFor(() => {
       expect(getFocusedHistoryMessageId(container)).toBe("m2");
       expect(document.activeElement).toBe(messageList());
     });
 
-    fireEvent.keyDown(window, { key: "ArrowUp", metaKey: true });
+    await dispatchWindowShortcut({ key: "ArrowUp", metaKey: true });
     await waitFor(() => {
       expect(getFocusedHistoryMessageId(container)).toBe("m1");
       expect(document.activeElement).toBe(messageList());
@@ -50,15 +63,22 @@ describe("App history messages", () => {
     const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
 
     await waitFor(() => {
-      expect(screen.getByText("Page 1 / 5 (250 messages)")).toBeInTheDocument();
+      expect(screen.getByText("250 messages")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
     });
 
-    fireEvent.keyDown(window, { key: "ArrowDown", metaKey: true });
-    fireEvent.keyDown(window, { key: "ArrowDown", metaKey: true });
-    fireEvent.keyDown(window, { key: "ArrowDown", metaKey: true });
+    await dispatchWindowShortcut({ key: "ArrowDown", metaKey: true });
+    await waitFor(() => {
+      expect(getFocusedHistoryMessageId(container)).toBe("m1");
+    });
+    await dispatchWindowShortcut({ key: "ArrowDown", metaKey: true });
+    await waitFor(() => {
+      expect(getFocusedHistoryMessageId(container)).toBe("m2");
+    });
+    await dispatchWindowShortcut({ key: "ArrowDown", metaKey: true });
 
     await waitFor(() => {
-      expect(screen.getByText("Page 2 / 5 (250 messages)")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
       expect(getFocusedHistoryMessageId(container)).toBe("m1");
       expect(document.activeElement).toBe(messageList());
     });
@@ -148,7 +168,7 @@ describe("App history messages", () => {
       configurable: true,
     });
 
-    fireEvent.keyDown(window, { key: "ArrowDown", metaKey: true });
+    await dispatchWindowShortcut({ key: "ArrowDown", metaKey: true });
 
     await waitFor(() => {
       expect(scrollTo).toHaveBeenCalledWith({ top: 80 });
@@ -256,12 +276,11 @@ describe("App history messages", () => {
     expect(document.activeElement).toBe(messageList);
   });
 
-  it("lets Cmd+Up/Cmd+Down from the history search box move focus into the message list", async () => {
+  it("lets Cmd+Up/Cmd+Down from the history search box keep focus in the search box", async () => {
     installScrollIntoViewMock();
 
     const client = createAppClient();
     const { container } = renderWithClient(<App />, client);
-    const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
 
     await waitFor(() => {
       expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
@@ -274,17 +293,86 @@ describe("App history messages", () => {
     }
 
     searchInput.focus();
-    fireEvent.keyDown(searchInput, { key: "ArrowDown", metaKey: true });
+    await dispatchElementShortcut(searchInput, { key: "ArrowDown", metaKey: true });
     await waitFor(() => {
       expect(getFocusedHistoryMessageId(container)).toBe("m1");
-      expect(document.activeElement).toBe(messageList());
+      expect(document.activeElement).toBe(searchInput);
     });
 
     searchInput.focus();
-    fireEvent.keyDown(searchInput, { key: "ArrowUp", metaKey: true });
+    await dispatchElementShortcut(searchInput, { key: "ArrowUp", metaKey: true });
     await waitFor(() => {
       expect(getFocusedHistoryMessageId(container)).toBe("m1");
-      expect(document.activeElement).toBe(messageList());
+      expect(document.activeElement).toBe(searchInput);
+    });
+  });
+
+  it("keeps the message pane focused after click-based message and pane actions", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(<App />, client);
+    const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    const messageListElement = messageList();
+    expect(messageListElement).not.toBeNull();
+    if (!messageListElement) {
+      throw new Error("Expected message list");
+    }
+
+    messageListElement.focus();
+    await user.click(screen.getAllByRole("button", { name: "Collapse message" })[0]!);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(messageListElement);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Expand all messages" }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(messageListElement);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(messageListElement);
+    });
+  });
+
+  it("keeps the message pane focused when clicking empty header space", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(<App />, client);
+    const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    const messageListElement = messageList();
+    const header = container.querySelector<HTMLElement>(".msg-header");
+    expect(messageListElement).not.toBeNull();
+    expect(header).not.toBeNull();
+    if (!messageListElement || !header) {
+      throw new Error("Expected message list and header");
+    }
+
+    messageListElement.focus();
+    await user.pointer([
+      {
+        target: header,
+        coords: { clientX: 12, clientY: 12 },
+        keys: "[MouseLeft]",
+      },
+    ]);
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(messageListElement);
     });
   });
 

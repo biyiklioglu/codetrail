@@ -1,5 +1,6 @@
 import { basename, extname } from "node:path";
 
+import { compactMetadata } from "../../metadata";
 import {
   type ResolvedDiscoveryDependencies,
   getDiscoveryPath,
@@ -30,11 +31,12 @@ function toDiscoveredCodexFile(
   const meta = readCodexJsonlMeta(filePath, dependencies);
   const sourceSessionId = meta.sessionId ?? basename(filePath, ".jsonl");
   const sessionIdentity = providerSessionIdentity("codex", sourceSessionId, filePath);
-  const projectPath = meta.cwd ?? "";
+  const projectPath = meta.canonicalProjectPath ?? meta.cwd ?? "";
 
   return {
     provider: "codex",
     projectPath,
+    canonicalProjectPath: projectPath,
     projectName: projectNameFromPath(projectPath),
     sessionIdentity,
     sourceSessionId,
@@ -47,6 +49,25 @@ function toDiscoveredCodexFile(
       unresolvedProject: false,
       gitBranch: meta.gitBranch,
       cwd: meta.cwd,
+      worktreeLabel: meta.worktreeLabel,
+      worktreeSource: meta.worktreeSource,
+      repositoryUrl: meta.repositoryUrl,
+      forkedFromSessionId: meta.forkedFromSessionId,
+      parentSessionCwd: meta.parentSessionCwd,
+      providerProjectKey: null,
+      providerSessionId: meta.sessionId ?? sourceSessionId,
+      sessionKind: meta.forkedFromSessionId ? "forked" : "regular",
+      gitCommitHash: meta.gitCommitHash,
+      providerClient: meta.originator,
+      providerSource: meta.source,
+      providerClientVersion: meta.cliVersion,
+      lineageParentId: meta.forkedFromSessionId,
+      resolutionSource: meta.resolutionSource,
+      projectMetadata: null,
+      sessionMetadata: compactMetadata({
+        modelProvider: meta.modelProvider,
+        dynamicToolsCount: meta.dynamicToolsCount || undefined,
+      }),
     },
   };
 }

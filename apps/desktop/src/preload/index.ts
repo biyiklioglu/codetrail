@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core";
 
+import { APP_COMMAND_CHANNEL, type AppCommand } from "../shared/appCommands";
 import {
   HISTORY_EXPORT_PROGRESS_CHANNEL,
   type HistoryExportProgressPayload,
@@ -10,6 +11,7 @@ import {
 type InvokeApi = {
   invoke<C extends IpcChannel>(channel: C, payload: IpcRequestInput<C>): Promise<IpcResponse<C>>;
   onHistoryExportProgress(listener: (payload: HistoryExportProgressPayload) => void): () => void;
+  onAppCommand(listener: (command: AppCommand) => void): () => void;
 };
 
 const api: InvokeApi = {
@@ -21,6 +23,15 @@ const api: InvokeApi = {
     ipcRenderer.on(HISTORY_EXPORT_PROGRESS_CHANNEL, handler);
     return () => {
       ipcRenderer.removeListener(HISTORY_EXPORT_PROGRESS_CHANNEL, handler);
+    };
+  },
+  onAppCommand: (listener) => {
+    const handler = (_event: unknown, command: AppCommand) => {
+      listener(command);
+    };
+    ipcRenderer.on(APP_COMMAND_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(APP_COMMAND_CHANNEL, handler);
     };
   },
 };

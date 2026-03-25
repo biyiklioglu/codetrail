@@ -15,6 +15,7 @@ describe("codetrailClient", () => {
     const providedClient: CodetrailClient = {
       invoke: vi.fn(async () => ({ ok: true }) as never),
       onHistoryExportProgress: vi.fn(() => () => undefined),
+      onAppCommand: vi.fn(() => () => undefined),
     };
 
     const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -31,6 +32,7 @@ describe("codetrailClient", () => {
       get: () => ({
         invoke: vi.fn(async () => ({ ok: true }) as never),
         onHistoryExportProgress: vi.fn(() => () => undefined),
+        onAppCommand: vi.fn(() => () => undefined),
       }),
     });
 

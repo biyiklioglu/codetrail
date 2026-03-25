@@ -6,6 +6,7 @@ import { openDatabase, runIncrementalIndexing } from "@codetrail/core";
 import { describe, expect, it } from "vitest";
 
 import {
+  createQueryService,
   getSessionDetail,
   listProjectBookmarks,
   listProjects,
@@ -279,6 +280,32 @@ describe("queryService", () => {
     cleanup();
   });
 
+  it("lists recent live session files by provider and mtime", () => {
+    const { dbPath, cleanup } = setupIndexedDb();
+    const queryService = createQueryService(dbPath);
+
+    const recentFiles = queryService.listRecentLiveSessionFiles({
+      providers: ["codex", "claude"],
+      minFileMtimeMs: 0,
+      limit: 10,
+    });
+
+    expect(recentFiles).toHaveLength(2);
+    expect(recentFiles.map((entry) => entry.provider).sort()).toEqual(["claude", "codex"]);
+    expect(recentFiles[0]?.fileMtimeMs).toBeGreaterThanOrEqual(recentFiles[1]?.fileMtimeMs ?? 0);
+
+    const claudeOnly = queryService.listRecentLiveSessionFiles({
+      providers: ["claude"],
+      minFileMtimeMs: 0,
+      limit: 10,
+    });
+    expect(claudeOnly).toHaveLength(1);
+    expect(claudeOnly[0]?.provider).toBe("claude");
+
+    queryService.close();
+    cleanup();
+  });
+
   it("runs search queries with filter and facet parity", () => {
     const { dbPath, cleanup } = setupIndexedDb();
 
@@ -493,6 +520,7 @@ describe("queryService", () => {
       projectId: older.project_id,
       query: "",
       categories: undefined,
+      sortDirection: "desc",
     });
     expect(listed.totalCount).toBe(2);
     expect(listed.results[0]?.message.id).toBe(newer.id);

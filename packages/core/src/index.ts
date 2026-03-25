@@ -7,6 +7,7 @@ export * from "./discovery";
 export * from "./db/bootstrap";
 export * from "./db/constants";
 export * from "./indexing";
+export * from "./live";
 export * from "./parsing";
 export * from "./search";
 export * from "./tooling/editOperations";

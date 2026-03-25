@@ -16,6 +16,8 @@ export type SearchQueryResponse = IpcResponse<"search:query">;
 export type SearchResult = SearchQueryResponse["results"][number];
 export type SettingsInfoResponse = IpcResponse<"app:getSettingsInfo">;
 export type WatchStatsResponse = IpcResponse<"watcher:getStats">;
+export type WatchLiveStatusResponse = IpcResponse<"watcher:getLiveStatus">;
+export type ClaudeHookStateResponse = WatchLiveStatusResponse["claudeHookState"];
 export type PaneStateSnapshot = IpcResponse<"ui:getPaneState"> & IpcResponse<"indexer:getConfig">;
 
 export type HistoryMessage =
@@ -26,7 +28,6 @@ export type MainView = "history" | "search" | "settings" | "help";
 export type SortDirection = "asc" | "desc";
 export type ProjectViewMode = "list" | "tree";
 export type ProjectSortField = "last_active" | "name";
-export type BulkExpandScope = "all" | MessageCategory;
 
 export type HistorySelection =
   | { mode: "project_all"; projectId: string }
@@ -51,6 +52,11 @@ export type HistorySearchNavigation = {
 export type PendingRevealTarget = {
   sourceId: string;
   messageId: string;
+};
+
+export type TreeAutoRevealSessionRequest = {
+  projectId: string;
+  sessionId: string;
 };
 
 export type PendingMessagePageNavigation = {

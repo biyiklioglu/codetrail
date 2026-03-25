@@ -18,7 +18,7 @@ function decodeCursorProjectPath(
   projectDir: string,
   encodedName: string,
   dependencies: ResolvedDiscoveryDependencies,
-): { projectPath: string; unresolvedProject: boolean } {
+): { projectPath: string; unresolvedProject: boolean; resolutionSource: string } {
   const terminalsDir = join(projectDir, "terminals");
   if (safeIsDirectory(terminalsDir, dependencies)) {
     for (const entry of safeReadDir(terminalsDir, dependencies)) {
@@ -33,7 +33,7 @@ function decodeCursorProjectPath(
       if (cwdMatch?.[1]) {
         const cwd = normalizeCursorTerminalCwd(cwdMatch[1]);
         if (cwd && isLikelyAbsolutePath(cwd)) {
-          return { projectPath: cwd, unresolvedProject: false };
+          return { projectPath: cwd, unresolvedProject: false, resolutionSource: "terminal_cwd" };
         }
       }
     }
@@ -41,10 +41,10 @@ function decodeCursorProjectPath(
 
   const naive = `/${encodedName.replaceAll("-", "/")}`;
   if (safeIsDirectory(naive, dependencies)) {
-    return { projectPath: naive, unresolvedProject: false };
+    return { projectPath: naive, unresolvedProject: false, resolutionSource: "folder_decode" };
   }
 
-  return { projectPath: "", unresolvedProject: true };
+  return { projectPath: "", unresolvedProject: true, resolutionSource: "unresolved" };
 }
 
 function normalizeCursorTerminalCwd(value: string): string | null {
@@ -112,6 +112,7 @@ function toDiscoveredCursorFile(
   return {
     provider: "cursor",
     projectPath,
+    canonicalProjectPath: projectPath,
     projectName,
     sessionIdentity,
     sourceSessionId: uuid,
@@ -124,6 +125,22 @@ function toDiscoveredCursorFile(
       unresolvedProject,
       gitBranch: null,
       cwd: projectPath || null,
+      worktreeLabel: null,
+      worktreeSource: null,
+      repositoryUrl: null,
+      forkedFromSessionId: null,
+      parentSessionCwd: null,
+      providerProjectKey: encodedName,
+      providerSessionId: uuid,
+      sessionKind: "regular",
+      gitCommitHash: null,
+      providerClient: "Cursor",
+      providerSource: null,
+      providerClientVersion: null,
+      lineageParentId: null,
+      resolutionSource: cursorProject.resolutionSource,
+      projectMetadata: null,
+      sessionMetadata: null,
     },
   };
 }

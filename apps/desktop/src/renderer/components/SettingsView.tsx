@@ -1,7 +1,6 @@
 import { type ReactNode, useState } from "react";
 
 import {
-  type MessageCategory,
   PROVIDER_LIST,
   type Provider,
   type SystemMessageRegexRules,
@@ -21,8 +20,6 @@ import {
   THEME_GROUPS,
   type ThemeMode,
   UI_DIFF_VIEW_MODE_VALUES,
-  UI_MESSAGE_CATEGORY_VALUES,
-  UI_MESSAGE_PAGE_SIZE_VALUES,
   UI_MONO_FONT_SIZE_VALUES,
   UI_MONO_FONT_VALUES,
   UI_REGULAR_FONT_SIZE_VALUES,
@@ -33,13 +30,25 @@ import {
   getShikiThemeGroupForUiTheme,
   isShikiThemeId,
 } from "../../shared/uiPreferences";
-import type { SettingsInfoResponse, WatchStatsResponse } from "../app/types";
+import type {
+  ClaudeHookStateResponse,
+  SettingsInfoResponse,
+  WatchLiveStatusResponse,
+  WatchStatsResponse,
+} from "../app/types";
 import { copyTextToClipboard } from "../lib/clipboard";
+import { formatInteger } from "../lib/numberFormatting";
 import { openPath } from "../lib/pathActions";
 import { compactPath, prettyCategory, toErrorMessage } from "../lib/viewUtils";
 import { ToolbarIcon } from "./ToolbarIcon";
-import { ZoomPercentInput } from "./ZoomPercentInput";
 import { ExternalToolsSection } from "./settings/ExternalToolsSection";
+import { LiveWatchSection } from "./settings/LiveWatchSection";
+import {
+  InlineSwitchRow,
+  SectionCard,
+  SectionHeader,
+  SettingsSwitch,
+} from "./settings/SettingsSectionPrimitives";
 
 type SettingsAppearanceProps = {
   theme: ThemeMode;
@@ -119,8 +128,6 @@ type SettingsIndexingProps = {
 };
 
 type SettingsMessageRulesProps = {
-  expandedByDefaultCategories: MessageCategory[];
-  onToggleExpandedByDefault: (category: MessageCategory) => void;
   systemMessageRegexRules: SystemMessageRegexRules;
   onAddSystemMessageRegexRule: (provider: Provider) => void;
   onUpdateSystemMessageRegexRule: (provider: Provider, index: number, pattern: string) => void;
@@ -145,8 +152,6 @@ const MONO_FONT_SIZE_OPTIONS: Array<{ value: MonoFontSize; label: string }> =
 
 const REGULAR_FONT_SIZE_OPTIONS: Array<{ value: RegularFontSize; label: string }> =
   UI_REGULAR_FONT_SIZE_VALUES.map((value) => ({ value, label: value }));
-const MESSAGE_PAGE_SIZE_OPTIONS: Array<{ value: MessagePageSize; label: string }> =
-  UI_MESSAGE_PAGE_SIZE_VALUES.map((value) => ({ value, label: `${value}` }));
 const VIEWER_WRAP_MODE_OPTIONS: Array<{ value: ViewerWrapMode; label: string }> = [
   { value: "nowrap", label: "Not Wrapped" },
   { value: "wrap", label: "Wrapped" },
@@ -165,16 +170,6 @@ const PROVIDER_ICONS: Record<Provider, string> = {
   copilot: "P",
 };
 
-const MESSAGE_CATEGORY_ICONS: Record<MessageCategory, string> = {
-  user: "U",
-  assistant: "A",
-  tool_edit: "W",
-  tool_use: "T",
-  tool_result: "R",
-  thinking: "Q",
-  system: "S",
-};
-
 export function SettingsView({
   info,
   loading,
@@ -182,6 +177,16 @@ export function SettingsView({
   diagnostics,
   diagnosticsLoading,
   diagnosticsError,
+  liveStatus,
+  liveStatusError,
+  claudeHookState,
+  claudeHookActionPending,
+  onInstallClaudeHooks,
+  onRemoveClaudeHooks,
+  liveWatchEnabled,
+  liveWatchRowHasBackground,
+  onLiveWatchEnabledChange,
+  onLiveWatchRowHasBackgroundChange,
   appearance,
   indexing,
   messageRules,
@@ -193,6 +198,16 @@ export function SettingsView({
   diagnostics: WatchStatsResponse | null;
   diagnosticsLoading: boolean;
   diagnosticsError: string | null;
+  liveStatus: WatchLiveStatusResponse | null;
+  liveStatusError: string | null;
+  claudeHookState: ClaudeHookStateResponse | null;
+  claudeHookActionPending: "install" | "remove" | null;
+  onInstallClaudeHooks: () => void;
+  onRemoveClaudeHooks: () => void;
+  liveWatchEnabled: boolean;
+  liveWatchRowHasBackground: boolean;
+  onLiveWatchEnabledChange: (enabled: boolean) => void;
+  onLiveWatchRowHasBackgroundChange: (enabled: boolean) => void;
   appearance: SettingsAppearanceProps;
   indexing: SettingsIndexingProps;
   messageRules: SettingsMessageRulesProps;
@@ -318,48 +333,6 @@ export function SettingsView({
                         </svg>
                       </span>
                     </div>
-                  </SettingsField>
-
-                  <SettingsField label="Messages per page">
-                    <div className="settings-select-wrap">
-                      <select
-                        className="settings-select"
-                        aria-label="Messages per page"
-                        value={appearance.messagePageSize}
-                        onChange={(event) =>
-                          appearance.onMessagePageSizeChange(
-                            selectNumericValueOrFallback(
-                              event.target.value,
-                              UI_MESSAGE_PAGE_SIZE_VALUES,
-                              appearance.messagePageSize,
-                            ),
-                          )
-                        }
-                      >
-                        {MESSAGE_PAGE_SIZE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="settings-select-chevron" aria-hidden>
-                        <svg viewBox="0 0 12 12">
-                          <title>Open menu</title>
-                          <path d="M3 4.5L6 7.5L9 4.5" />
-                        </svg>
-                      </span>
-                    </div>
-                  </SettingsField>
-
-                  <SettingsField label="Zoom">
-                    <ZoomPercentInput
-                      value={appearance.zoomPercent}
-                      onCommit={appearance.onZoomPercentChange}
-                      ariaLabel="Zoom"
-                      title="Zoom level (60%-175%)"
-                      wrapperClassName="settings-zoom-control"
-                      inputClassName="settings-zoom-input"
-                    />
                   </SettingsField>
 
                   <SettingsField label="Default text viewer wrap">
@@ -582,42 +555,6 @@ export function SettingsView({
                 </InlineSwitchRow>
               </SectionCard>
 
-              <SectionCard>
-                <SectionHeader
-                  tone="expansion"
-                  icon="⊞"
-                  title="Default Expansion"
-                  subtitle="Which message types should start expanded in message view."
-                />
-                <div className="settings-token-grid">
-                  {UI_MESSAGE_CATEGORY_VALUES.map((category) => {
-                    const active = messageRules.expandedByDefaultCategories.includes(category);
-                    return (
-                      <button
-                        key={category}
-                        type="button"
-                        className={`settings-token${active ? " is-active" : ""}`}
-                        onClick={() => messageRules.onToggleExpandedByDefault(category)}
-                        aria-pressed={active}
-                        aria-label={prettyCategory(category)}
-                        title={`Toggle default expansion for ${prettyCategory(category)}`}
-                      >
-                        <span className="settings-token-icon" aria-hidden>
-                          {MESSAGE_CATEGORY_ICONS[category]}
-                        </span>
-                        <span className="settings-token-label">{prettyCategory(category)}</span>
-                        <span className="settings-token-check" aria-hidden>
-                          <svg viewBox="0 0 14 14">
-                            <title>Selected</title>
-                            <path d="M3 7l3 3 5-5" />
-                          </svg>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </SectionCard>
-
               <SectionCard padded={false}>
                 <div className="settings-section-block">
                   <SectionHeader
@@ -688,6 +625,19 @@ export function SettingsView({
                   refresh, but never touches the raw transcript files on disk.
                 </div>
               </SectionCard>
+
+              <LiveWatchSection
+                liveStatus={liveStatus}
+                liveStatusError={liveStatusError}
+                claudeHookState={claudeHookState}
+                claudeHookActionPending={claudeHookActionPending}
+                onInstallClaudeHooks={onInstallClaudeHooks}
+                onRemoveClaudeHooks={onRemoveClaudeHooks}
+                liveWatchEnabled={liveWatchEnabled}
+                liveWatchRowHasBackground={liveWatchRowHasBackground}
+                onLiveWatchEnabledChange={onLiveWatchEnabledChange}
+                onLiveWatchRowHasBackgroundChange={onLiveWatchRowHasBackgroundChange}
+              />
 
               <SectionCard>
                 <SectionHeader
@@ -905,91 +855,12 @@ export function SettingsView({
   );
 }
 
-function SectionCard({
-  children,
-  padded = true,
-}: {
-  children: ReactNode;
-  padded?: boolean;
-}) {
-  return <section className={`settings-section${padded ? "" : " no-padding"}`}>{children}</section>;
-}
-
-function SectionHeader({
-  icon,
-  title,
-  subtitle,
-  tone,
-}: {
-  icon: string;
-  title: string;
-  subtitle: string;
-  tone:
-    | "theme"
-    | "fonts"
-    | "provider"
-    | "expansion"
-    | "warning"
-    | "rules"
-    | "storage"
-    | "discovery"
-    | "diagnostics"
-    | "breakdown";
-}) {
-  return (
-    <div className="settings-section-header">
-      <div className={`settings-section-icon settings-section-icon-${tone}`} aria-hidden>
-        {icon}
-      </div>
-      <div className="settings-section-heading">
-        <h3>{title}</h3>
-        <p>{subtitle}</p>
-      </div>
-    </div>
-  );
-}
-
 function SettingsField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="settings-field">
       <span className="settings-field-label">{label}</span>
       {children}
     </div>
-  );
-}
-
-function InlineSwitchRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="settings-inline-switch-row">
-      <span>{label}</span>
-      {children}
-    </div>
-  );
-}
-
-function SettingsSwitch({
-  checked,
-  onChange,
-  ariaLabel,
-  tone,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  ariaLabel: string;
-  tone?: Provider;
-}) {
-  return (
-    <label className={`settings-switch${tone ? ` settings-switch-${tone}` : ""}`}>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        aria-label={ariaLabel}
-      />
-      <span className="settings-switch-track" aria-hidden>
-        <span className="settings-switch-thumb" />
-      </span>
-    </label>
   );
 }
 
@@ -1090,15 +961,6 @@ function selectValueOrFallback<T extends string>(
   fallback: T,
 ): T {
   return allowedValues.includes(value as T) ? (value as T) : fallback;
-}
-
-function selectNumericValueOrFallback<T extends number>(
-  value: string,
-  allowedValues: readonly T[],
-  fallback: T,
-): T {
-  const parsed = Number.parseInt(value, 10);
-  return allowedValues.includes(parsed as T) ? (parsed as T) : fallback;
 }
 
 function reportSettingsActionError(
@@ -1337,7 +1199,7 @@ function RuntimeStat({ label, value }: { label: string; value: string }) {
 }
 
 function formatCount(value: number): string {
-  return new Intl.NumberFormat().format(value);
+  return formatInteger(value);
 }
 
 function formatUnitCount(value: number, singular: string, plural = `${singular}s`): string {

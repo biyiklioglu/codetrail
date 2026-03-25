@@ -1,8 +1,15 @@
-import { type Ref, useCallback, useEffect, useRef, useState } from "react";
+import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { SessionSummary } from "../../app/types";
 import { useClickOutside } from "../../hooks/useClickOutside";
+import { useVirtualListWindow } from "../../hooks/useVirtualListWindow";
+import { formatTooltip } from "../../lib/tooltipText";
 import { deriveSessionTitle, formatDate, sessionActivityOf } from "../../lib/viewUtils";
+import {
+  SIDEBAR_LIST_OVERSCAN,
+  SIDEBAR_LIST_ROW_HEIGHT,
+  SIDEBAR_LIST_VIRTUALIZATION_THRESHOLD,
+} from "../../lib/virtualList";
 import { ToolbarIcon } from "../ToolbarIcon";
 import { HistoryListContextMenu } from "./HistoryListContextMenu";
 import { scheduleSelectedSessionScroll } from "./sessionAutoScroll";
@@ -76,14 +83,40 @@ export function SessionPane({
     : bookmarksSelected
       ? "__bookmarks__"
       : selectedSessionId;
-  const sortTooltip =
-    sortDirection === "asc"
-      ? "Oldest first (sessions). Click to switch to newest first."
-      : "Newest first (sessions). Click to switch to oldest first.";
+  const sortTooltip = sortDirection === "asc" ? "Oldest first" : "Newest first";
   const sortAriaLabel =
     sortDirection === "asc"
       ? "Oldest first (sessions). Switch to newest first"
       : "Newest first (sessions). Switch to oldest first";
+  const sessionRows = useMemo(
+    () => [
+      { kind: "all" as const, id: "__project_all__" },
+      ...(bookmarksCount > 0 ? [{ kind: "bookmarks" as const, id: "__bookmarks__" }] : []),
+      ...sortedSessions.map((session) => ({
+        kind: "session" as const,
+        id: session.id,
+        session,
+      })),
+    ],
+    [bookmarksCount, sortedSessions],
+  );
+  const activeIndex = sessionRows.findIndex((row) => row.id === selectedItemId);
+  const {
+    setContainerRef,
+    handleScroll,
+    startIndex,
+    endIndex,
+    topSpacerHeight,
+    bottomSpacerHeight,
+    isVirtualized,
+  } = useVirtualListWindow({
+    itemCount: sessionRows.length,
+    itemHeight: SIDEBAR_LIST_ROW_HEIGHT,
+    overscan: SIDEBAR_LIST_OVERSCAN,
+    activeIndex,
+    enabled: sessionRows.length > SIDEBAR_LIST_VIRTUALIZATION_THRESHOLD,
+    externalRef: listRef,
+  });
   const selectedSessionRef = useCallback((node: HTMLButtonElement | null) => {
     setSelectedSessionElement(node);
   }, []);
@@ -188,82 +221,115 @@ export function SessionPane({
             className="collapse-btn pane-collapse-btn"
             onClick={onToggleCollapsed}
             aria-label={collapsed ? "Expand Sessions pane" : "Collapse Sessions pane"}
-            title={
-              collapsed
-                ? "Expand Sessions (Cmd/Ctrl+Shift+B)"
-                : "Collapse Sessions (Cmd/Ctrl+Shift+B)"
-            }
+            title={formatTooltip(
+              collapsed ? "Expand Sessions" : "Collapse Sessions",
+              "Cmd+Shift+B",
+            )}
           >
             <ToolbarIcon name="chevronLeft" />
           </button>
         </div>
       </div>
-      <div className="list-scroll session-list" ref={listRef} tabIndex={-1}>
-        <button
-          type="button"
-          ref={allSessionsSelected ? selectedSessionRef : null}
-          className={
-            allSessionsSelected
-              ? "session-item all-sessions-item active"
-              : "session-item all-sessions-item"
-          }
-          onClick={onSelectAllSessions}
-        >
-          <div className="session-preview">All Sessions</div>
-          <div className="session-meta">
-            <span className="msg-count">{allSessionsCount} msgs</span>
-            <span className="session-time">Project-wide</span>
-          </div>
-        </button>
-        {bookmarksCount > 0 ? (
-          <button
-            type="button"
-            ref={bookmarksSelected ? selectedSessionRef : null}
-            className={
-              bookmarksSelected
-                ? "session-item bookmarks-item active"
-                : "session-item bookmarks-item"
-            }
-            onClick={onSelectBookmarks}
-          >
-            <div className="session-preview">Bookmarked Messages</div>
-            <div className="session-meta">
-              <span className="msg-count">{bookmarksCount} msgs</span>
-              <span className="session-time">Project-wide</span>
-            </div>
-          </button>
+      <div
+        className="list-scroll session-list"
+        ref={setContainerRef}
+        tabIndex={-1}
+        onScroll={handleScroll}
+      >
+        {isVirtualized && topSpacerHeight > 0 ? (
+          <div
+            aria-hidden
+            className="virtual-list-spacer"
+            style={{ height: `${topSpacerHeight}px` }}
+          />
         ) : null}
-        {sortedSessions.map((session) => (
-          <button
-            key={session.id}
-            type="button"
-            ref={session.id === selectedSessionId && !bookmarksSelected ? selectedSessionRef : null}
-            className={
-              session.id === selectedSessionId && !bookmarksSelected
-                ? "session-item active"
-                : "session-item"
-            }
-            onClick={() => {
-              setContextMenu(null);
-              onSelectSession(session.id);
-            }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              onSelectSession(session.id);
-              setContextMenu({
-                sessionId: session.id,
-                x: event.clientX,
-                y: event.clientY,
-              });
-            }}
-          >
-            <div className="session-preview">{deriveSessionTitle(session)}</div>
-            <div className="session-meta">
-              <span className="msg-count">{session.messageCount} msgs</span>
-              <span className="session-time">{formatDate(sessionActivityOf(session))}</span>
-            </div>
-          </button>
-        ))}
+        {sessionRows.slice(startIndex, endIndex).map((row) => {
+          if (row.kind === "all") {
+            return (
+              <button
+                key={row.id}
+                type="button"
+                ref={allSessionsSelected ? selectedSessionRef : null}
+                className={
+                  allSessionsSelected
+                    ? "session-item all-sessions-item active"
+                    : "session-item all-sessions-item"
+                }
+                onClick={onSelectAllSessions}
+              >
+                <div className="session-preview">All Sessions</div>
+                <div className="session-meta">
+                  <span className="msg-count">{allSessionsCount} msgs</span>
+                  <span className="session-time">Project-wide</span>
+                </div>
+              </button>
+            );
+          }
+
+          if (row.kind === "bookmarks") {
+            return (
+              <button
+                key={row.id}
+                type="button"
+                ref={bookmarksSelected ? selectedSessionRef : null}
+                className={
+                  bookmarksSelected
+                    ? "session-item bookmarks-item active"
+                    : "session-item bookmarks-item"
+                }
+                onClick={onSelectBookmarks}
+              >
+                <div className="session-preview">Bookmarked Messages</div>
+                <div className="session-meta">
+                  <span className="msg-count">{bookmarksCount} msgs</span>
+                  <span className="session-time">Project-wide</span>
+                </div>
+              </button>
+            );
+          }
+
+          const session = row.session;
+          return (
+            <button
+              key={session.id}
+              type="button"
+              ref={
+                session.id === selectedSessionId && !bookmarksSelected ? selectedSessionRef : null
+              }
+              className={
+                session.id === selectedSessionId && !bookmarksSelected
+                  ? "session-item active"
+                  : "session-item"
+              }
+              onClick={() => {
+                setContextMenu(null);
+                onSelectSession(session.id);
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                onSelectSession(session.id);
+                setContextMenu({
+                  sessionId: session.id,
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+              }}
+            >
+              <div className="session-preview">{deriveSessionTitle(session)}</div>
+              <div className="session-meta">
+                <span className="msg-count">{session.messageCount} msgs</span>
+                <span className="session-time">{formatDate(sessionActivityOf(session))}</span>
+              </div>
+            </button>
+          );
+        })}
+        {isVirtualized && bottomSpacerHeight > 0 ? (
+          <div
+            aria-hidden
+            className="virtual-list-spacer"
+            style={{ height: `${bottomSpacerHeight}px` }}
+          />
+        ) : null}
       </div>
       <HistoryListContextMenu
         open={Boolean(contextMenu)}

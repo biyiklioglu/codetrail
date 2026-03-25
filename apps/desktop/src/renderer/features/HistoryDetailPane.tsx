@@ -1,19 +1,26 @@
-import type { Dispatch, SetStateAction } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 
 import type { MessageCategory } from "@codetrail/core/browser";
 
+import { type MessagePageSize, UI_MESSAGE_PAGE_SIZE_VALUES } from "../../shared/uiPreferences";
 import { CATEGORIES } from "../app/constants";
-import type { BulkExpandScope } from "../app/types";
+import type { WatchLiveStatusResponse } from "../app/types";
 import { AdvancedSearchToggleButton } from "../components/AdvancedSearchToggleButton";
 import { HistoryExportMenu } from "../components/HistoryExportMenu";
 import { ToolbarIcon } from "../components/ToolbarIcon";
 import { ZoomPercentInput } from "../components/ZoomPercentInput";
 import { MessageCard } from "../components/messages/MessagePresentation";
 import {
+  formatCompactLiveAge,
+  getNextCompactLiveAgeUpdateDelayMs,
+  selectRelevantLiveSession,
+} from "../lib/liveSessions";
+import {
   getAdvancedSearchToggleTitle,
   getSearchQueryPlaceholder,
   getSearchQueryTooltip,
 } from "../lib/searchLabels";
+import { formatTooltip } from "../lib/tooltipText";
 import { toggleValue } from "../lib/viewUtils";
 import type { useHistoryController } from "./useHistoryController";
 
@@ -29,15 +36,22 @@ function getHistoryCategoryShortcutDigit(
 
 function getHistoryCategoryTooltip(history: HistoryController, category: MessageCategory): string {
   const label = history.prettyCategory(category);
-  return `Toggle ${label} messages on or off (${history.historyCategoriesShortcutMap[category]})
-(${history.historyCategoryExpandShortcutMap[category]} to expand or collapse ${label} messages)`;
+  return formatTooltip(
+    `Show or hide ${label} messages`,
+    history.historyCategoriesShortcutMap[category],
+  );
 }
 
-function parseBulkExpandScope(value: string): BulkExpandScope {
-  if (value === "all") {
-    return "all";
-  }
-  return CATEGORIES.find((category) => category === value) ?? "all";
+function getHistoryCategoryExpansionDefaultTooltip(
+  history: HistoryController,
+  category: MessageCategory,
+): string {
+  const label = history.prettyCategory(category);
+  const nextAction = history.expandedByDefaultCategories.includes(category) ? "Collapse" : "Expand";
+  return formatTooltip(
+    `${nextAction} ${label} messages`,
+    history.historyCategoryExpandShortcutMap[category],
+  );
 }
 
 function formatHistoryCategorySelection(history: HistoryController): string {
@@ -60,6 +74,26 @@ function getHistoryExportViewLabel(history: HistoryController): string {
   return "Session";
 }
 
+function isInteractiveHeaderTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(
+    target.closest(
+      'button, input, select, textarea, a, label, [role="button"], [role="menuitem"], [contenteditable="true"]',
+    ),
+  );
+}
+
+function selectNumericValueOrFallback<T extends number>(
+  value: string,
+  allowedValues: readonly T[],
+  fallback: T,
+): T {
+  const numericValue = Number(value);
+  return allowedValues.includes(numericValue as T) ? (numericValue as T) : fallback;
+}
+
 export function HistoryDetailPane({
   history,
   advancedSearchEnabled,
@@ -69,6 +103,8 @@ export function HistoryDetailPane({
   canZoomOut,
   applyZoomAction,
   setZoomPercent,
+  liveSessions = [],
+  liveRowHasBackground = true,
 }: {
   history: HistoryController;
   advancedSearchEnabled: boolean;
@@ -78,6 +114,8 @@ export function HistoryDetailPane({
   canZoomOut: boolean;
   applyZoomAction: (action: "in" | "out" | "reset") => Promise<void>;
   setZoomPercent: (percent: number) => Promise<void>;
+  liveSessions?: WatchLiveStatusResponse["sessions"];
+  liveRowHasBackground?: boolean;
 }) {
   const exportAllPagesCount =
     history.historyMode === "bookmarks"
@@ -107,10 +145,91 @@ export function HistoryDetailPane({
       : `Newest first (${messageSortScopeSuffix}). Switch to oldest first`;
   const historySearchPlaceholder = getSearchQueryPlaceholder(advancedSearchEnabled);
   const historySearchTooltip = getSearchQueryTooltip(advancedSearchEnabled);
+  const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
+  const [pageInputValue, setPageInputValue] = useState(() => `${history.sessionPage + 1}`);
+  const skipNextPageInputBlurResetRef = useRef(false);
+  const liveSession = useMemo(
+    () =>
+      selectRelevantLiveSession({
+        sessions: liveSessions,
+        selectionMode: history.historyMode,
+        selectedProject: history.selectedProject,
+        selectedSession: history.selectedSession,
+      }),
+    [history.historyMode, history.selectedProject, history.selectedSession, liveSessions],
+  );
+
+  useEffect(() => {
+    if (!liveSession) {
+      return;
+    }
+
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) {
+        return;
+      }
+      const nextNowMs = Date.now();
+      setLiveNowMs(nextNowMs);
+      const nextDelayMs = getNextCompactLiveAgeUpdateDelayMs(liveSession.lastActivityAt, nextNowMs);
+      timeoutId = window.setTimeout(tick, nextDelayMs);
+    };
+
+    setLiveNowMs(Date.now());
+    let timeoutId = window.setTimeout(
+      tick,
+      getNextCompactLiveAgeUpdateDelayMs(liveSession.lastActivityAt),
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [liveSession]);
+
+  useEffect(() => {
+    setPageInputValue(`${history.sessionPage + 1}`);
+  }, [history.sessionPage]);
+
+  const liveTimer = liveSession
+    ? formatCompactLiveAge(liveSession.lastActivityAt, liveNowMs)
+    : null;
+  const liveDetailText = liveSession?.detailText?.trim() ?? "";
+  const liveSummary = liveSession
+    ? ["Live", liveTimer, liveSession.statusText, liveDetailText].filter(Boolean).join(" · ")
+    : null;
+
+  const resetPageInputValue = () => {
+    setPageInputValue(`${history.sessionPage + 1}`);
+  };
+
+  const commitPageInputValue = () => {
+    const parsedValue = Number.parseInt(pageInputValue.trim(), 10);
+    skipNextPageInputBlurResetRef.current = true;
+    if (!Number.isFinite(parsedValue)) {
+      resetPageInputValue();
+      history.focusMessagePane();
+      return;
+    }
+    const nextPageNumber = Math.max(1, Math.min(history.totalPages, parsedValue));
+    setPageInputValue(`${nextPageNumber}`);
+    if (nextPageNumber !== history.sessionPage + 1) {
+      history.goToHistoryPage(nextPageNumber - 1);
+    }
+    history.focusMessagePane();
+  };
 
   return (
     <div className="history-view">
-      <div className="msg-header">
+      <div
+        className="msg-header"
+        onMouseDown={(event) => {
+          if (isInteractiveHeaderTarget(event.target)) {
+            return;
+          }
+          history.focusMessagePane();
+        }}
+      >
         <div className="msg-header-top">
           <div className="msg-header-info">
             <span className="summary-count">{history.selectedSummaryMessageCount}</span>
@@ -118,9 +237,12 @@ export function HistoryDetailPane({
               <button
                 type="button"
                 className="msg-header-action-button msg-header-action-button-close"
-                onClick={history.closeBookmarksView}
+                onClick={() => {
+                  history.closeBookmarksView();
+                  history.focusMessagePane();
+                }}
                 aria-label="Close bookmarks"
-                title="Close bookmarks and return to the previous view"
+                title="Close bookmarks"
               >
                 <ToolbarIcon name="closeFocus" />
                 Close bookmarks
@@ -129,9 +251,12 @@ export function HistoryDetailPane({
               <button
                 type="button"
                 className="msg-header-action-button"
-                onClick={() => history.selectBookmarksView()}
+                onClick={() => {
+                  history.selectBookmarksView();
+                  history.focusMessagePane();
+                }}
                 aria-label={`${history.currentViewBookmarkCount} ${history.currentViewBookmarkCount === 1 ? "bookmark" : "bookmarks"}`}
-                title={`Open ${history.currentViewBookmarkCount} bookmarked messages`}
+                title="Open bookmarked messages"
               >
                 <ToolbarIcon name="bookmark" />
                 {history.currentViewBookmarkCount}{" "}
@@ -158,14 +283,17 @@ export function HistoryDetailPane({
                 if (history.historyMode === "project_all") {
                   history.setProjectAllSortDirection((value) => (value === "asc" ? "desc" : "asc"));
                   history.setSessionPage(0);
+                  history.focusMessagePane();
                   return;
                 }
                 if (history.historyMode === "bookmarks") {
                   history.setBookmarkSortDirection((value) => (value === "asc" ? "desc" : "asc"));
+                  history.focusMessagePane();
                   return;
                 }
                 history.setMessageSortDirection((value) => (value === "asc" ? "desc" : "asc"));
                 history.setSessionPage(0);
+                history.focusMessagePane();
               }}
               aria-label={messageSortAriaLabel}
               title={history.messageSortTooltip}
@@ -178,32 +306,16 @@ export function HistoryDetailPane({
               <button
                 type="button"
                 className="toolbar-btn expand-scope-action"
-                onClick={history.handleToggleScopedMessagesExpanded}
-                disabled={history.scopedMessages.length === 0}
-                aria-label={history.scopedExpandCollapseLabel}
-                title={`${history.scopedExpandCollapseLabel} (Cmd/Ctrl+E)`}
-              >
-                <ToolbarIcon
-                  name={history.areScopedMessagesExpanded ? "collapseAll" : "expandAll"}
-                />
-                {history.scopedActionLabel}
-              </button>
-              <select
-                className="expand-scope-select"
-                value={history.bulkExpandScope}
-                onChange={(event) => {
-                  history.setBulkExpandScope(parseBulkExpandScope(event.target.value));
+                onClick={() => {
+                  history.handleToggleAllCategoryDefaultExpansion();
+                  history.focusMessagePane();
                 }}
-                aria-label="Select expand and collapse scope"
-                title="Choose which message type the expand/collapse action applies to"
+                aria-label={`${history.globalExpandCollapseLabel} all messages`}
+                title={formatTooltip(`${history.globalExpandCollapseLabel} all messages`, "Cmd+E")}
               >
-                <option value="all">All</option>
-                {CATEGORIES.map((category) => (
-                  <option key={category} value={category}>
-                    {history.prettyCategory(category)}
-                  </option>
-                ))}
-              </select>
+                <ToolbarIcon name={history.areAllMessagesExpanded ? "collapseAll" : "expandAll"} />
+                {history.globalExpandCollapseLabel}
+              </button>
             </div>
             <div className="toolbar-zoom-group">
               <button
@@ -212,7 +324,7 @@ export function HistoryDetailPane({
                 onClick={() => void applyZoomAction("out")}
                 disabled={!canZoomOut}
                 aria-label="Zoom out"
-                title="Zoom out (Cmd/Ctrl+-)"
+                title={formatTooltip("Zoom out", "Cmd+-")}
               >
                 <ToolbarIcon name="zoomOut" />
               </button>
@@ -220,7 +332,7 @@ export function HistoryDetailPane({
                 value={zoomPercent}
                 onCommit={(percent) => void setZoomPercent(percent)}
                 ariaLabel="Zoom percentage"
-                title="Zoom level (60%-175%; Enter applies, Cmd/Ctrl+0 resets)"
+                title={formatTooltip("Zoom level", "Cmd+0")}
                 wrapperClassName="zoom-level-control"
                 inputClassName="zoom-level-input"
               />
@@ -230,39 +342,91 @@ export function HistoryDetailPane({
                 onClick={() => void applyZoomAction("in")}
                 disabled={!canZoomIn}
                 aria-label="Zoom in"
-                title="Zoom in (Cmd/Ctrl++)"
+                title={formatTooltip("Zoom in", "Cmd++")}
               >
                 <ToolbarIcon name="zoomIn" />
               </button>
             </div>
           </div>
         </div>
+        {liveSession && liveTimer ? (
+          <div
+            className={`msg-live-row${liveRowHasBackground ? "" : " is-flat"}`}
+            title={liveSummary ?? undefined}
+          >
+            <span className="msg-live-label">Live</span>
+            <span className="msg-live-separator" aria-hidden="true">
+              ·
+            </span>
+            <span className="msg-live-timer">{liveTimer}</span>
+            <span className="msg-live-separator" aria-hidden="true">
+              ·
+            </span>
+            <span className={`msg-live-status msg-live-status-${liveSession.statusKind}`}>
+              {liveSession.statusText}
+            </span>
+            {liveDetailText ? (
+              <>
+                <span className="msg-live-separator" aria-hidden="true">
+                  ·
+                </span>
+                <span className="msg-live-detail">{liveDetailText}</span>
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="msg-filters">
         {CATEGORIES.map((category) => (
-          <button
+          <div
             key={category}
-            type="button"
             className={`msg-filter ${category}-filter${
               history.historyCategories.includes(category) ? " active" : ""
             }`}
-            title={getHistoryCategoryTooltip(history, category)}
-            onClick={() => {
-              history.setHistoryCategories((value) =>
-                toggleValue<MessageCategory>(value, category),
-              );
-              history.setSessionPage(0);
-            }}
           >
-            <span className="filter-shortcut" aria-hidden="true">
-              {getHistoryCategoryShortcutDigit(history, category)}
-            </span>
-            <span className="filter-label">
-              {history.prettyCategory(category)}
-              <span className="filter-count">{history.historyCategoryCounts[category]}</span>
-            </span>
-          </button>
+            <button
+              type="button"
+              className="msg-filter-main"
+              title={getHistoryCategoryTooltip(history, category)}
+              onClick={() => {
+                history.setHistoryCategories((value) =>
+                  toggleValue<MessageCategory>(value, category),
+                );
+                history.setSessionPage(0);
+                history.focusMessagePane();
+              }}
+            >
+              <span className="filter-shortcut" aria-hidden="true">
+                {getHistoryCategoryShortcutDigit(history, category)}
+              </span>
+              <span className="filter-label">
+                {history.prettyCategory(category)}
+                <span className="filter-count">{history.historyCategoryCounts[category]}</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="msg-filter-expand-toggle"
+              aria-label={getHistoryCategoryExpansionDefaultTooltip(history, category)}
+              title={getHistoryCategoryExpansionDefaultTooltip(history, category)}
+              onClick={() => {
+                history.handleToggleCategoryDefaultExpansion(category);
+                history.focusMessagePane();
+              }}
+            >
+              <svg
+                className={`msg-chevron filter-expand-chevron${
+                  history.expandedByDefaultCategories.includes(category) ? "" : " is-collapsed"
+                }`}
+                fill="none"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" />
+              </svg>
+            </button>
+          </div>
         ))}
       </div>
 
@@ -334,11 +498,14 @@ export function HistoryDetailPane({
                   : false
               }
               isExpanded={
-                history.messageExpanded[message.id] ?? history.isExpandedByDefault(message.category)
+                history.messageExpansionOverrides[message.id] ??
+                history.isExpandedByDefault(message.category)
               }
               onToggleExpanded={history.handleToggleMessageExpanded}
+              onToggleCategoryExpanded={history.handleToggleVisibleCategoryMessagesExpanded}
               onToggleBookmark={history.handleToggleBookmark}
               onRevealInSession={history.handleRevealInSession}
+              onPreservePaneFocus={history.focusMessagePane}
               cardRef={
                 history.focusMessageId === message.id ? history.refs.focusedMessageRef : null
               }
@@ -353,28 +520,144 @@ export function HistoryDetailPane({
         )}
       </div>
 
-      <div className="msg-pagination pagination-row">
-        <button
-          type="button"
-          className="page-btn"
-          onClick={history.goToPreviousHistoryPage}
-          disabled={!history.canGoToPreviousHistoryPage}
-          title="Previous page (Cmd/Ctrl+Left)"
-          aria-label="Previous page"
-        >
-          Previous
-        </button>
-        <span className="page-info">{`Page ${history.sessionPage + 1} / ${history.totalPages} (${paginationTotal} ${paginationUnit})`}</span>
-        <button
-          type="button"
-          className="page-btn"
-          onClick={history.goToNextHistoryPage}
-          disabled={!history.canGoToNextHistoryPage}
-          title="Next page (Cmd/Ctrl+Right)"
-          aria-label="Next page"
-        >
-          Next
-        </button>
+      <div
+        className="msg-pagination pagination-row"
+        onMouseDown={(event) => {
+          if (isInteractiveHeaderTarget(event.target)) {
+            return;
+          }
+          history.focusMessagePane();
+        }}
+      >
+        <div className="msg-pagination-group msg-pagination-summary">
+          <span className="page-total">{`${paginationTotal} ${paginationUnit}`}</span>
+        </div>
+
+        <div className="msg-pagination-group msg-pagination-controls">
+          <button
+            type="button"
+            className="page-btn page-icon-btn"
+            onClick={() => {
+              history.goToFirstHistoryPage();
+              history.focusMessagePane();
+            }}
+            disabled={!history.canGoToPreviousHistoryPage}
+            title="First page"
+            aria-label="First page"
+          >
+            <ToolbarIcon name="chevronsLeft" />
+          </button>
+          <button
+            type="button"
+            className="page-btn page-icon-btn"
+            onClick={() => {
+              history.goToPreviousHistoryPage();
+              history.focusMessagePane();
+            }}
+            disabled={!history.canGoToPreviousHistoryPage}
+            title={formatTooltip("Previous page", "Cmd+Left")}
+            aria-label="Previous page"
+          >
+            <ToolbarIcon name="chevronLeft" />
+          </button>
+
+          <label className="page-jump-control">
+            <span className="page-jump-label-text">Page</span>
+            <input
+              className="page-jump-input"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={pageInputValue}
+              onChange={(event) => {
+                setPageInputValue(event.target.value);
+              }}
+              onBlur={() => {
+                if (skipNextPageInputBlurResetRef.current) {
+                  skipNextPageInputBlurResetRef.current = false;
+                  return;
+                }
+                resetPageInputValue();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitPageInputValue();
+                  return;
+                }
+                if (event.key === "Escape" || event.key === "Tab") {
+                  event.preventDefault();
+                  resetPageInputValue();
+                  history.focusMessagePane();
+                }
+              }}
+              aria-label="Page number"
+            />
+            <span className="page-jump-total">{`of ${history.totalPages}`}</span>
+          </label>
+
+          <button
+            type="button"
+            className="page-btn page-icon-btn"
+            onClick={() => {
+              history.goToNextHistoryPage();
+              history.focusMessagePane();
+            }}
+            disabled={!history.canGoToNextHistoryPage}
+            title={formatTooltip("Next page", "Cmd+Right")}
+            aria-label="Next page"
+          >
+            <ToolbarIcon name="chevronRight" />
+          </button>
+          <button
+            type="button"
+            className="page-btn page-icon-btn"
+            onClick={() => {
+              history.goToLastHistoryPage();
+              history.focusMessagePane();
+            }}
+            disabled={!history.canGoToNextHistoryPage}
+            title="Last page"
+            aria-label="Last page"
+          >
+            <ToolbarIcon name="chevronsRight" />
+          </button>
+        </div>
+
+        <div className="msg-pagination-group msg-pagination-page-size">
+          <label className="page-size-control">
+            <span className="page-size-label-text">Per page</span>
+            <div className="pagination-select-wrap">
+              <select
+                className="pagination-select"
+                aria-label="Messages per page"
+                value={history.messagePageSize}
+                onChange={(event) => {
+                  history.setMessagePageSize(
+                    selectNumericValueOrFallback(
+                      event.target.value,
+                      UI_MESSAGE_PAGE_SIZE_VALUES,
+                      history.messagePageSize as MessagePageSize,
+                    ),
+                  );
+                  history.focusMessagePane();
+                }}
+              >
+                {UI_MESSAGE_PAGE_SIZE_VALUES.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+              <span className="pagination-select-chevron" aria-hidden>
+                <svg viewBox="0 0 12 12">
+                  <title>Open menu</title>
+                  <path d="M3 4.5L6 7.5L9 4.5" />
+                </svg>
+              </span>
+            </div>
+          </label>
+        </div>
       </div>
     </div>
   );

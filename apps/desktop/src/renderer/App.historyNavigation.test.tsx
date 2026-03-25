@@ -20,6 +20,14 @@ function expectDefined<T>(value: T | null | undefined, message: string): NonNull
   return value as NonNullable<T>;
 }
 
+function pressWindowArrow(
+  key: "ArrowUp" | "ArrowDown",
+  modifiers: { altKey?: boolean; ctrlKey?: boolean },
+) {
+  fireEvent.keyDown(window, { key, ...modifiers });
+  fireEvent.keyUp(window, { key, ...modifiers });
+}
+
 async function expandHistoryPanes() {
   const expandProjectsButton = screen.queryByRole("button", { name: "Expand Projects pane" });
   if (expandProjectsButton) {
@@ -44,7 +52,7 @@ describe("App history navigation", () => {
     setTestHistorySelectionDebounceOverrides(null);
   });
 
-  it("navigates sessions with Option+Up/Down and projects with Ctrl+Up/Down", async () => {
+  it("navigates sessions with Option+Up/Down and projects with Ctrl+Up/Down without stealing focus", async () => {
     installScrollIntoViewMock();
 
     const user = userEvent.setup();
@@ -52,6 +60,7 @@ describe("App history navigation", () => {
     const { container } = renderWithClient(<App />, client);
     const sessionList = () => container.querySelector<HTMLDivElement>(".list-scroll.session-list");
     const projectList = () => container.querySelector<HTMLDivElement>(".list-scroll.project-list");
+    const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
 
     await waitFor(() => {
       expect(screen.getByText("Project one first message")).toBeInTheDocument();
@@ -63,47 +72,144 @@ describe("App history navigation", () => {
     await waitFor(() => {
       expect(screen.getByText("Session one message")).toBeInTheDocument();
     });
+    expectDefined(messageList(), "Expected message list").focus();
 
-    fireEvent.keyDown(window, { key: "ArrowDown", altKey: true });
-    fireEvent.keyUp(window, { key: "ArrowDown", altKey: true });
+    pressWindowArrow("ArrowDown", { altKey: true });
     await waitFor(() => {
       expect(screen.getByText("Session two message")).toBeInTheDocument();
-      expect(document.activeElement).toBe(sessionList());
+      expect(document.activeElement).toBe(messageList());
     });
 
-    fireEvent.keyDown(window, { key: "ArrowUp", altKey: true });
-    fireEvent.keyUp(window, { key: "ArrowUp", altKey: true });
+    pressWindowArrow("ArrowUp", { altKey: true });
     await waitFor(() => {
       expect(screen.getByText("Session one message")).toBeInTheDocument();
-      expect(document.activeElement).toBe(sessionList());
+      expect(document.activeElement).toBe(messageList());
     });
 
-    fireEvent.keyDown(window, { key: "ArrowDown", ctrlKey: true });
-    fireEvent.keyDown(window, { key: "ArrowDown", ctrlKey: true });
-    fireEvent.keyUp(window, { key: "ArrowDown", ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Switch to List" }));
+    pressWindowArrow("ArrowDown", { ctrlKey: true });
     await waitFor(() => {
       expect(screen.getByText("Project two combined message")).toBeInTheDocument();
-      expect(projectList()?.contains(document.activeElement)).toBe(true);
-      expect(
-        document.activeElement?.getAttribute("data-project-nav-id") ??
-          document.activeElement
-            ?.closest("[data-project-nav-id]")
-            ?.getAttribute("data-project-nav-id"),
-      ).toBe("project_2");
+      expect(document.activeElement).toBe(messageList());
     });
 
-    fireEvent.keyDown(window, { key: "ArrowUp", ctrlKey: true });
-    fireEvent.keyDown(window, { key: "ArrowUp", ctrlKey: true });
-    fireEvent.keyUp(window, { key: "ArrowUp", ctrlKey: true });
+    pressWindowArrow("ArrowUp", { ctrlKey: true });
     await waitFor(() => {
       expect(screen.getByText("Project one first message")).toBeInTheDocument();
-      expect(projectList()?.contains(document.activeElement)).toBe(true);
-      expect(
-        document.activeElement?.getAttribute("data-project-nav-id") ??
-          document.activeElement
-            ?.closest("[data-project-nav-id]")
-            ?.getAttribute("data-project-nav-id"),
-      ).toBe("project_1");
+      expect(document.activeElement).toBe(messageList());
+    });
+  });
+
+  it("does nothing for Option+Up/Down when the sessions pane is hidden and for Ctrl+Up/Down when the projects pane is collapsed", async () => {
+    installScrollIntoViewMock();
+
+    const client = createHistoryNavigationClient();
+    const { container } = renderWithClient(<App />, client);
+    const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+
+    await waitFor(() => {
+      expect(screen.getByText("Project one first message")).toBeInTheDocument();
+    });
+
+    expectDefined(messageList(), "Expected message list").focus();
+    pressWindowArrow("ArrowDown", { altKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByText("Project one first message")).toBeInTheDocument();
+      expect(document.activeElement).toBe(messageList());
+      expect(screen.getByRole("button", { name: "Expand Sessions pane" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to List" }));
+    pressWindowArrow("ArrowDown", { altKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByText("Project one first message")).toBeInTheDocument();
+      expect(document.activeElement).toBe(messageList());
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Projects pane" }));
+    pressWindowArrow("ArrowDown", { ctrlKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByText("Project one first message")).toBeInTheDocument();
+      expect(document.activeElement).toBe(messageList());
+    });
+  });
+
+  it("matches visible project-pane Arrow behavior for Ctrl+Up/Down without stealing focus", async () => {
+    installScrollIntoViewMock();
+
+    const client = createHistoryNavigationClient();
+    const { container } = renderWithClient(<App />, client);
+    const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+
+    await waitFor(() => {
+      expect(screen.getByText("Project one first message")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to List" }));
+    expectDefined(messageList(), "Expected message list").focus();
+
+    pressWindowArrow("ArrowDown", { ctrlKey: true });
+    await waitFor(() => {
+      expect(screen.getByText("Project two combined message")).toBeInTheDocument();
+      expect(document.activeElement).toBe(messageList());
+    });
+
+    pressWindowArrow("ArrowUp", { ctrlKey: true });
+    await waitFor(() => {
+      expect(screen.getByText("Project one first message")).toBeInTheDocument();
+      expect(document.activeElement).toBe(messageList());
+    });
+  });
+
+  it("continues project Ctrl+Up/Down navigation after toggling a tree project expander", async () => {
+    installScrollIntoViewMock();
+
+    const client = createHistoryNavigationClient();
+    const { container } = renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project one first message")).toBeInTheDocument();
+    });
+
+    const projectToggle = expectDefined(
+      container.querySelector<HTMLButtonElement>('[data-project-expand-toggle-for="project_1"]'),
+      "Expected project_1 expand toggle",
+    );
+    projectToggle.focus();
+    fireEvent.click(projectToggle);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Collapse project sessions" })).toBeInTheDocument();
+      expect(document.activeElement).toBe(projectToggle);
+    });
+
+    pressWindowArrow("ArrowDown", { ctrlKey: true });
+    await waitFor(() => {
+      expect(screen.getByText("Session one message")).toBeInTheDocument();
+    });
+  });
+
+  it("continues Ctrl+Down across a tree folder boundary without getting stuck", async () => {
+    installScrollIntoViewMock();
+
+    const client = createHistoryNavigationClient();
+    const { container } = renderWithClient(<App />, client);
+    const messageList = () => container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+
+    await waitFor(() => {
+      expect(screen.getByText("Project one first message")).toBeInTheDocument();
+    });
+
+    expectDefined(messageList(), "Expected message list").focus();
+    pressWindowArrow("ArrowDown", { ctrlKey: true });
+    pressWindowArrow("ArrowDown", { ctrlKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByText("Project two combined message")).toBeInTheDocument();
+      expect(document.activeElement).toBe(messageList());
     });
   });
 
@@ -229,40 +335,6 @@ describe("App history navigation", () => {
 
     expectDefined(sessionList(), "Expected session list");
     expectDefined(messageList(), "Expected message list");
-  });
-
-  it("includes All Sessions and Bookmarked Messages when moving up from the first session", async () => {
-    installScrollIntoViewMock();
-
-    const user = userEvent.setup();
-    const client = createHistoryNavigationClient();
-    const { container } = renderWithClient(<App />, client);
-    const sessionList = () => container.querySelector<HTMLDivElement>(".list-scroll.session-list");
-
-    await waitFor(() => {
-      expect(screen.getByText("Project one first message")).toBeInTheDocument();
-    });
-
-    await expandHistoryPanes();
-
-    await user.click(screen.getByText("Session one"));
-    await waitFor(() => {
-      expect(screen.getByText("Session one message")).toBeInTheDocument();
-    });
-
-    fireEvent.keyDown(window, { key: "ArrowUp", altKey: true });
-    fireEvent.keyUp(window, { key: "ArrowUp", altKey: true });
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.globalMessages)).toBeInTheDocument();
-      expect(document.activeElement).toBe(sessionList());
-    });
-
-    fireEvent.keyDown(window, { key: "ArrowUp", altKey: true });
-    fireEvent.keyUp(window, { key: "ArrowUp", altKey: true });
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.globalMessages)).toBeInTheDocument();
-      expect(document.activeElement).toBe(sessionList());
-    });
   });
 
   it("waits to show bookmark navigation until bookmarks are loaded for the selected project", async () => {

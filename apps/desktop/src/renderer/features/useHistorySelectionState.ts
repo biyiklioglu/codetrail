@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MutableRefObject, SetStateAction } from "react";
 
-import {
-  createHistorySelectionFromPaneState,
-} from "../app/historySelection";
-import type {
-  HistorySelection,
-  HistorySelectionCommitMode,
-  PaneStateSnapshot,
-} from "../app/types";
+import { createHistorySelectionFromPaneState } from "../app/historySelection";
+import type { HistorySelection, HistorySelectionCommitMode, PaneStateSnapshot } from "../app/types";
 
 type PendingSelectionCommit =
   | {
@@ -189,10 +183,7 @@ export function useHistorySelectionState(initialPaneState?: PaneStateSnapshot | 
   );
 
   const queueSelectionNoopCommit = useCallback(
-    (
-      commitMode: HistorySelectionCommitMode = "immediate",
-      waitForKeyboardIdle = false,
-    ) => {
+    (commitMode: HistorySelectionCommitMode = "immediate", waitForKeyboardIdle = false) => {
       if (commitMode === "immediate") {
         pendingDebouncedSelectionRef.current = null;
         clearSelectionCommitTimer();

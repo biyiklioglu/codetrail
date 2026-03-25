@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -11,7 +11,11 @@ describe("TopBar", () => {
     const user = userEvent.setup();
     const onToggleSearchView = vi.fn();
     const onThemeChange = vi.fn();
+    const onThemePreview = vi.fn();
+    const onThemePreviewReset = vi.fn();
     const onShikiThemeChange = vi.fn();
+    const onShikiThemePreview = vi.fn();
+    const onShikiThemePreviewReset = vi.fn();
     const onIncrementalRefresh = vi.fn();
     const onToggleFocus = vi.fn();
     const onToggleHelp = vi.fn();
@@ -27,7 +31,11 @@ describe("TopBar", () => {
         focusDisabled={false}
         onToggleSearchView={onToggleSearchView}
         onThemeChange={onThemeChange}
+        onThemePreview={onThemePreview}
+        onThemePreviewReset={onThemePreviewReset}
         onShikiThemeChange={onShikiThemeChange}
+        onShikiThemePreview={onShikiThemePreview}
+        onShikiThemePreviewReset={onShikiThemePreviewReset}
         onIncrementalRefresh={onIncrementalRefresh}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
@@ -44,15 +52,15 @@ describe("TopBar", () => {
     expect(container.querySelector(".app-title-suffix")).toBeNull();
     expect(screen.getByRole("button", { name: "Search" })).toHaveAttribute(
       "title",
-      "Open Search (Cmd/Ctrl+Shift+F).",
+      "Open Search  ⌘⇧F",
     );
     expect(screen.getByRole("button", { name: "Enter focus mode" })).toHaveAttribute(
       "title",
-      "Enter focus mode (Cmd/Ctrl+Shift+M).",
+      "Enter Focus mode  ⌘⇧M",
     );
     expect(screen.getByRole("button", { name: "Open settings" })).toHaveAttribute(
       "title",
-      "Open Settings (Cmd/Ctrl+,).",
+      "Open Settings  ⌘,",
     );
 
     await user.click(screen.getByRole("button", { name: "Search" }));
@@ -76,6 +84,365 @@ describe("TopBar", () => {
     expect(onToggleSettings).toHaveBeenCalledTimes(1);
   });
 
+  it("previews and restores the regular theme on hover without committing", async () => {
+    const user = userEvent.setup();
+    const onThemeChange = vi.fn();
+    const onThemePreview = vi.fn();
+    const onThemePreviewReset = vi.fn();
+
+    render(
+      <TopBar
+        mainView="history"
+        theme="light"
+        shikiTheme="github-light-default"
+        indexing={false}
+        focusMode={false}
+        focusDisabled={false}
+        onToggleSearchView={vi.fn()}
+        onThemeChange={onThemeChange}
+        onThemePreview={onThemePreview}
+        onThemePreviewReset={onThemePreviewReset}
+        onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={vi.fn()}
+        onShikiThemePreviewReset={vi.fn()}
+        onIncrementalRefresh={vi.fn()}
+        refreshStrategy="off"
+        onRefreshStrategyChange={vi.fn()}
+        autoRefreshStatusLabel={null}
+        autoRefreshStatusTone={null}
+        autoRefreshStatusTooltip={null}
+        onToggleFocus={vi.fn()}
+        onToggleHelp={vi.fn()}
+        onToggleSettings={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose theme" }));
+    await user.hover(screen.getByRole("button", { name: "Tomorrow Night" }));
+
+    expect(onThemePreview).toHaveBeenCalledWith("tomorrow-night");
+    expect(onThemeChange).not.toHaveBeenCalled();
+
+    fireEvent.mouseLeave(screen.getByLabelText("Theme"));
+
+    expect(onThemePreviewReset).toHaveBeenCalledTimes(1);
+    expect(onThemeChange).not.toHaveBeenCalled();
+  });
+
+  it("previews and restores the text viewer theme on hover without committing", async () => {
+    const user = userEvent.setup();
+    const onShikiThemeChange = vi.fn();
+    const onShikiThemePreview = vi.fn();
+    const onShikiThemePreviewReset = vi.fn();
+
+    render(
+      <TopBar
+        mainView="history"
+        theme="light"
+        shikiTheme="github-light-default"
+        indexing={false}
+        focusMode={false}
+        focusDisabled={false}
+        onToggleSearchView={vi.fn()}
+        onThemeChange={vi.fn()}
+        onThemePreview={vi.fn()}
+        onThemePreviewReset={vi.fn()}
+        onShikiThemeChange={onShikiThemeChange}
+        onShikiThemePreview={onShikiThemePreview}
+        onShikiThemePreviewReset={onShikiThemePreviewReset}
+        onIncrementalRefresh={vi.fn()}
+        refreshStrategy="off"
+        onRefreshStrategyChange={vi.fn()}
+        autoRefreshStatusLabel={null}
+        autoRefreshStatusTone={null}
+        autoRefreshStatusTooltip={null}
+        onToggleFocus={vi.fn()}
+        onToggleHelp={vi.fn()}
+        onToggleSettings={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose text viewer theme" }));
+    await user.hover(screen.getByRole("button", { name: "Light Plus" }));
+
+    expect(onShikiThemePreview).toHaveBeenCalledWith("light-plus");
+    expect(onShikiThemeChange).not.toHaveBeenCalled();
+
+    fireEvent.mouseLeave(screen.getByLabelText("Text viewer theme"));
+
+    expect(onShikiThemePreviewReset).toHaveBeenCalledTimes(1);
+    expect(onShikiThemeChange).not.toHaveBeenCalled();
+  });
+
+  it("supports arrow-key navigation and escape for the regular theme menu", async () => {
+    const user = userEvent.setup();
+    const onThemePreview = vi.fn();
+    const onThemePreviewReset = vi.fn();
+
+    render(
+      <TopBar
+        mainView="history"
+        theme="light"
+        shikiTheme="github-light-default"
+        indexing={false}
+        focusMode={false}
+        focusDisabled={false}
+        onToggleSearchView={vi.fn()}
+        onThemeChange={vi.fn()}
+        onThemePreview={onThemePreview}
+        onThemePreviewReset={onThemePreviewReset}
+        onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={vi.fn()}
+        onShikiThemePreviewReset={vi.fn()}
+        onIncrementalRefresh={vi.fn()}
+        refreshStrategy="off"
+        onRefreshStrategyChange={vi.fn()}
+        autoRefreshStatusLabel={null}
+        autoRefreshStatusTone={null}
+        autoRefreshStatusTooltip={null}
+        onToggleFocus={vi.fn()}
+        onToggleHelp={vi.fn()}
+        onToggleSettings={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Choose theme" });
+    await user.click(trigger);
+
+    const lightButton = screen.getByRole("button", { name: /Light/, pressed: true });
+    await waitFor(() => expect(lightButton).toHaveFocus());
+
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Clean White" })).toHaveFocus());
+    expect(onThemePreview).toHaveBeenCalledWith("clean-white");
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.queryByLabelText("Theme")).not.toBeInTheDocument();
+    expect(onThemePreviewReset).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues regular theme keyboard navigation from the hovered item", async () => {
+    const user = userEvent.setup();
+    const onThemePreview = vi.fn();
+
+    render(
+      <TopBar
+        mainView="history"
+        theme="light"
+        shikiTheme="github-light-default"
+        indexing={false}
+        focusMode={false}
+        focusDisabled={false}
+        onToggleSearchView={vi.fn()}
+        onThemeChange={vi.fn()}
+        onThemePreview={onThemePreview}
+        onThemePreviewReset={vi.fn()}
+        onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={vi.fn()}
+        onShikiThemePreviewReset={vi.fn()}
+        onIncrementalRefresh={vi.fn()}
+        refreshStrategy="off"
+        onRefreshStrategyChange={vi.fn()}
+        autoRefreshStatusLabel={null}
+        autoRefreshStatusTone={null}
+        autoRefreshStatusTooltip={null}
+        onToggleFocus={vi.fn()}
+        onToggleHelp={vi.fn()}
+        onToggleSettings={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose theme" }));
+    await user.hover(screen.getByRole("button", { name: "Clean White" }));
+
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Warm Paper" })).toHaveFocus());
+    expect(onThemePreview).toHaveBeenLastCalledWith("warm-paper");
+  });
+
+  it("ignores passive mouse-enter events after keyboard navigation takes over in the theme menu", async () => {
+    const user = userEvent.setup();
+    const onThemePreview = vi.fn();
+
+    render(
+      <TopBar
+        mainView="history"
+        theme="light"
+        shikiTheme="github-light-default"
+        indexing={false}
+        focusMode={false}
+        focusDisabled={false}
+        onToggleSearchView={vi.fn()}
+        onThemeChange={vi.fn()}
+        onThemePreview={onThemePreview}
+        onThemePreviewReset={vi.fn()}
+        onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={vi.fn()}
+        onShikiThemePreviewReset={vi.fn()}
+        onIncrementalRefresh={vi.fn()}
+        refreshStrategy="off"
+        onRefreshStrategyChange={vi.fn()}
+        autoRefreshStatusLabel={null}
+        autoRefreshStatusTone={null}
+        autoRefreshStatusTooltip={null}
+        onToggleFocus={vi.fn()}
+        onToggleHelp={vi.fn()}
+        onToggleSettings={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose theme" }));
+    await user.hover(screen.getByRole("button", { name: "Clean White" }));
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Warm Paper" })).toHaveFocus());
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "Sand" }));
+    await user.keyboard("{ArrowDown}");
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Stone" })).toHaveFocus());
+    expect(onThemePreview).toHaveBeenLastCalledWith("stone");
+  });
+
+  it("supports arrow-key navigation and escape for the text viewer theme menu", async () => {
+    const user = userEvent.setup();
+    const onShikiThemePreview = vi.fn();
+    const onShikiThemePreviewReset = vi.fn();
+
+    render(
+      <TopBar
+        mainView="history"
+        theme="light"
+        shikiTheme="github-light-default"
+        indexing={false}
+        focusMode={false}
+        focusDisabled={false}
+        onToggleSearchView={vi.fn()}
+        onThemeChange={vi.fn()}
+        onThemePreview={vi.fn()}
+        onThemePreviewReset={vi.fn()}
+        onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={onShikiThemePreview}
+        onShikiThemePreviewReset={onShikiThemePreviewReset}
+        onIncrementalRefresh={vi.fn()}
+        refreshStrategy="off"
+        onRefreshStrategyChange={vi.fn()}
+        autoRefreshStatusLabel={null}
+        autoRefreshStatusTone={null}
+        autoRefreshStatusTooltip={null}
+        onToggleFocus={vi.fn()}
+        onToggleHelp={vi.fn()}
+        onToggleSettings={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Choose text viewer theme" });
+    await user.click(trigger);
+
+    const selectedButton = screen.getByRole("button", {
+      name: /GitHub Light Default/,
+      pressed: true,
+    });
+    await waitFor(() => expect(selectedButton).toHaveFocus());
+
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "GitHub Light High Contrast" })).toHaveFocus(),
+    );
+    expect(onShikiThemePreview).toHaveBeenCalledWith("github-light-high-contrast");
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.queryByLabelText("Text viewer theme")).not.toBeInTheDocument();
+    expect(onShikiThemePreviewReset).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues text viewer theme keyboard navigation from the hovered item", async () => {
+    const user = userEvent.setup();
+    const onShikiThemePreview = vi.fn();
+
+    render(
+      <TopBar
+        mainView="history"
+        theme="light"
+        shikiTheme="github-light-default"
+        indexing={false}
+        focusMode={false}
+        focusDisabled={false}
+        onToggleSearchView={vi.fn()}
+        onThemeChange={vi.fn()}
+        onThemePreview={vi.fn()}
+        onThemePreviewReset={vi.fn()}
+        onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={onShikiThemePreview}
+        onShikiThemePreviewReset={vi.fn()}
+        onIncrementalRefresh={vi.fn()}
+        refreshStrategy="off"
+        onRefreshStrategyChange={vi.fn()}
+        autoRefreshStatusLabel={null}
+        autoRefreshStatusTone={null}
+        autoRefreshStatusTooltip={null}
+        onToggleFocus={vi.fn()}
+        onToggleHelp={vi.fn()}
+        onToggleSettings={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose text viewer theme" }));
+    await user.hover(screen.getByRole("button", { name: "Light Plus" }));
+
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Material Theme Lighter" })).toHaveFocus(),
+    );
+    expect(onShikiThemePreview).toHaveBeenLastCalledWith("material-theme-lighter");
+  });
+
+  it("ignores passive mouse-enter events after keyboard navigation takes over in the text viewer theme menu", async () => {
+    const user = userEvent.setup();
+    const onShikiThemePreview = vi.fn();
+
+    render(
+      <TopBar
+        mainView="history"
+        theme="light"
+        shikiTheme="github-light-default"
+        indexing={false}
+        focusMode={false}
+        focusDisabled={false}
+        onToggleSearchView={vi.fn()}
+        onThemeChange={vi.fn()}
+        onThemePreview={vi.fn()}
+        onThemePreviewReset={vi.fn()}
+        onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={onShikiThemePreview}
+        onShikiThemePreviewReset={vi.fn()}
+        onIncrementalRefresh={vi.fn()}
+        refreshStrategy="off"
+        onRefreshStrategyChange={vi.fn()}
+        autoRefreshStatusLabel={null}
+        autoRefreshStatusTone={null}
+        autoRefreshStatusTooltip={null}
+        onToggleFocus={vi.fn()}
+        onToggleHelp={vi.fn()}
+        onToggleSettings={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose text viewer theme" }));
+    await user.hover(screen.getByRole("button", { name: "Light Plus" }));
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Material Theme Lighter" })).toHaveFocus(),
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "Vitesse Light" }));
+    await user.keyboard("{ArrowDown}");
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Min Light" })).toHaveFocus());
+    expect(onShikiThemePreview).toHaveBeenLastCalledWith("min-light");
+  });
+
   it("reflects disabled and active states", () => {
     render(
       <TopBar
@@ -87,7 +454,11 @@ describe("TopBar", () => {
         focusDisabled={true}
         onToggleSearchView={vi.fn()}
         onThemeChange={vi.fn()}
+        onThemePreview={vi.fn()}
+        onThemePreviewReset={vi.fn()}
         onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={vi.fn()}
+        onShikiThemePreviewReset={vi.fn()}
         onIncrementalRefresh={vi.fn()}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
@@ -102,11 +473,11 @@ describe("TopBar", () => {
 
     expect(screen.getByRole("button", { name: "Search" })).toHaveAttribute(
       "title",
-      "Search view is open. Return to history view (Esc).",
+      "Return to History  Esc",
     );
     expect(screen.getByRole("button", { name: "Exit focus mode" })).toHaveAttribute(
       "title",
-      "Exit focus mode (Cmd/Ctrl+Shift+M).",
+      "Exit Focus mode  ⌘⇧M",
     );
     expect(screen.getByRole("button", { name: "Indexing in progress" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Exit focus mode" })).toBeDisabled();
@@ -114,7 +485,7 @@ describe("TopBar", () => {
     expect(screen.getByRole("button", { name: "Choose text viewer theme" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open settings" })).toHaveAttribute(
       "title",
-      "Open Settings (Cmd/Ctrl+,).",
+      "Open Settings  ⌘,",
     );
   });
 
@@ -129,7 +500,11 @@ describe("TopBar", () => {
         focusDisabled={false}
         onToggleSearchView={vi.fn()}
         onThemeChange={vi.fn()}
+        onThemePreview={vi.fn()}
+        onThemePreviewReset={vi.fn()}
         onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={vi.fn()}
+        onShikiThemePreviewReset={vi.fn()}
         onIncrementalRefresh={vi.fn()}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
@@ -155,7 +530,11 @@ describe("TopBar", () => {
         focusDisabled={false}
         onToggleSearchView={vi.fn()}
         onThemeChange={vi.fn()}
+        onThemePreview={vi.fn()}
+        onThemePreviewReset={vi.fn()}
         onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={vi.fn()}
+        onShikiThemePreviewReset={vi.fn()}
         onIncrementalRefresh={vi.fn()}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
@@ -180,7 +559,11 @@ describe("TopBar", () => {
         focusDisabled={false}
         onToggleSearchView={vi.fn()}
         onThemeChange={vi.fn()}
+        onThemePreview={vi.fn()}
+        onThemePreviewReset={vi.fn()}
         onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={vi.fn()}
+        onShikiThemePreviewReset={vi.fn()}
         onIncrementalRefresh={vi.fn()}
         refreshStrategy="off"
         onRefreshStrategyChange={vi.fn()}
@@ -209,7 +592,11 @@ describe("TopBar", () => {
         focusDisabled={false}
         onToggleSearchView={vi.fn()}
         onThemeChange={vi.fn()}
+        onThemePreview={vi.fn()}
+        onThemePreviewReset={vi.fn()}
         onShikiThemeChange={vi.fn()}
+        onShikiThemePreview={vi.fn()}
+        onShikiThemePreviewReset={vi.fn()}
         onIncrementalRefresh={vi.fn()}
         refreshStrategy="watch-5s"
         onRefreshStrategyChange={vi.fn()}

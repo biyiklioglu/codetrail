@@ -550,24 +550,62 @@ describe("queryService in-memory", () => {
     const now = "2026-03-01T10:00:00.000Z";
 
     db.prepare(
-      `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run("project_cursor", "cursor", "Cursor Project", "/workspace/cursor-project", now, now);
+      `INSERT INTO projects (id, provider, name, path, metadata_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "project_cursor",
+      "cursor",
+      "Cursor Project",
+      "/workspace/cursor-project",
+      '{"workspaceId":"cursor-workspace"}',
+      now,
+      now,
+    );
+    db.prepare(
+      `INSERT INTO sessions (
+        id,
+        project_id,
+        provider,
+        file_path,
+        model_names,
+        metadata_json,
+        message_count,
+        token_input_total,
+        token_output_total
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "session_cursor",
+      "project_cursor",
+      "cursor",
+      "/workspace/cursor-project/session-1.jsonl",
+      "",
+      '{"composerId":"composer-1"}',
+      0,
+      0,
+      0,
+    );
 
     const service = createQueryServiceFromDb(db);
     const projects = service.listProjects({ providers: undefined, query: "" });
+    const sessions = service.listSessions({ projectId: "project_cursor" });
     expect(projects.projects).toEqual([
       {
         id: "project_cursor",
         provider: "cursor",
         name: "Cursor Project",
         path: "/workspace/cursor-project",
-        sessionCount: 0,
+        providerProjectKey: null,
+        repositoryUrl: null,
+        resolutionState: null,
+        resolutionSource: null,
+        metadataJson: '{"workspaceId":"cursor-workspace"}',
+        sessionCount: 1,
         messageCount: 0,
         bookmarkCount: 0,
         lastActivity: null,
       },
     ]);
+    expect(sessions.sessions[0]?.metadataJson).toBe('{"composerId":"composer-1"}');
   });
 
   it("includes bookmark counts in project and session listings", () => {
@@ -616,9 +654,7 @@ describe("queryService in-memory", () => {
       })),
       listProjectBookmarks: vi.fn((projectId: string, options?: unknown) => {
         const typedOptions =
-          typeof options === "object" && options !== null
-            ? (options as { offset?: number })
-            : {};
+          typeof options === "object" && options !== null ? (options as { offset?: number }) : {};
         if (projectId !== "project_1") {
           return [];
         }
@@ -693,9 +729,7 @@ describe("queryService in-memory", () => {
     const bookmarkStore = createBookmarkStoreMock({
       countProjectBookmarks: vi.fn((projectId: string, options?: unknown) => {
         const typedOptions =
-          typeof options === "object" && options !== null
-            ? (options as { query?: string })
-            : {};
+          typeof options === "object" && options !== null ? (options as { query?: string }) : {};
         if (projectId !== "project_1") {
           return 0;
         }
@@ -1659,7 +1693,7 @@ describe("queryService in-memory", () => {
     expect(bookmarkStore.removeProjectBookmarks).not.toHaveBeenCalled();
   });
 
-  it("fails project deletion loudly when a session cannot be tombstoned and leaves project data untouched", () => {
+  it("allows project deletion when a session resume tombstone is incomplete and skips it", () => {
     const db = seedQueryDb();
     db.prepare("DELETE FROM indexed_files WHERE file_path = ?").run(
       "/workspace/project-one/session-1.jsonl",
@@ -1671,20 +1705,34 @@ describe("queryService in-memory", () => {
     const bookmarkStore = createBookmarkStoreMock({
       removeProjectBookmarks: vi.fn(() => 2),
     });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const service = createQueryServiceFromDb(db, {
       bookmarkStore,
       ownsBookmarkStore: false,
     });
 
-    expect(() => service.deleteProject({ projectId: "project_1" })).toThrowError(
-      'Cannot delete indexed history for session "session_1" because its incremental resume metadata is incomplete.',
+    expect(service.deleteProject({ projectId: "project_1" })).toEqual({
+      deleted: true,
+      provider: "claude",
+      sourceFormat: "jsonl_stream",
+      removedSessionCount: 1,
+      removedMessageCount: 2,
+      removedBookmarkCount: 2,
+    });
+    expect(bookmarkStore.removeProjectBookmarks).toHaveBeenCalledWith("project_1");
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[codetrail] Skipping deleted-session tombstone for "session_1" because incremental resume metadata is incomplete.',
     );
-    expect(bookmarkStore.removeProjectBookmarks).not.toHaveBeenCalled();
-    expect((db.prepare("SELECT COUNT(*) as c FROM projects").get() as { c: number }).c).toBe(1);
-    expect((db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) as c FROM projects").get() as { c: number }).c).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c).toBe(0);
     expect(
       (db.prepare("SELECT COUNT(*) as c FROM deleted_projects").get() as { c: number }).c,
+    ).toBe(1);
+    expect(
+      (db.prepare("SELECT COUNT(*) as c FROM deleted_sessions").get() as { c: number }).c,
     ).toBe(0);
+
+    warnSpy.mockRestore();
   });
 
   it("allows project deletion when a legacy session row is missing file metadata and skips its tombstone", () => {

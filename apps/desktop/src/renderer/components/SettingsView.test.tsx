@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 
-import { useState } from "react";
+import { type ComponentProps, useState } from "react";
 
-import type { IpcResponse, MessageCategory, Provider } from "@codetrail/core/browser";
-import { createSettingsInfoFixture } from "@codetrail/core/testing";
+import type { IpcResponse, Provider } from "@codetrail/core/browser";
+import {
+  createClaudeHookStateFixture,
+  createLiveStatusFixture,
+  createSettingsInfoFixture,
+} from "@codetrail/core/testing";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -90,7 +94,10 @@ const diagnostics = {
   },
 };
 
-function createBaseProps() {
+function createBaseProps(): Omit<
+  ComponentProps<typeof SettingsView>,
+  "info" | "loading" | "error"
+> {
   const externalTools: ExternalToolConfig[] = [
     ...createDefaultExternalTools().map((tool) =>
       tool.appId === "vscode"
@@ -118,6 +125,68 @@ function createBaseProps() {
     diagnostics,
     diagnosticsLoading: false,
     diagnosticsError: null,
+    liveStatus: createLiveStatusFixture({
+      enabled: true,
+      updatedAt: "2026-03-16T10:05:04.000Z",
+      providerCounts: {
+        claude: 1,
+        codex: 1,
+        gemini: 0,
+        cursor: 0,
+        copilot: 0,
+      },
+      sessions: [
+        {
+          provider: "claude",
+          sessionIdentity: "claude-session",
+          sourceSessionId: "claude-session",
+          filePath: "/workspace/.claude/projects/project-a/claude-session.jsonl",
+          projectName: "project-a",
+          projectPath: "/workspace/project-a",
+          cwd: "/workspace/project-a",
+          statusKind: "waiting_for_approval" as const,
+          statusText: "Waiting for approval",
+          detailText: "Read ~/.claude/settings.json",
+          sourcePrecision: "hook" as const,
+          lastActivityAt: "2026-03-16T10:05:02.000Z",
+          bestEffort: false,
+        },
+      ],
+      claudeHookState: createClaudeHookStateFixture({
+        installed: true,
+        managedEventNames: [
+          "SessionStart",
+          "UserPromptSubmit",
+          "PreToolUse",
+          "PostToolUse",
+          "Notification",
+          "Stop",
+          "SessionEnd",
+        ],
+        missingEventNames: [],
+      }),
+    }),
+    liveStatusError: null,
+    liveWatchEnabled: true,
+    liveWatchRowHasBackground: true,
+    onLiveWatchEnabledChange: vi.fn(),
+    onLiveWatchRowHasBackgroundChange: vi.fn(),
+    claudeHookState: createClaudeHookStateFixture({
+      installed: true,
+      managedEventNames: [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "Notification",
+        "Stop",
+        "SessionEnd",
+      ],
+      missingEventNames: [],
+    }),
+    claudeHookActionPending: null,
+    onInstallClaudeHooks: vi.fn(),
+    onRemoveClaudeHooks: vi.fn(),
     appearance: {
       theme: "dark" as const,
       shikiTheme: "github-dark-default" as ShikiThemeId,
@@ -228,8 +297,6 @@ function createBaseProps() {
       onRemoveMissingSessionsDuringIncrementalIndexingChange: vi.fn(),
     },
     messageRules: {
-      expandedByDefaultCategories: ["assistant"] as MessageCategory[],
-      onToggleExpandedByDefault: vi.fn(),
       systemMessageRegexRules: {
         claude: ["^<command-name>"],
         codex: ["^<environment_context>"],
@@ -268,10 +335,11 @@ describe("SettingsView", () => {
     const sectionHeadings = screen
       .getAllByRole("heading", { level: 3 })
       .map((node) => node.textContent?.trim());
-    expect(sectionHeadings.indexOf("Default Expansion")).toBeLessThan(
-      sectionHeadings.indexOf("Providers"),
-    );
+    expect(sectionHeadings).not.toContain("Default Expansion");
     expect(sectionHeadings.indexOf("Providers")).toBeLessThan(
+      sectionHeadings.indexOf("Live Watch"),
+    );
+    expect(sectionHeadings.indexOf("Live Watch")).toBeLessThan(
       sectionHeadings.indexOf("External Tools"),
     );
     expect(sectionHeadings.indexOf("External Tools")).toBeLessThan(
@@ -282,7 +350,7 @@ describe("SettingsView", () => {
     expect(screen.getByText("System Message Rules")).toBeInTheDocument();
 
     const selects = screen.getAllByRole("combobox");
-    expect(selects.length).toBeGreaterThanOrEqual(9);
+    expect(selects.length).toBeGreaterThanOrEqual(8);
     await user.selectOptions(screen.getByRole("combobox", { name: "Theme" }), "midnight");
     expect(screen.getByRole("option", { name: "Tokyo Night" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Light Plus" })).not.toBeInTheDocument();
@@ -290,14 +358,10 @@ describe("SettingsView", () => {
       screen.getByRole("combobox", { name: "Text viewer theme" }),
       "tokyo-night",
     );
-    await user.selectOptions(screen.getByRole("combobox", { name: "Messages per page" }), "25");
     await user.selectOptions(screen.getByRole("combobox", { name: "Monospaced font" }), "current");
     await user.selectOptions(screen.getByRole("combobox", { name: "Monospaced size" }), "13px");
     await user.selectOptions(screen.getByRole("combobox", { name: "Regular font" }), "inter");
     await user.selectOptions(screen.getByRole("combobox", { name: "Regular size" }), "14px");
-    await user.clear(screen.getByRole("textbox", { name: "Zoom" }));
-    await user.type(screen.getByRole("textbox", { name: "Zoom" }), "104%");
-    await user.tab();
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Preferred editor" }),
       "custom:1",
@@ -348,13 +412,14 @@ describe("SettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Remove Custom Tool 1" }));
     await user.click(screen.getByRole("button", { name: "Rescan System" }));
     await user.click(screen.getByRole("checkbox", { name: "Claude" }));
+    await user.click(screen.getByRole("checkbox", { name: "Enable live watch" }));
+    await user.click(screen.getByRole("checkbox", { name: "Use live row background" }));
     await user.click(screen.getByRole("button", { name: "Force reindex" }));
     await user.click(
       screen.getByRole("checkbox", {
         name: "Remove indexed sessions when source files disappear during incremental refresh",
       }),
     );
-    await user.click(screen.getByRole("button", { name: "User" }));
     await user.click(screen.getByRole("button", { name: "Add claude regex rule" }));
     await user.type(screen.getByRole("textbox", { name: "claude regex rule 1" }), "$");
     await user.click(screen.getByRole("button", { name: "Remove claude regex rule 1" }));
@@ -368,8 +433,6 @@ describe("SettingsView", () => {
 
     expect(baseProps.appearance.onThemeChange).toHaveBeenCalledWith("midnight");
     expect(baseProps.appearance.onShikiThemeChange).toHaveBeenCalledWith("tokyo-night");
-    expect(baseProps.appearance.onMessagePageSizeChange).toHaveBeenCalledWith(25);
-    expect(baseProps.appearance.onZoomPercentChange).toHaveBeenCalledWith(104);
     expect(baseProps.appearance.onMonoFontFamilyChange).toHaveBeenCalledWith("current");
     expect(baseProps.appearance.onMonoFontSizeChange).toHaveBeenCalledWith("13px");
     expect(baseProps.appearance.onRegularFontFamilyChange).toHaveBeenCalledWith("inter");
@@ -381,7 +444,8 @@ describe("SettingsView", () => {
     expect(baseProps.appearance.onAutoHideViewerHeaderActionsChange).toHaveBeenCalledWith(true);
     expect(baseProps.appearance.onPreferredExternalEditorChange).toHaveBeenCalledWith("custom:1");
     expect(baseProps.appearance.onPreferredExternalDiffToolChange).toHaveBeenCalledWith("");
-    const externalToolCalls = baseProps.appearance.onExternalToolsChange.mock.calls.map(
+    const onExternalToolsChange = vi.mocked(baseProps.appearance.onExternalToolsChange);
+    const externalToolCalls = onExternalToolsChange.mock.calls.map(
       ([tools]) => tools as ExternalToolConfig[],
     );
     expect(
@@ -435,13 +499,14 @@ describe("SettingsView", () => {
     expect(externalToolCalls.some((tools) => !tools.some((tool) => tool.id === "custom:1"))).toBe(
       true,
     );
-    expect(baseProps.appearance.onRescanExternalTools).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(baseProps.appearance.onRescanExternalTools!)).toHaveBeenCalledTimes(1);
     expect(baseProps.indexing.onToggleProviderEnabled).toHaveBeenCalledWith("claude");
+    expect(baseProps.onLiveWatchEnabledChange).toHaveBeenCalledWith(false);
+    expect(baseProps.onLiveWatchRowHasBackgroundChange).toHaveBeenCalledWith(false);
     expect(baseProps.indexing.onForceReindex).toHaveBeenCalledTimes(1);
     expect(
       baseProps.indexing.onRemoveMissingSessionsDuringIncrementalIndexingChange,
     ).toHaveBeenCalledWith(true);
-    expect(baseProps.messageRules.onToggleExpandedByDefault).toHaveBeenCalledWith("user");
     expect(baseProps.messageRules.onAddSystemMessageRegexRule).toHaveBeenCalledWith("claude");
     expect(baseProps.messageRules.onUpdateSystemMessageRegexRule).toHaveBeenCalledWith(
       "claude",
@@ -487,7 +552,19 @@ describe("SettingsView", () => {
           diagnosticsError={initialProps.diagnosticsError}
           indexing={initialProps.indexing}
           messageRules={initialProps.messageRules}
-          onActionError={initialProps.onActionError}
+          liveStatus={initialProps.liveStatus ?? null}
+          liveStatusError={initialProps.liveStatusError ?? null}
+          claudeHookState={initialProps.claudeHookState ?? null}
+          claudeHookActionPending={initialProps.claudeHookActionPending ?? null}
+          onInstallClaudeHooks={initialProps.onInstallClaudeHooks ?? (() => undefined)}
+          onRemoveClaudeHooks={initialProps.onRemoveClaudeHooks ?? (() => undefined)}
+          liveWatchEnabled={initialProps.liveWatchEnabled ?? false}
+          liveWatchRowHasBackground={initialProps.liveWatchRowHasBackground ?? true}
+          onLiveWatchEnabledChange={initialProps.onLiveWatchEnabledChange ?? (() => undefined)}
+          onLiveWatchRowHasBackgroundChange={
+            initialProps.onLiveWatchRowHasBackgroundChange ?? (() => undefined)
+          }
+          {...(initialProps.onActionError ? { onActionError: initialProps.onActionError } : {})}
           appearance={{
             ...appearanceState,
             onThemeChange: initialProps.appearance.onThemeChange,
@@ -521,7 +598,9 @@ describe("SettingsView", () => {
               setAppearanceState((current) => ({ ...current, terminalAppCommand: value })),
             onExternalToolsChange: (tools) =>
               setAppearanceState((current) => ({ ...current, externalTools: tools })),
-            onRescanExternalTools: initialProps.appearance.onRescanExternalTools,
+            ...(initialProps.appearance.onRescanExternalTools
+              ? { onRescanExternalTools: initialProps.appearance.onRescanExternalTools }
+              : {}),
           }}
         />
       );
@@ -562,7 +641,7 @@ describe("SettingsView", () => {
 
     await user.click(screen.getByRole("button", { name: "Move Zed up" }));
 
-    const toolCalls = baseProps.appearance.onExternalToolsChange.mock.calls;
+    const toolCalls = vi.mocked(baseProps.appearance.onExternalToolsChange).mock.calls;
     expect(toolCalls.length).toBeGreaterThan(0);
     const reorderedTools = toolCalls.at(-1)?.[0] as ExternalToolConfig[];
     expect(reorderedTools.map((tool) => tool.id)).toEqual([
@@ -591,6 +670,26 @@ describe("SettingsView", () => {
     expect(screen.getByText("Trigger type")).toBeInTheDocument();
     expect(screen.getByText("Avg duration")).toBeInTheDocument();
     expect(screen.getByText("Max duration")).toBeInTheDocument();
+  });
+
+  it("forwards Claude hook install and remove actions", async () => {
+    const user = userEvent.setup();
+    const baseProps = createBaseProps();
+
+    render(<SettingsView info={info} loading={false} error={null} {...baseProps} />);
+
+    expect(screen.getByText("Live Watch")).toBeInTheDocument();
+    expect(screen.getByText("Claude hooks installed")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Live tracking only runs while Auto-refresh is using a watch strategy. Manual and scan refresh modes do not produce live session updates.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Install / Update" }));
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+
+    expect(baseProps.onInstallClaudeHooks).toHaveBeenCalledTimes(1);
+    expect(baseProps.onRemoveClaudeHooks).toHaveBeenCalledTimes(1);
   });
 });
 

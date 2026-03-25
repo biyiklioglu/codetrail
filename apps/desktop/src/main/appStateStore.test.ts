@@ -63,6 +63,8 @@ describe("AppStateStore", () => {
       sessionPaneWidth: 404,
       singleClickFoldersExpand: false,
       singleClickProjectsExpand: true,
+      hideSessionsPaneInTreeView: true,
+      liveWatchRowHasBackground: false,
       theme: "ft-dark",
       darkShikiTheme: "vesper",
       lightShikiTheme: "github-light-default",
@@ -85,6 +87,7 @@ describe("AppStateStore", () => {
       historyMode: "bookmarks",
       projectViewMode: "tree",
       projectSortField: "name",
+      currentAutoRefreshStrategy: "watch-3s",
       preferredAutoRefreshStrategy: "scan-30s",
       projectSortDirection: "desc",
       sessionSortDirection: "desc",
@@ -114,6 +117,8 @@ describe("AppStateStore", () => {
       sessionPaneWidth: 404,
       singleClickFoldersExpand: false,
       singleClickProjectsExpand: true,
+      hideSessionsPaneInTreeView: true,
+      liveWatchRowHasBackground: false,
       theme: "ft-dark",
       darkShikiTheme: "vesper",
       lightShikiTheme: "github-light-default",
@@ -136,6 +141,7 @@ describe("AppStateStore", () => {
       historyMode: "bookmarks",
       projectViewMode: "tree",
       projectSortField: "name",
+      currentAutoRefreshStrategy: "watch-3s",
       preferredAutoRefreshStrategy: "scan-30s",
       projectSortDirection: "desc",
       sessionSortDirection: "desc",
@@ -203,6 +209,73 @@ describe("AppStateStore", () => {
       defaultViewerWrapMode: "nowrap",
       defaultDiffViewMode: "unified",
       externalTools: createDefaultExternalTools(),
+    });
+  });
+
+  it("keeps pane state in memory without writing until flush when updated runtime-only", () => {
+    const fs = createMemoryFs();
+    const fakeTimer = createFakeTimer();
+    const filePath = "/tmp/codetrail-runtime-only-ui-state.json";
+
+    const store = new AppStateStore(filePath, {
+      fs,
+      timer: fakeTimer.timer,
+    });
+
+    store.setPaneStateRuntimeOnly({ projectPaneWidth: 320, sessionPaneWidth: 390 });
+
+    expect(store.getPaneState()).toEqual({
+      projectPaneWidth: 320,
+      sessionPaneWidth: 390,
+      darkShikiTheme: "github-dark-default",
+      lightShikiTheme: "github-light-default",
+      messagePageSize: 50,
+      defaultViewerWrapMode: "nowrap",
+      defaultDiffViewMode: "unified",
+      externalTools: createDefaultExternalTools(),
+    });
+    expect(fakeTimer.timer.setTimeout).not.toHaveBeenCalled();
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+
+    fakeTimer.runAll();
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+
+    store.flush();
+    expect(fs.writeFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges runtime-only pane patches into existing pane state", () => {
+    const fs = createMemoryFs();
+    const filePath = "/tmp/codetrail-runtime-pane-patch.json";
+
+    const store = new AppStateStore(filePath, { fs });
+    store.setPaneState({ projectPaneWidth: 320, sessionPaneWidth: 390 });
+    store.setPaneStateRuntimeOnly({ currentAutoRefreshStrategy: "watch-3s" } as never);
+    store.flush();
+
+    expect(store.getPaneState()).toEqual({
+      projectPaneWidth: 320,
+      sessionPaneWidth: 390,
+      currentAutoRefreshStrategy: "watch-3s",
+      darkShikiTheme: "github-dark-default",
+      lightShikiTheme: "github-light-default",
+      messagePageSize: 50,
+      defaultViewerWrapMode: "nowrap",
+      defaultDiffViewMode: "unified",
+      externalTools: createDefaultExternalTools(),
+    });
+    expect(JSON.parse(fs.files.get(filePath) ?? "{}")).toEqual({
+      pane: {
+        projectPaneWidth: 320,
+        sessionPaneWidth: 390,
+        currentAutoRefreshStrategy: "watch-3s",
+        darkShikiTheme: "github-dark-default",
+        lightShikiTheme: "github-light-default",
+        messagePageSize: 50,
+        defaultViewerWrapMode: "nowrap",
+        defaultDiffViewMode: "unified",
+        externalTools: createDefaultExternalTools(),
+      },
     });
   });
 

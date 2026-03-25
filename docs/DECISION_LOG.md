@@ -40,3 +40,4 @@
 - Session category chips persist during session navigation in app state.
 - Search result click deep-links to session detail with focus target.
 - Path context actions use file manager open API.
+- History refresh and pagination behavior follow `docs/HISTORY_REFRESH_POLICY.md`.

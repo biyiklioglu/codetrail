@@ -8,6 +8,7 @@ import type {
   ProjectViewMode,
   SessionSummary,
 } from "../../app/types";
+import type { ProjectFolderGroup } from "../../lib/projectTree";
 
 export type ProjectPaneHistoryMode = "session" | "bookmarks" | "project_all";
 
@@ -47,6 +48,11 @@ export type ProjectPaneData = {
   projectUpdates: Record<string, { messageDelta: number; updatedAt: number }>;
   treeProjectSessionsByProjectId?: Record<string, SessionSummary[]>;
   treeProjectSessionsLoadingByProjectId?: Record<string, boolean>;
+  folderGroups?: ProjectFolderGroup[];
+  expandedFolderIdSet?: Set<string>;
+  expandedProjectIds?: string[];
+  allVisibleFoldersExpanded?: boolean;
+  treeFocusedRow?: ProjectPaneTreeFocusedRow | null;
   listRef?: Ref<HTMLDivElement>;
 };
 
@@ -59,6 +65,7 @@ export type ProjectPaneSorting = {
 export type ProjectPanePreferences = {
   singleClickFoldersExpand?: boolean;
   singleClickProjectsExpand?: boolean;
+  hideSessionsPaneInTreeView?: boolean;
 };
 
 export type ProjectPaneSelectionOptions = {
@@ -80,6 +87,7 @@ export type ProjectPaneActions = {
   onToggleSortDirection: () => void;
   onToggleSessionSortDirection?: () => void;
   onToggleViewMode: () => void;
+  onToggleHideSessionsPaneInTreeView: () => void;
   onToggleSingleClickFoldersExpand: () => void;
   onToggleSingleClickProjectsExpand: () => void;
   onCopyProjectDetails: (projectId?: string) => void;
@@ -93,7 +101,10 @@ export type ProjectPaneActions = {
   onSelectProjectBookmarks?: (projectId: string) => void;
   consumeFocusSelectionBehavior?: () => ProjectPaneSelectionOptions;
   onQueueProjectTreeNoopCommit?: (options?: ProjectPaneSelectionOptions) => void;
-  onEnsureTreeProjectSessionsLoaded?: (projectId: string) => void;
+  onSetTreeFocusedRow?: (row: ProjectPaneTreeFocusedRow | null) => void;
+  onToggleFolder?: (folderId: string) => void;
+  onToggleAllFolders?: () => void;
+  onToggleProjectExpansion?: (projectId: string) => void;
   onOpenProjectLocation: (projectId?: string) => void;
   onOpenSessionLocation: (sessionId?: string) => void;
   onDeleteProject: (projectId?: string) => void;

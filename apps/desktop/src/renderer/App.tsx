@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  type MessageCategory,
+  type IpcRequest,
   PROVIDER_LIST,
   type Provider,
   type SearchMode,
 } from "@codetrail/core/browser";
 
+import type { AppCommand } from "../shared/appCommands";
 import {
   DEFAULT_PREFERRED_REFRESH_STRATEGY,
   type RefreshStrategy,
@@ -40,12 +41,13 @@ import {
   setTestHistorySelectionDebounceOverrides,
   useHistoryController,
 } from "./features/useHistoryController";
+import { useLiveWatchController } from "./features/useLiveWatchController";
 import { useSearchController } from "./features/useSearchController";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useReconcileProviderSelection } from "./hooks/useReconcileProviderSelection";
 import { useCodetrailClient } from "./lib/codetrailClient";
 import { findSessionSummaryById } from "./lib/historySessionLookup";
-import { toErrorMessage, toggleValue } from "./lib/viewUtils";
+import { toErrorMessage } from "./lib/viewUtils";
 import { ViewerExternalAppsProvider } from "./lib/viewerExternalAppsContext";
 
 // Module-level override for tests — keeps the component API clean
@@ -121,7 +123,9 @@ export function App({
   );
   const [historyDeleteError, setHistoryDeleteError] = useState<string | null>(null);
   const [historyDeletePending, setHistoryDeletePending] = useState(false);
-  const [refreshStrategy, setRefreshStrategy] = useState<RefreshStrategy>("off");
+  const [refreshStrategy, setRefreshStrategy] = useState<RefreshStrategy>(
+    initialPaneState?.currentAutoRefreshStrategy ?? "off",
+  );
   const [watcherPendingPathCount, setWatcherPendingPathCount] = useState(0);
   const [autoRefreshScanInFlight, setAutoRefreshScanInFlight] = useState(false);
   const [watchStats, setWatchStats] = useState<WatchStatsResponse | null>(null);
@@ -141,6 +145,7 @@ export function App({
   const logError = useCallback((context: string, error: unknown) => {
     console.error(`[codetrail] ${context}: ${toErrorMessage(error)}`);
   }, []);
+  const previousMainViewRef = useRef<MainView>(mainView);
   const wasIndexingRef = useRef(false);
   const lastCompletedJobsRef = useRef(-1);
   const watchStatsLoadedRef = useRef(false);
@@ -171,6 +176,23 @@ export function App({
   });
   const preferredRefreshStrategy =
     history.preferredAutoRefreshStrategy ?? DEFAULT_PREFERRED_REFRESH_STRATEGY;
+  const {
+    liveStatus,
+    liveStatusError,
+    claudeHookActionPending,
+    showClaudeHooksPrompt,
+    setShowClaudeHooksPrompt,
+    installClaudeHooks,
+    removeClaudeHooks,
+  } = useLiveWatchController({
+    codetrail,
+    mainView,
+    refreshStrategy,
+    liveWatchEnabled: history.liveWatchEnabled,
+    claudeEnabled: enabledProviders.includes("claude"),
+    claudeHooksPrompted: history.claudeHooksPrompted,
+    logError,
+  });
 
   useEffect(() => {
     if (mainView !== "settings" || appearance.settingsInfo || appearance.settingsLoading) {
@@ -178,6 +200,33 @@ export function App({
     }
     void appearance.loadSettingsInfo();
   }, [appearance.loadSettingsInfo, appearance.settingsInfo, appearance.settingsLoading, mainView]);
+
+  useEffect(() => {
+    const previousMainView = previousMainViewRef.current;
+    previousMainViewRef.current = mainView;
+    if (previousMainView !== "settings" || mainView === "settings") {
+      return;
+    }
+    void codetrail.invoke("app:flushState", {}).catch((error: unknown) => {
+      logError("Failed flushing app state after closing settings", error);
+    });
+  }, [codetrail, logError, mainView]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void codetrail
+        .invoke("ui:setPaneState", {
+          currentAutoRefreshStrategy: refreshStrategy,
+        } as IpcRequest<"ui:setPaneState">)
+        .catch((error: unknown) => {
+          logError("Failed saving current auto-refresh strategy", error);
+        });
+    }, 180);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [codetrail, logError, refreshStrategy]);
 
   useReconcileProviderSelection(enabledProviders, setSearchProviders);
 
@@ -192,9 +241,17 @@ export function App({
 
   const reloadIndexedData = useCallback(
     async (source: "manual" | "auto") => {
-      await Promise.all([history.handleRefreshAllData(source), search.reloadSearch()]);
+      const historyRefreshPromise = history.handleRefreshAllData(source, {
+        historyViewActive: mainView === "history",
+      });
+      const shouldReloadSearch =
+        source === "manual" || (mainView === "search" && search.hasActiveSearchQuery);
+      await Promise.all([
+        historyRefreshPromise,
+        shouldReloadSearch ? search.reloadSearch() : Promise.resolve(),
+      ]);
     },
-    [history.handleRefreshAllData, search.reloadSearch],
+    [history.handleRefreshAllData, mainView, search.hasActiveSearchQuery, search.reloadSearch],
   );
 
   const pendingProviderDisableLabel =
@@ -463,12 +520,12 @@ export function App({
   }, [history.refs.messageListRef, mainView]);
 
   const handleRefresh = useCallback(
-    async (force: boolean) => {
+    async (force: boolean, source: "manual" | "auto" = "manual") => {
       setRefreshing(true);
       try {
         skipNextStatusDrivenReloadRef.current = true;
         await codetrail.invoke("indexer:refresh", { force });
-        await reloadIndexedData("manual");
+        await reloadIndexedData(source);
       } catch (error) {
         skipNextStatusDrivenReloadRef.current = false;
         logError("Refresh failed", error);
@@ -487,14 +544,7 @@ export function App({
     await handleRefresh(true);
   }, [handleRefresh]);
   const indexing = refreshing || indexingInBackground;
-  const handleToggleExpandedByDefault = useCallback(
-    (category: MessageCategory) => {
-      history.setExpandedByDefaultCategories((value) =>
-        toggleValue<MessageCategory>(value, category),
-      );
-    },
-    [history.setExpandedByDefaultCategories],
-  );
+  const watchStrategyActive = isWatchRefreshStrategy(refreshStrategy);
   const handleAddSystemMessageRegexRule = useCallback(
     (provider: Provider) => {
       history.setSystemMessageRegexRules((value) => ({
@@ -549,6 +599,118 @@ export function App({
     [history.setPreferredAutoRefreshStrategy],
   );
 
+  useEffect(() => {
+    return codetrail.onAppCommand((command: AppCommand) => {
+      switch (command) {
+        case "open-settings":
+          setMainView("settings");
+          break;
+        case "open-help":
+          setMainView("help");
+          break;
+        case "search-current-view":
+          if (mainView === "search") {
+            focusGlobalSearch();
+          } else {
+            focusSessionSearch();
+          }
+          break;
+        case "open-global-search":
+          focusGlobalSearch();
+          break;
+        case "refresh-now":
+          void handleIncrementalRefresh();
+          break;
+        case "toggle-auto-refresh":
+          updateRefreshStrategy((value) => (value !== "off" ? "off" : preferredRefreshStrategy));
+          break;
+        case "zoom-in":
+          void appearance.applyZoomAction("in");
+          break;
+        case "zoom-out":
+          void appearance.applyZoomAction("out");
+          break;
+        case "zoom-reset":
+          void appearance.applyZoomAction("reset");
+          break;
+        case "toggle-project-pane":
+          if (mainView === "history") {
+            history.setProjectPaneCollapsed((value) => !value);
+          }
+          break;
+        case "toggle-session-pane":
+          if (mainView === "history") {
+            history.setSessionPaneCollapsed((value) => !value);
+          }
+          break;
+        case "toggle-focus-mode":
+          toggleFocusMode();
+          break;
+        case "toggle-all-messages-expanded":
+          if (mainView === "history") {
+            history.handleToggleAllCategoryDefaultExpansion();
+          }
+          break;
+      }
+    });
+  }, [
+    appearance,
+    codetrail,
+    focusGlobalSearch,
+    focusSessionSearch,
+    handleIncrementalRefresh,
+    history,
+    mainView,
+    preferredRefreshStrategy,
+    toggleFocusMode,
+    updateRefreshStrategy,
+  ]);
+
+  const selectAdjacentSessionWithoutFocus = useCallback(
+    (direction: "previous" | "next") => {
+      const sessionPaneVisible =
+        !history.sessionPaneCollapsed &&
+        !(history.projectViewMode === "tree" && history.hideSessionsPaneForTreeView);
+      if (!sessionPaneVisible) {
+        return;
+      }
+      const activeElement = document.activeElement;
+      const sessionPaneFocused =
+        activeElement instanceof HTMLElement &&
+        history.refs.sessionListRef.current?.contains(activeElement);
+      if (sessionPaneFocused) {
+        history.selectAdjacentSession(direction);
+        return;
+      }
+      history.selectAdjacentSession(direction, { preserveFocus: true });
+    },
+    [
+      history.projectViewMode,
+      history.hideSessionsPaneForTreeView,
+      history.sessionPaneCollapsed,
+      history.refs.sessionListRef,
+      history.selectAdjacentSession,
+    ],
+  );
+
+  const selectAdjacentProjectWithoutFocus = useCallback(
+    (direction: "previous" | "next") => {
+      if (history.projectPaneCollapsed) {
+        return;
+      }
+      const activeElement = document.activeElement;
+      const projectPaneFocused =
+        activeElement instanceof HTMLElement &&
+        history.refs.projectListRef.current?.contains(activeElement);
+      if (projectPaneFocused) {
+        history.selectAdjacentProject(direction);
+        return;
+      }
+      history.selectAdjacentProject(direction, { preserveFocus: true });
+    },
+    [history.projectPaneCollapsed, history.refs.projectListRef, history.selectAdjacentProject],
+  );
+
   const refreshingRef = useRef(false);
   useEffect(() => {
     refreshingRef.current = indexing;
@@ -563,7 +725,7 @@ export function App({
     const id = window.setInterval(() => {
       if (refreshingRef.current) return;
       setAutoRefreshScanInFlight(true);
-      void handleRefresh(false).finally(() => {
+      void handleRefresh(false, "auto").finally(() => {
         setAutoRefreshScanInFlight(false);
       });
     }, pollingIntervalMs);
@@ -610,19 +772,25 @@ export function App({
     focusGlobalSearch,
     focusSessionSearch,
     toggleFocusMode,
-    toggleScopedMessagesExpanded: history.handleToggleScopedMessagesExpanded,
+    toggleAllMessagesExpanded: history.handleToggleAllCategoryDefaultExpansion,
     toggleHistoryCategory: history.handleToggleHistoryCategoryShortcut,
-    toggleHistoryCategoryExpanded: history.handleToggleCategoryMessagesExpanded,
+    toggleHistoryCategoryDefaultExpansion: history.handleToggleCategoryDefaultExpansion,
     toggleProjectPaneCollapsed: () => history.setProjectPaneCollapsed((value) => !value),
     toggleSessionPaneCollapsed: () => history.setSessionPaneCollapsed((value) => !value),
-    focusPreviousHistoryMessage: () => history.focusAdjacentHistoryMessage("previous"),
-    focusNextHistoryMessage: () => history.focusAdjacentHistoryMessage("next"),
+    focusPreviousHistoryMessage: () =>
+      history.focusAdjacentHistoryMessage("previous", { preserveFocus: true }),
+    focusNextHistoryMessage: () =>
+      history.focusAdjacentHistoryMessage("next", { preserveFocus: true }),
     focusPreviousSearchResult: () => search.focusAdjacentSearchResult("previous"),
     focusNextSearchResult: () => search.focusAdjacentSearchResult("next"),
-    selectPreviousSession: () => history.selectAdjacentSession("previous"),
-    selectNextSession: () => history.selectAdjacentSession("next"),
-    selectPreviousProject: () => history.selectAdjacentProject("previous"),
-    selectNextProject: () => history.selectAdjacentProject("next"),
+    selectPreviousSession: () => selectAdjacentSessionWithoutFocus("previous"),
+    selectNextSession: () => selectAdjacentSessionWithoutFocus("next"),
+    selectPreviousProject: () => selectAdjacentProjectWithoutFocus("previous"),
+    selectNextProject: () => selectAdjacentProjectWithoutFocus("next"),
+    selectPreviousFocusedSession: () => history.selectAdjacentSession("previous"),
+    selectNextFocusedSession: () => history.selectAdjacentSession("next"),
+    selectPreviousFocusedProject: () => history.selectAdjacentProject("previous"),
+    selectNextFocusedProject: () => history.selectAdjacentProject("next"),
     handleProjectTreeArrow: history.handleProjectTreeArrow,
     handleProjectTreeEnter: history.handleProjectTreeEnter,
     pageHistoryMessagesUp: history.pageHistoryMessagesUp,
@@ -639,26 +807,26 @@ export function App({
       updateRefreshStrategy((value) => (value !== "off" ? "off" : preferredRefreshStrategy)),
   });
 
-  const autoRefreshStatusLabel = isWatchRefreshStrategy(refreshStrategy)
+  const autoRefreshStatusLabel = watchStrategyActive
     ? `${watcherPendingPathCount}`
     : isScanRefreshStrategy(refreshStrategy)
       ? autoRefreshScanInFlight
         ? "Refreshing..."
         : "Auto"
       : null;
-  const autoRefreshStatusTone = isWatchRefreshStrategy(refreshStrategy)
+  const autoRefreshStatusTone = watchStrategyActive
     ? ("queued" as const)
     : isScanRefreshStrategy(refreshStrategy)
       ? autoRefreshScanInFlight
         ? ("running" as const)
         : ("queued" as const)
       : null;
-  const autoRefreshStatusTooltip = isWatchRefreshStrategy(refreshStrategy)
-    ? "Number of changed files currently queued by the watcher before auto-refresh runs."
+  const autoRefreshStatusTooltip = watchStrategyActive
+    ? `Watcher queue: ${watcherPendingPathCount} files`
     : isScanRefreshStrategy(refreshStrategy)
       ? autoRefreshScanInFlight
-        ? "Automatic scan refresh is currently running."
-        : "Automatic scan refresh is enabled and waiting for the next interval."
+        ? "Auto-refresh running"
+        : "Auto-refresh waiting"
       : null;
   const viewerExternalAppsSnapshot = useMemo(
     () => ({
@@ -696,7 +864,11 @@ export function App({
             setMainView((value) => (value === "search" ? "history" : "search"))
           }
           onThemeChange={appearance.setTheme}
+          onThemePreview={appearance.previewTheme}
+          onThemePreviewReset={appearance.clearPreviewTheme}
           onShikiThemeChange={appearance.setShikiTheme}
+          onShikiThemePreview={appearance.previewShikiTheme}
+          onShikiThemePreviewReset={appearance.clearPreviewShikiTheme}
           onIncrementalRefresh={() => void handleIncrementalRefresh()}
           refreshStrategy={refreshStrategy}
           onRefreshStrategyChange={updateRefreshStrategy}
@@ -715,6 +887,8 @@ export function App({
             mainView === "search" ? "search-layout" : ""
           }${history.projectPaneCollapsed ? " projects-collapsed" : ""}${
             history.sessionPaneCollapsed ? " sessions-collapsed" : ""
+          }${
+            history.hideSessionsPaneForTreeView ? " tree-sessions-hidden" : ""
           }${isHistoryLayout && !history.paneStateHydrated ? " pane-layout-hydrating" : ""}`}
           style={history.workspaceStyle}
           aria-busy={isHistoryLayout && !history.paneStateHydrated}
@@ -733,6 +907,8 @@ export function App({
                 logError={logError}
                 onDeleteProject={handleOpenProjectDelete}
                 onDeleteSession={handleOpenSessionDelete}
+                liveSessions={liveStatus?.sessions ?? []}
+                liveRowHasBackground={history.liveWatchRowHasBackground}
               />
             ) : (
               <section className="pane content-pane history-focus-pane">
@@ -745,6 +921,8 @@ export function App({
                   canZoomOut={appearance.canZoomOut}
                   applyZoomAction={appearance.applyZoomAction}
                   setZoomPercent={appearance.setZoomPercent}
+                  liveSessions={liveStatus?.sessions ?? []}
+                  liveRowHasBackground={history.liveWatchRowHasBackground}
                 />
               </section>
             )
@@ -783,6 +961,16 @@ export function App({
                 diagnostics={watchStats}
                 diagnosticsLoading={watchStatsLoading}
                 diagnosticsError={watchStatsError}
+                liveStatus={liveStatus}
+                liveStatusError={liveStatusError}
+                claudeHookState={liveStatus?.claudeHookState ?? null}
+                claudeHookActionPending={claudeHookActionPending}
+                onInstallClaudeHooks={() => void installClaudeHooks()}
+                onRemoveClaudeHooks={() => void removeClaudeHooks()}
+                liveWatchEnabled={history.liveWatchEnabled}
+                liveWatchRowHasBackground={history.liveWatchRowHasBackground}
+                onLiveWatchEnabledChange={history.setLiveWatchEnabled}
+                onLiveWatchRowHasBackgroundChange={history.setLiveWatchRowHasBackground}
                 appearance={{
                   theme: appearance.theme,
                   shikiTheme: appearance.shikiTheme,
@@ -833,8 +1021,6 @@ export function App({
                     handleMissingSessionCleanupToggle,
                 }}
                 messageRules={{
-                  expandedByDefaultCategories: history.expandedByDefaultCategories,
-                  onToggleExpandedByDefault: handleToggleExpandedByDefault,
                   systemMessageRegexRules: history.systemMessageRegexRules,
                   onAddSystemMessageRegexRule: handleAddSystemMessageRegexRule,
                   onUpdateSystemMessageRegexRule: handleUpdateSystemMessageRegexRule,
@@ -845,6 +1031,22 @@ export function App({
             </section>
           )}
         </div>
+        <ConfirmDialog
+          open={showClaudeHooksPrompt}
+          title="Install Claude Hooks?"
+          message="Claude can report precise waiting-for-input, approval, and tool states only when Codetrail-managed Claude hooks are installed. Install them now?"
+          confirmLabel="Install Hooks"
+          cancelLabel="Not Now"
+          onConfirm={() => {
+            history.setClaudeHooksPrompted(true);
+            setShowClaudeHooksPrompt(false);
+            void installClaudeHooks();
+          }}
+          onCancel={() => {
+            history.setClaudeHooksPrompted(true);
+            setShowClaudeHooksPrompt(false);
+          }}
+        />
         <ConfirmDialog
           open={showReindexConfirm}
           title="Force Reindex"

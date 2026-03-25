@@ -1,0 +1,2 @@
+{"sessionId":"claude-session-redacted-wt-001","cwd":"/Users/redacted/workspace/demo/claude/.claude/worktrees/funny-haibt","gitBranch":"claude/funny-haibt","type":"user","message":{"role":"user","content":"Hello from the in-repo Claude worktree"}}
+{"sessionId":"claude-session-redacted-wt-001","cwd":"/Users/redacted/workspace/demo/claude/.claude/worktrees/funny-haibt","gitBranch":"claude/funny-haibt","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Worktree ready."}]}}

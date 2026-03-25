@@ -73,6 +73,67 @@ function makeSessionDetail({
   };
 }
 
+function makeSessionSummary({
+  id = "session_1",
+  projectId = "project_1",
+  title = "Investigate markdown rendering",
+  messageCount,
+  bookmarkCount = 0,
+  tokenInputTotal = 14,
+  tokenOutputTotal = 8,
+}: {
+  id?: string;
+  projectId?: string;
+  title?: string;
+  messageCount: number;
+  bookmarkCount?: number;
+  tokenInputTotal?: number;
+  tokenOutputTotal?: number;
+}) {
+  return {
+    id,
+    projectId,
+    provider: "claude" as const,
+    filePath: `/workspace/${projectId}/${id}.jsonl`,
+    title,
+    modelNames: "claude-opus-4-1",
+    startedAt: "2026-03-01T10:00:00.000Z",
+    endedAt: "2026-03-01T10:00:05.000Z",
+    durationMs: 5000,
+    gitBranch: "main",
+    cwd: `/workspace/${projectId}`,
+    messageCount,
+    bookmarkCount,
+    tokenInputTotal,
+    tokenOutputTotal,
+  };
+}
+
+function makeProjectSummary({
+  id = "project_1",
+  name = "Project One",
+  messageCount,
+  bookmarkCount = 0,
+  lastActivity = "2026-03-01T10:00:05.000Z",
+}: {
+  id?: string;
+  name?: string;
+  messageCount: number;
+  bookmarkCount?: number;
+  lastActivity?: string;
+}) {
+  return {
+    id,
+    provider: "claude" as const,
+    name,
+    path: `/workspace/${id}`,
+    sessionCount: 1,
+    messageCount,
+    bookmarkCount,
+    lastActivity,
+  };
+}
+
 function expectDefined<T>(value: T | null | undefined, message: string): NonNullable<T> {
   if (value == null) {
     throw new Error(message);
@@ -173,10 +234,18 @@ describe("App refresh scroll preservation", () => {
 
   it("re-fetches the same page when scrolled away from edge (no focusMessageId sent)", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let sessionListCallCount = 0;
     const client = createAppClient({
+      "sessions:list": () => {
+        sessionListCallCount++;
+        const messageCount = sessionListCallCount <= 1 ? 2 : 4;
+        return {
+          sessions: [makeSessionSummary({ messageCount })],
+        };
+      },
       "sessions:getDetail": (request) =>
         makeSessionDetail({
-          totalCount: 2,
+          totalCount: sessionListCallCount <= 1 ? 2 : 4,
           page: Number(request.page ?? 0),
           messages: [
             { id: "m1", content: "Session one message" },
@@ -219,18 +288,23 @@ describe("App refresh scroll preservation", () => {
 
   it("auto-scrolls to latest page when pinned to bottom edge (ASC sort)", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    let detailCallCount = 0;
+    let sessionListCallCount = 0;
     const client = createAppClient({
+      "sessions:list": () => {
+        sessionListCallCount++;
+        const messageCount = sessionListCallCount <= 1 ? 2 : 250;
+        return {
+          sessions: [makeSessionSummary({ messageCount })],
+        };
+      },
       "sessions:getDetail": (request) => {
-        detailCallCount++;
-        // After initial loads, simulate new messages arriving.
-        const totalCount = detailCallCount <= 2 ? 150 : 250;
+        const totalCount = sessionListCallCount <= 1 ? 2 : 250;
         return makeSessionDetail({
           totalCount,
           page: Number(request.page ?? 0),
           messages: [
-            { id: `m_${detailCallCount}_1`, content: `Message ${detailCallCount} A` },
-            { id: `m_${detailCallCount}_2`, content: `Message ${detailCallCount} B` },
+            { id: `m_${totalCount}_1`, content: `Message ${totalCount} A` },
+            { id: `m_${totalCount}_2`, content: `Message ${totalCount} B` },
           ],
         });
       },
@@ -242,6 +316,12 @@ describe("App refresh scroll preservation", () => {
       expect(screen.getByText(/Message \d+ A/)).toBeInTheDocument();
     });
 
+    await user.click(
+      screen.getByRole("button", {
+        name: "Newest first (session). Switch to oldest first",
+      }),
+    );
+
     // Mock the message list as scrolled to the bottom (edge-pinned for ASC).
     const messageList = container.querySelector<HTMLElement>(".msg-scroll.message-list");
     if (messageList) mockScrolledToBottom(messageList);
@@ -252,22 +332,30 @@ describe("App refresh scroll preservation", () => {
 
     await advanceRefreshTimers();
 
-    // Auto-scroll should navigate to last page: ceil(250/100) - 1 = 2.
+    // Auto-scroll should navigate to the new last page for the current message page size.
     await waitFor(() => {
       const detailCalls = client.invoke.mock.calls.filter(
         ([channel]) => channel === "sessions:getDetail",
       );
       const pages = detailCalls.map(([, p]) => (p as Record<string, unknown>).page);
-      expect(pages).toContain(2);
+      expect(pages).toContain(4);
     });
   });
 
-  it("auto-scrolls to page 0 when pinned to top edge (DESC sort)", async () => {
+  it("does not auto-scroll from an older DESC page when pinned to the top of that page", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let sessionListCallCount = 0;
     const client = createAppClient({
+      "sessions:list": () => {
+        sessionListCallCount++;
+        const messageCount = sessionListCallCount <= 1 ? 250 : 350;
+        return {
+          sessions: [makeSessionSummary({ messageCount })],
+        };
+      },
       "sessions:getDetail": (request) =>
         makeSessionDetail({
-          totalCount: 250,
+          totalCount: sessionListCallCount <= 1 ? 250 : 350,
           page: Number(request.page ?? 0),
           messages: [
             { id: "m1", content: "DESC message A" },
@@ -282,17 +370,14 @@ describe("App refresh scroll preservation", () => {
       expect(screen.getByText("DESC message A")).toBeInTheDocument();
     });
 
-    // Toggle sort direction to DESC.
-    await user.click(screen.getByRole("button", { name: /Switch to newest first/i }));
-
     // Navigate to page 2 (away from newest in DESC).
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 3/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("3");
     });
 
     // In jsdom, scrollTop defaults to 0 which is the top edge — pinned for DESC.
@@ -302,9 +387,9 @@ describe("App refresh scroll preservation", () => {
 
     await advanceRefreshTimers();
 
-    // For DESC, auto-scroll should navigate to page 0 (newest messages).
+    // Top of page 3 is not the live edge for DESC; stay on page 3.
     await waitFor(() => {
-      expect(getLastInvokePayload(client, "sessions:getDetail").page).toBe(0);
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("3");
     });
   });
 
@@ -340,17 +425,14 @@ describe("App refresh scroll preservation", () => {
     await advanceRefreshTimers();
 
     await waitFor(() => {
-      const detailCallsAfter = client.invoke.mock.calls.filter(
-        ([channel]) => channel === "sessions:getDetail",
-      ).length;
-      expect(detailCallsAfter).toBeGreaterThan(detailCallsBefore);
+      expect(screen.getByText("Stable message A")).toBeInTheDocument();
     });
 
-    // All detail calls should be for page 0 — no navigation.
-    const allDetailCalls = client.invoke.mock.calls.filter(
+    const detailCallsAfter = client.invoke.mock.calls.filter(
       ([channel]) => channel === "sessions:getDetail",
     );
-    for (const call of allDetailCalls) {
+    expect(detailCallsAfter.length).toBeGreaterThanOrEqual(detailCallsBefore);
+    for (const call of detailCallsAfter) {
       expect((call[1] as Record<string, unknown>).page).toBe(0);
     }
 
@@ -385,7 +467,7 @@ describe("App refresh scroll preservation", () => {
     // Navigate to page 2, then mock as scrolled away.
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
     const messageList = container.querySelector<HTMLElement>(".msg-scroll.message-list");
     if (messageList) mockScrolledAway(messageList);
@@ -394,7 +476,7 @@ describe("App refresh scroll preservation", () => {
 
     // Should still be on page 2.
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
   });
 
@@ -423,7 +505,11 @@ describe("App refresh scroll preservation", () => {
     await user.click(screen.getByRole("button", { name: "5s scan" }));
 
     // Toggle sort direction — this should invalidate any pending refresh context.
-    await user.click(screen.getByRole("button", { name: /Switch to newest first/i }));
+    await user.click(
+      screen.getByRole("button", {
+        name: "Newest first (session). Switch to oldest first",
+      }),
+    );
 
     await advanceRefreshTimers();
 
@@ -435,17 +521,23 @@ describe("App refresh scroll preservation", () => {
     expect(getLastInvokePayload(client, "sessions:getDetail").focusMessageId).toBeUndefined();
   });
 
-  it("treats scroll within threshold as edge-pinned (ASC, 5px from bottom)", async () => {
+  it("treats scroll within threshold as visually pinned but does not follow from a non-live ASC page", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    let detailCallCount = 0;
+    let sessionListCallCount = 0;
     const client = createAppClient({
+      "sessions:list": () => {
+        sessionListCallCount++;
+        const messageCount = sessionListCallCount <= 1 ? 250 : 350;
+        return {
+          sessions: [makeSessionSummary({ messageCount })],
+        };
+      },
       "sessions:getDetail": (request) => {
-        detailCallCount++;
-        const totalCount = detailCallCount <= 2 ? 150 : 250;
+        const totalCount = sessionListCallCount <= 1 ? 250 : 350;
         return makeSessionDetail({
           totalCount,
           page: Number(request.page ?? 0),
-          messages: [{ id: `m_${detailCallCount}_1`, content: `Threshold msg ${detailCallCount}` }],
+          messages: [{ id: `m_${totalCount}_1`, content: `Threshold msg ${totalCount}` }],
         });
       },
     });
@@ -456,6 +548,17 @@ describe("App refresh scroll preservation", () => {
       expect(screen.getByText(/Threshold msg/)).toBeInTheDocument();
     });
 
+    await user.click(
+      screen.getByRole("button", {
+        name: "Newest first (session). Switch to oldest first",
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
+    });
+
     const messageList = container.querySelector<HTMLElement>(".msg-scroll.message-list");
     if (messageList) mockScrolledNearBottom(messageList);
 
@@ -464,22 +567,26 @@ describe("App refresh scroll preservation", () => {
 
     await advanceRefreshTimers();
 
-    // Should auto-scroll: navigate to latest page (page 2 for 250 messages).
+    // Bottom of page 2 is visually pinned but not the live edge for ASC after growth.
     await waitFor(() => {
-      const detailCalls = client.invoke.mock.calls.filter(
-        ([channel]) => channel === "sessions:getDetail",
-      );
-      const pages = detailCalls.map(([, p]) => (p as Record<string, unknown>).page);
-      expect(pages).toContain(2);
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
   });
 
   it("treats scroll outside threshold as NOT edge-pinned (ASC, 20px from bottom)", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let sessionListCallCount = 0;
     const client = createAppClient({
+      "sessions:list": () => {
+        sessionListCallCount++;
+        const messageCount = sessionListCallCount <= 1 ? 250 : 350;
+        return {
+          sessions: [makeSessionSummary({ messageCount })],
+        };
+      },
       "sessions:getDetail": (request) =>
         makeSessionDetail({
-          totalCount: 250,
+          totalCount: sessionListCallCount <= 1 ? 250 : 350,
           page: Number(request.page ?? 0),
           messages: [{ id: "m1", content: "Not pinned message" }],
         }),
@@ -490,6 +597,12 @@ describe("App refresh scroll preservation", () => {
     await waitFor(() => {
       expect(screen.getByText("Not pinned message")).toBeInTheDocument();
     });
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Newest first (session). Switch to oldest first",
+      }),
+    );
 
     const messageList = container.querySelector<HTMLElement>(".msg-scroll.message-list");
     if (messageList) mockScrolledJustOutsideBottom(messageList);
@@ -520,10 +633,18 @@ describe("App refresh scroll preservation", () => {
 
   it("DESC sort scrolled away from top preserves same page", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let sessionListCallCount = 0;
     const client = createAppClient({
+      "sessions:list": () => {
+        sessionListCallCount++;
+        const messageCount = sessionListCallCount <= 1 ? 250 : 350;
+        return {
+          sessions: [makeSessionSummary({ messageCount })],
+        };
+      },
       "sessions:getDetail": (request) =>
         makeSessionDetail({
-          totalCount: 250,
+          totalCount: sessionListCallCount <= 1 ? 250 : 350,
           page: Number(request.page ?? 0),
           messages: [
             { id: "m1", content: "DESC away msg A" },
@@ -538,13 +659,10 @@ describe("App refresh scroll preservation", () => {
       expect(screen.getByText("DESC away msg A")).toBeInTheDocument();
     });
 
-    // Switch to DESC sort.
-    await user.click(screen.getByRole("button", { name: /Switch to newest first/i }));
-
     // Navigate to page 2.
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
     // Mock scrolled away from top (NOT pinned for DESC).
@@ -558,16 +676,24 @@ describe("App refresh scroll preservation", () => {
 
     // Should stay on page 2, not navigate to page 0.
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
   });
 
-  it("DESC sort pinned to top edge auto-scrolls to page 0", async () => {
+  it("DESC sort pinned to top edge on page 0 keeps following the newest messages", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let sessionListCallCount = 0;
     const client = createAppClient({
+      "sessions:list": () => {
+        sessionListCallCount++;
+        const messageCount = sessionListCallCount <= 1 ? 250 : 350;
+        return {
+          sessions: [makeSessionSummary({ messageCount })],
+        };
+      },
       "sessions:getDetail": (request) =>
         makeSessionDetail({
-          totalCount: 250,
+          totalCount: sessionListCallCount <= 1 ? 250 : 350,
           page: Number(request.page ?? 0),
           messages: [
             { id: "m1", content: "DESC pinned msg" },
@@ -582,14 +708,6 @@ describe("App refresh scroll preservation", () => {
       expect(screen.getByText("DESC pinned msg")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: /Switch to newest first/i }));
-
-    // Navigate to page 2.
-    await user.click(screen.getByRole("button", { name: "Next page" }));
-    await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
-    });
-
     // Mock scrolled to top (pinned for DESC, within threshold).
     const messageList = container.querySelector<HTMLElement>(".msg-scroll.message-list");
     if (messageList) mockScrolledToTop(messageList);
@@ -599,19 +717,25 @@ describe("App refresh scroll preservation", () => {
 
     await advanceRefreshTimers();
 
-    // Should auto-scroll to page 0.
+    // Page 0 is the live edge for DESC, so the view stays on page 0.
     await waitFor(() => {
       expect(getLastInvokePayload(client, "sessions:getDetail").page).toBe(0);
     });
   });
 
-  it("project_all mode uses projectAllSortDirection for edge detection", async () => {
+  it("project_all mode does not auto-scroll from an older DESC page just because the page top is pinned", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    let combinedCallCount = 0;
+    let projectListCallCount = 0;
     const client = createAppClient({
+      "projects:list": () => {
+        projectListCallCount++;
+        const messageCount = projectListCallCount <= 1 ? 250 : 350;
+        return {
+          projects: [makeProjectSummary({ messageCount })],
+        };
+      },
       "projects:getCombinedDetail": (request) => {
-        combinedCallCount++;
-        const totalCount = combinedCallCount <= 1 ? 250 : 350;
+        const totalCount = projectListCallCount <= 1 ? 250 : 350;
         const requestedPage = Number(request.page ?? 0);
         const page = Number.isFinite(requestedPage) && requestedPage >= 0 ? requestedPage : 0;
         return {
@@ -631,12 +755,12 @@ describe("App refresh scroll preservation", () => {
           focusIndex: null,
           messages: [
             {
-              id: `pm_${combinedCallCount}`,
-              sourceId: `psrc_${combinedCallCount}`,
+              id: `pm_${totalCount}`,
+              sourceId: `psrc_${totalCount}`,
               sessionId: "session_1",
               provider: "claude" as const,
               category: "user" as const,
-              content: `Project all msg ${combinedCallCount}`,
+              content: `Project all msg ${totalCount}`,
               createdAt: "2026-03-01T10:00:00.000Z",
               tokenInput: null,
               tokenOutput: null,
@@ -658,7 +782,7 @@ describe("App refresh scroll preservation", () => {
 
     // project_all mode loads on initial render (default view).
     await waitFor(() => {
-      expect(screen.getByText("Project all msg 1")).toBeInTheDocument();
+      expect(screen.getByText("Project all msg 250")).toBeInTheDocument();
     });
 
     // The default projectAllSortDirection is "desc", so newest is at top.
@@ -669,26 +793,174 @@ describe("App refresh scroll preservation", () => {
     // Navigate to page 2 (away from page 0).
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
+
+    const messageList = document.querySelector<HTMLElement>(".msg-scroll.message-list");
+    if (messageList) mockScrolledToTop(messageList);
 
     await advanceRefreshTimers();
 
-    // DESC auto-scroll should navigate back to page 0.
+    // Top of page 2 is not the live edge for DESC project-all.
     await waitFor(() => {
-      expect(getLastInvokePayload(client, "projects:getCombinedDetail").page).toBe(0);
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
+    });
+  });
+
+  it("ignores unrelated project updates while viewing a session page", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let projectListCallCount = 0;
+    const client = createAppClient({
+      "projects:list": () => {
+        projectListCallCount++;
+        return {
+          projects: [
+            makeProjectSummary({ id: "project_1", name: "Project One", messageCount: 250 }),
+            makeProjectSummary({
+              id: "project_2",
+              name: "Project Two",
+              messageCount: projectListCallCount <= 1 ? 10 : 25,
+              lastActivity: "2026-03-01T10:01:05.000Z",
+            }),
+          ],
+        };
+      },
+      "sessions:list": () => ({
+        sessions: [makeSessionSummary({ messageCount: 250 })],
+      }),
+      "sessions:getDetail": (request) =>
+        makeSessionDetail({
+          totalCount: 250,
+          page: Number(request.page ?? 0),
+          messages: [
+            { id: "m1", content: "Selected project msg" },
+            { id: "m2", content: "Selected project msg 2" },
+          ],
+        }),
+    });
+    const { container } = renderWithClient(<App />, client);
+
+    await enterSessionView(user);
+    await waitFor(() => {
+      expect(screen.getByText("Selected project msg")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
+    });
+
+    const messageList = container.querySelector<HTMLElement>(".msg-scroll.message-list");
+    if (messageList) mockScrolledToTop(messageList);
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("button", { name: "5s scan" }));
+
+    await advanceRefreshTimers();
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
+    });
+  });
+
+  it("ignores unrelated project updates while viewing project_all", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let projectListCallCount = 0;
+    const client = createAppClient({
+      "projects:list": () => {
+        projectListCallCount++;
+        return {
+          projects: [
+            makeProjectSummary({ id: "project_1", name: "Project One", messageCount: 250 }),
+            makeProjectSummary({
+              id: "project_2",
+              name: "Project Two",
+              messageCount: projectListCallCount <= 1 ? 10 : 25,
+              lastActivity: "2026-03-01T10:01:05.000Z",
+            }),
+          ],
+        };
+      },
+      "projects:getCombinedDetail": (request) => ({
+        projectId: "project_1",
+        totalCount: 250,
+        categoryCounts: {
+          user: 125,
+          assistant: 125,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: Number(request.page ?? 0),
+        pageSize: 100,
+        focusIndex: null,
+        messages: [
+          {
+            id: "pm1",
+            sourceId: "psrc1",
+            sessionId: "session_1",
+            provider: "claude" as const,
+            category: "user" as const,
+            content: "Project all selected scope",
+            createdAt: "2026-03-01T10:00:00.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+            sessionTitle: "Investigate markdown rendering",
+            sessionActivity: "2026-03-01T10:00:05.000Z",
+            sessionStartedAt: "2026-03-01T10:00:00.000Z",
+            sessionEndedAt: "2026-03-01T10:00:05.000Z",
+            sessionGitBranch: "main",
+            sessionCwd: "/workspace/project-one",
+          },
+        ],
+      }),
+    });
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project all selected scope")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
+    });
+
+    const messageList = document.querySelector<HTMLElement>(".msg-scroll.message-list");
+    if (messageList) mockScrolledToTop(messageList);
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("button", { name: "5s scan" }));
+
+    await advanceRefreshTimers();
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
   });
 
   it("handles page clamping when totalCount drops and current page is out of range", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let sessionListCallCount = 0;
     let detailCallCount = 0;
     const client = createAppClient({
+      "sessions:list": () => {
+        sessionListCallCount++;
+        const messageCount = sessionListCallCount <= 1 ? 250 : 50;
+        return {
+          sessions: [makeSessionSummary({ messageCount })],
+        };
+      },
       "sessions:getDetail": (request) => {
         detailCallCount++;
         const requestedPage = Number(request.page ?? 0);
         // Initially 250 messages (3 pages). After refresh, only 50 messages (1 page).
-        const totalCount = detailCallCount <= 3 ? 250 : 50;
+        const totalCount = sessionListCallCount <= 1 ? 250 : 50;
         const maxPage = Math.max(0, Math.ceil(totalCount / 100) - 1);
         const clampedPage = Math.min(requestedPage, maxPage);
         return makeSessionDetail({
@@ -708,16 +980,20 @@ describe("App refresh scroll preservation", () => {
     // Navigate to page 3 (index 2).
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 3/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("3");
     });
 
     // Mock scrolled away so we don't trigger auto-scroll.
     const messageList = container.querySelector<HTMLElement>(".msg-scroll.message-list");
     if (messageList) mockScrolledAway(messageList);
+
+    const detailCallsBeforeAutoRefresh = client.invoke.mock.calls.filter(
+      ([channel]) => channel === "sessions:getDetail",
+    ).length;
 
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
     await user.click(screen.getByRole("button", { name: "5s scan" }));
@@ -727,7 +1003,7 @@ describe("App refresh scroll preservation", () => {
     // Server clamps page 2 → page 0 (only 1 page exists now).
     // The response.page !== sessionPage guard should update the page.
     await waitFor(() => {
-      expect(screen.getByText(/Page 1 /)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
     });
   });
 
@@ -754,12 +1030,16 @@ describe("App refresh scroll preservation", () => {
     // Navigate to page 2.
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
     // Mock scrolled away so auto-scroll doesn't engage.
     const messageList = container.querySelector<HTMLElement>(".msg-scroll.message-list");
     if (messageList) mockScrolledAway(messageList);
+
+    const detailCallsBeforeAutoRefresh = client.invoke.mock.calls.filter(
+      ([channel]) => channel === "sessions:getDetail",
+    ).length;
 
     await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
     await user.click(screen.getByRole("button", { name: "5s scan" }));
@@ -771,17 +1051,16 @@ describe("App refresh scroll preservation", () => {
 
     // Should still be on page 2 after 3 ticks.
     await waitFor(() => {
-      expect(screen.getByText(/Page 2/)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
-    // All refresh detail calls for page 1 (index).
-    const detailCalls = client.invoke.mock.calls.filter(
+    const detailCallsAfterAutoRefresh = client.invoke.mock.calls.filter(
       ([channel]) => channel === "sessions:getDetail",
     );
-    const refreshCalls = detailCalls.slice(-3);
-    for (const call of refreshCalls) {
-      expect((call[1] as Record<string, unknown>).page).toBe(1);
-    }
+    expect(detailCallsAfterAutoRefresh).toHaveLength(detailCallsBeforeAutoRefresh);
+    const lastDetailCall = detailCallsAfterAutoRefresh.at(-1);
+    expect(lastDetailCall).toBeDefined();
+    expect((lastDetailCall?.[1] as Record<string, unknown>).page).toBe(1);
   });
 
   it("switching sessions during refresh does not apply stale refresh data", async () => {

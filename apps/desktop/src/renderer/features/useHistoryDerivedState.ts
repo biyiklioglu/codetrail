@@ -5,6 +5,7 @@ import type { MessageCategory } from "@codetrail/core/browser";
 
 import {
   BOOKMARKS_NAV_ID,
+  CATEGORIES,
   COLLAPSED_PANE_WIDTH,
   EMPTY_CATEGORY_COUNTS,
   HISTORY_CATEGORY_EXPAND_SHORTCUTS,
@@ -13,7 +14,6 @@ import {
 } from "../app/constants";
 import type {
   BookmarkListResponse,
-  BulkExpandScope,
   HistoryMessage,
   ProjectCombinedDetail,
   ProjectSummary,
@@ -22,6 +22,7 @@ import type {
   SessionSummary,
   SortDirection,
 } from "../app/types";
+import { formatInteger } from "../lib/numberFormatting";
 import {
   compareRecent,
   countProviders,
@@ -29,6 +30,14 @@ import {
   prettyCategory,
   prettyProvider,
 } from "../lib/viewUtils";
+
+export function formatSelectedSummaryMessageCount(
+  filteredCount: number,
+  totalCount: number,
+  label: "messages" | "bookmarked messages",
+): string {
+  return `${formatInteger(filteredCount)} of ${formatInteger(totalCount)} ${label}`;
+}
 
 // Pure derived state for the history screen lives here so sorting, counts, labels, and layout math
 // remain memoized and testable without mixing them into fetch/interaction code.
@@ -50,8 +59,6 @@ export function useHistoryDerivedState({
   sessionPage,
   messagePageSize,
   expandedByDefaultCategories,
-  bulkExpandScope,
-  messageExpanded,
   isHistoryLayout,
   projectPaneCollapsed,
   projectPaneWidth,
@@ -75,8 +82,6 @@ export function useHistoryDerivedState({
   sessionPage: number;
   messagePageSize: number;
   expandedByDefaultCategories: MessageCategory[];
-  bulkExpandScope: BulkExpandScope;
-  messageExpanded: Record<string, boolean>;
   isHistoryLayout: boolean;
   projectPaneCollapsed: boolean;
   projectPaneWidth: number;
@@ -99,16 +104,7 @@ export function useHistoryDerivedState({
       : historyMode === "bookmarks"
         ? bookmarkSortDirection
         : messageSortDirection;
-  const messageSortScopeLabel =
-    historyMode === "project_all"
-      ? "all sessions"
-      : historyMode === "bookmarks"
-        ? "bookmarks"
-        : "session";
-  const messageSortTooltip =
-    activeMessageSortDirection === "asc"
-      ? `Oldest first (${messageSortScopeLabel}). Click to switch to newest first.`
-      : `Newest first (${messageSortScopeLabel}). Click to switch to oldest first.`;
+  const messageSortTooltip = activeMessageSortDirection === "asc" ? "Oldest first" : "Newest first";
 
   const bookmarkOrphanedByMessageId = useMemo(
     () =>
@@ -191,7 +187,7 @@ export function useHistoryDerivedState({
     historyMode === "bookmarks"
       ? bookmarksResponse.totalCount
       : historyMode === "session"
-      ? (selectedSession?.bookmarkCount ?? 0)
+        ? (selectedSession?.bookmarkCount ?? 0)
         : selectedProjectBookmarkCount;
 
   const sessionPaneNavigationItems = useMemo<SessionPaneNavigationItem[]>(() => {
@@ -228,8 +224,8 @@ export function useHistoryDerivedState({
       historyMode === "bookmarks"
         ? bookmarksResponse.filteredCount
         : historyMode === "project_all"
-        ? (projectCombinedDetail?.totalCount ?? 0)
-        : (sessionDetail?.totalCount ?? 0);
+          ? (projectCombinedDetail?.totalCount ?? 0)
+          : (sessionDetail?.totalCount ?? 0);
     if (totalCount === 0) {
       return 1;
     }
@@ -264,33 +260,29 @@ export function useHistoryDerivedState({
       : historyMode === "project_all"
         ? (projectCombinedDetail?.highlightPatterns ?? [])
         : (sessionDetail?.highlightPatterns ?? []);
+  const filteredMessageCount =
+    historyMode === "bookmarks"
+      ? bookmarksResponse.filteredCount
+      : historyMode === "project_all"
+        ? (projectCombinedDetail?.totalCount ?? 0)
+        : (sessionDetail?.totalCount ?? 0);
+  const totalMessageCount =
+    historyMode === "bookmarks"
+      ? bookmarksResponse.totalCount
+      : historyMode === "project_all"
+        ? (selectedProject?.messageCount ?? 0)
+        : (selectedSession?.messageCount ?? sessionDetail?.session?.messageCount ?? 0);
 
   const isExpandedByDefault = useCallback(
     (category: MessageCategory) => expandedByDefaultCategories.includes(category),
     [expandedByDefaultCategories],
   );
 
-  const scopedMessages = useMemo(
-    () =>
-      bulkExpandScope === "all"
-        ? activeHistoryMessages
-        : activeHistoryMessages.filter((message) => message.category === bulkExpandScope),
-    [activeHistoryMessages, bulkExpandScope],
+  const areAllMessagesExpanded = useMemo(
+    () => CATEGORIES.every((category) => isExpandedByDefault(category)),
+    [isExpandedByDefault],
   );
-  const areScopedMessagesExpanded = useMemo(
-    () =>
-      scopedMessages.length > 0 &&
-      scopedMessages.every(
-        (message) => messageExpanded[message.id] ?? isExpandedByDefault(message.category),
-      ),
-    [isExpandedByDefault, messageExpanded, scopedMessages],
-  );
-  const bulkScopeLabel = useMemo(
-    () => (bulkExpandScope === "all" ? "All" : prettyCategory(bulkExpandScope)),
-    [bulkExpandScope],
-  );
-  const scopedActionLabel = areScopedMessagesExpanded ? "Collapse" : "Expand";
-  const scopedExpandCollapseLabel = `${scopedActionLabel} ${bulkScopeLabel}`;
+  const globalExpandCollapseLabel = areAllMessagesExpanded ? "Collapse" : "Expand";
   const workspaceStyle = isHistoryLayout
     ? ({
         // Keep user-resized widths in CSS variables so responsive media queries can still take
@@ -298,15 +290,16 @@ export function useHistoryDerivedState({
         "--project-pane-width": `${
           projectPaneCollapsed ? COLLAPSED_PANE_WIDTH : projectPaneWidth
         }px`,
+        "--project-pane-min-width": `${projectPaneCollapsed ? COLLAPSED_PANE_WIDTH : 230}px`,
         "--session-pane-width": `${
           sessionPaneCollapsed ? COLLAPSED_PANE_WIDTH : sessionPaneWidth
         }px`,
+        "--session-pane-min-width": `${sessionPaneCollapsed ? COLLAPSED_PANE_WIDTH : 250}px`,
       } as CSSProperties)
     : undefined;
 
   return {
     activeMessageSortDirection,
-    messageSortScopeLabel,
     messageSortTooltip,
     bookmarkOrphanedByMessageId,
     bookmarkedMessageIds,
@@ -332,17 +325,17 @@ export function useHistoryDerivedState({
     historyQueryError,
     historyHighlightPatterns,
     isExpandedByDefault,
-    scopedMessages,
-    areScopedMessagesExpanded,
-    scopedActionLabel,
-    scopedExpandCollapseLabel,
+    areAllMessagesExpanded,
+    globalExpandCollapseLabel,
     workspaceStyle,
     selectedSummaryMessageCount:
       historyMode === "bookmarks"
-        ? `${bookmarksResponse.filteredCount} of ${bookmarksResponse.totalCount} bookmarked messages`
-        : historyMode === "project_all"
-          ? `${projectCombinedDetail?.totalCount ?? 0} messages`
-          : `${sessionDetail?.totalCount ?? 0} messages`,
+        ? formatSelectedSummaryMessageCount(
+            bookmarksResponse.filteredCount,
+            bookmarksResponse.totalCount,
+            "bookmarked messages",
+          )
+        : formatSelectedSummaryMessageCount(filteredMessageCount, totalMessageCount, "messages"),
     historyCategoryExpandShortcutMap: HISTORY_CATEGORY_EXPAND_SHORTCUTS,
     historyCategoriesShortcutMap: HISTORY_CATEGORY_SHORTCUTS,
     prettyCategory,

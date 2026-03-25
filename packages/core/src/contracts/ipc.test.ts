@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  createClaudeHookStateFixture,
+  createLiveStatusFixture,
+} from "../testing/liveWatchFixtures";
 import { createSettingsInfoFixture } from "../testing/settingsInfoFixture";
 import {
   type IpcChannel,
@@ -21,10 +25,22 @@ type ChannelExample = {
   response: unknown;
 };
 
+function createClaudeHookStateExample(input: { installed: boolean }) {
+  return createClaudeHookStateFixture({
+    settingsPath: "/home/user/.claude/settings.json",
+    logPath: "/tmp/codetrail/live-status/claude-hooks.jsonl",
+    installed: input.installed,
+  });
+}
+
 const channelExamples: Record<IpcChannel, ChannelExample> = {
   "app:getHealth": {
     request: {},
     response: { status: "ok", version: "0.1.0" },
+  },
+  "app:flushState": {
+    request: {},
+    response: { ok: true },
   },
   "app:getSettingsInfo": {
     request: {},
@@ -372,6 +388,7 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
       historyMode: "session",
       singleClickFoldersExpand: true,
       singleClickProjectsExpand: false,
+      hideSessionsPaneInTreeView: false,
       projectViewMode: "tree",
       projectSortField: "last_active",
       projectSortDirection: "desc",
@@ -381,6 +398,10 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
       projectAllSortDirection: "desc",
       sessionPage: 0,
       sessionScrollTop: 0,
+      liveWatchEnabled: false,
+      liveWatchRowHasBackground: true,
+      claudeHooksPrompted: false,
+      currentAutoRefreshStrategy: "off",
       preferredAutoRefreshStrategy: "watch-5s",
       systemMessageRegexRules: {
         claude: ["^<command-name>"],
@@ -447,9 +468,54 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
       lastRun: null,
     },
   },
+  "watcher:getLiveStatus": {
+    request: {},
+    response: createLiveStatusFixture({
+      enabled: true,
+      providerCounts: {
+        claude: 1,
+        codex: 0,
+        gemini: 0,
+        cursor: 0,
+        copilot: 0,
+      },
+      sessions: [
+        {
+          provider: "claude",
+          sessionIdentity: "claude:session-1",
+          sourceSessionId: "session-1",
+          filePath: "/home/user/.claude/projects/project-a/session-1.jsonl",
+          projectName: "project-a",
+          projectPath: "/workspace/project-a",
+          cwd: "/workspace/project-a",
+          statusKind: "running_tool",
+          statusText: "Running tool",
+          detailText: "Read",
+          sourcePrecision: "hook",
+          lastActivityAt: "2026-03-24T10:00:00.000Z",
+          bestEffort: false,
+        },
+      ],
+      claudeHookState: createClaudeHookStateExample({ installed: true }),
+    }),
+  },
   "watcher:stop": {
     request: {},
     response: { ok: true },
+  },
+  "claudeHooks:install": {
+    request: {},
+    response: {
+      ok: true,
+      state: createClaudeHookStateExample({ installed: true }),
+    },
+  },
+  "claudeHooks:remove": {
+    request: {},
+    response: {
+      ok: true,
+      state: createClaudeHookStateExample({ installed: false }),
+    },
   },
 };
 

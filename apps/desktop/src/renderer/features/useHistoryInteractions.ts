@@ -12,7 +12,7 @@ import type { RefreshContext } from "./useHistoryController";
 
 import type { MessageCategory, Provider } from "@codetrail/core/browser";
 
-import { BOOKMARKS_NAV_ID, PROJECT_ALL_NAV_ID, PROVIDERS } from "../app/constants";
+import { BOOKMARKS_NAV_ID, CATEGORIES, PROJECT_ALL_NAV_ID, PROVIDERS } from "../app/constants";
 import { createHistorySelection, setHistorySelectionProjectId } from "../app/historySelection";
 import type {
   HistoryMessage,
@@ -22,13 +22,16 @@ import type {
   PendingMessagePageNavigation,
   PendingRevealTarget,
   ProjectSummary,
+  ProjectViewMode,
   SessionPaneNavigationItem,
   SessionSummary,
+  TreeAutoRevealSessionRequest,
 } from "../app/types";
 import { copyTextToClipboard } from "../lib/clipboard";
 import type { CodetrailClient } from "../lib/codetrailClient";
 import {
   type Direction,
+  type ProjectNavigationTarget,
   getAdjacentItemId,
   getAdjacentVisibleProjectTarget,
   getFirstVisibleMessageId,
@@ -37,6 +40,7 @@ import {
   getProjectParentFolderTarget,
 } from "../lib/historyNavigation";
 import { toggleValue } from "../lib/viewUtils";
+import { SIDEBAR_LIST_ROW_HEIGHT, scrollVirtualListIndexIntoView } from "../lib/virtualList";
 import { focusHistoryList } from "./historyControllerShared";
 import { formatProjectDetails, formatSessionDetails } from "./historyCopyFormat";
 
@@ -56,15 +60,18 @@ type HistorySelectionOptions = {
   waitForKeyboardIdle?: boolean;
 };
 
+type AdjacentSelectionOptions = {
+  preserveFocus?: boolean;
+};
+
 // Interaction handlers are collected here so keyboard/mouse behavior can share the same
 // state-transition rules without being spread across components.
 export function useHistoryInteractions({
   codetrail,
   logError,
-  scopedMessages,
-  areScopedMessagesExpanded,
   setMessageExpanded,
   setHistoryCategories,
+  setExpandedByDefaultCategories,
   setSessionPage,
   isExpandedByDefault,
   historyMode,
@@ -91,6 +98,8 @@ export function useHistoryInteractions({
   selectedSessionId,
   sessionPaneNavigationItems,
   projectListRef,
+  sortedProjects,
+  projectViewMode,
   canNavigatePages,
   totalPages,
   canGoToNextHistoryPage,
@@ -103,6 +112,12 @@ export function useHistoryInteractions({
   sessionDetailTotalCount,
   allSessionsCount,
   sessionSearchInputRef,
+  projectPaneCollapsed,
+  setProjectPaneCollapsed,
+  sessionPaneCollapsed,
+  hideSessionsPaneForTreeView,
+  setProjectViewMode,
+  setAutoRevealSessionRequest,
   loadProjects,
   loadSessions,
   refreshVisibleBookmarkStates,
@@ -112,13 +127,15 @@ export function useHistoryInteractions({
   refreshTreeProjectSessions,
   pendingProjectPaneFocusCommitModeRef,
   pendingProjectPaneFocusWaitForKeyboardIdleRef,
+  queueProjectTreeNoopCommit,
+  treeFocusedRow,
+  setTreeFocusedRow,
 }: {
   codetrail: CodetrailClient;
   logError: (context: string, error: unknown) => void;
-  scopedMessages: HistoryMessage[];
-  areScopedMessagesExpanded: boolean;
   setMessageExpanded: Dispatch<SetStateAction<Record<string, boolean>>>;
   setHistoryCategories: Dispatch<SetStateAction<MessageCategory[]>>;
+  setExpandedByDefaultCategories: Dispatch<SetStateAction<MessageCategory[]>>;
   setSessionPage: Dispatch<SetStateAction<number>>;
   isExpandedByDefault: (category: MessageCategory) => boolean;
   historyMode: HistorySelection["mode"];
@@ -138,7 +155,7 @@ export function useHistoryInteractions({
   setSessionQueryInput: Dispatch<SetStateAction<string>>;
   setFocusMessageId: Dispatch<SetStateAction<string>>;
   setPendingRevealTarget: Dispatch<SetStateAction<PendingRevealTarget | null>>;
-  loadBookmarks: () => Promise<void>;
+  loadBookmarks: () => Promise<unknown>;
   sessionScrollTopRef: MutableRefObject<number>;
   sessionScrollSyncTimerRef: MutableRefObject<number | null>;
   setSessionScrollTop: Dispatch<SetStateAction<number>>;
@@ -154,6 +171,8 @@ export function useHistoryInteractions({
   selectedSessionId: string;
   sessionPaneNavigationItems: SessionPaneNavigationItem[];
   projectListRef: RefObject<HTMLDivElement | null>;
+  sortedProjects: ProjectSummary[];
+  projectViewMode: ProjectViewMode;
   canNavigatePages: boolean;
   totalPages: number;
   canGoToNextHistoryPage: boolean;
@@ -166,8 +185,14 @@ export function useHistoryInteractions({
   sessionDetailTotalCount: number | null | undefined;
   allSessionsCount: number;
   sessionSearchInputRef: RefObject<HTMLInputElement | null>;
-  loadProjects: (source?: "auto" | "resort") => Promise<void>;
-  loadSessions: () => Promise<void>;
+  projectPaneCollapsed: boolean;
+  setProjectPaneCollapsed: Dispatch<SetStateAction<boolean>>;
+  sessionPaneCollapsed: boolean;
+  hideSessionsPaneForTreeView: boolean;
+  setProjectViewMode: Dispatch<SetStateAction<ProjectViewMode>>;
+  setAutoRevealSessionRequest: Dispatch<SetStateAction<TreeAutoRevealSessionRequest | null>>;
+  loadProjects: (source?: "auto" | "resort") => Promise<unknown>;
+  loadSessions: () => Promise<unknown>;
   refreshVisibleBookmarkStates: () => void;
   setProjectProviders: Dispatch<SetStateAction<Provider[]>>;
   setProjectQueryInput: Dispatch<SetStateAction<string>>;
@@ -175,6 +200,12 @@ export function useHistoryInteractions({
   refreshTreeProjectSessions: () => Promise<void>;
   pendingProjectPaneFocusCommitModeRef: MutableRefObject<HistorySelectionCommitMode>;
   pendingProjectPaneFocusWaitForKeyboardIdleRef: MutableRefObject<boolean>;
+  queueProjectTreeNoopCommit: (options?: {
+    commitMode?: HistorySelectionCommitMode;
+    waitForKeyboardIdle?: boolean;
+  }) => void;
+  treeFocusedRow: ProjectNavigationTarget | null;
+  setTreeFocusedRow: Dispatch<SetStateAction<ProjectNavigationTarget | null>>;
 }) {
   const messagesByCategory = useMemo(() => {
     const map = new Map<MessageCategory, HistoryMessage[]>();
@@ -193,25 +224,36 @@ export function useHistoryInteractions({
     () => new Map(activeHistoryMessages.map((message) => [message.id, message])),
     [activeHistoryMessages],
   );
-
   const bookmarksByMessageId = useMemo(
     () => new Map(bookmarksResponse.results.map((entry) => [entry.message.id, entry])),
     [bookmarksResponse.results],
   );
 
-  const handleToggleScopedMessagesExpanded = useCallback(() => {
-    if (scopedMessages.length === 0) {
-      return;
-    }
-    const expanded = !areScopedMessagesExpanded;
-    setMessageExpanded((value) => {
-      const next = { ...value };
-      for (const message of scopedMessages) {
-        next[message.id] = expanded;
-      }
-      return next;
-    });
-  }, [areScopedMessagesExpanded, scopedMessages, setMessageExpanded]);
+  const setCategoryDefaultExpansion = useCallback(
+    (category: MessageCategory, expanded: boolean) => {
+      setExpandedByDefaultCategories((value) => {
+        const alreadyExpanded = value.includes(category);
+        if (expanded === alreadyExpanded) {
+          return value;
+        }
+        return expanded ? [...value, category] : value.filter((item) => item !== category);
+      });
+      const categoryMessages = messagesByCategory.get(category) ?? [];
+      setMessageExpanded((value) => {
+        let changed = false;
+        const next = { ...value };
+        for (const message of categoryMessages) {
+          if (!(message.id in next)) {
+            continue;
+          }
+          delete next[message.id];
+          changed = true;
+        }
+        return changed ? next : value;
+      });
+    },
+    [messagesByCategory, setExpandedByDefaultCategories, setMessageExpanded],
+  );
 
   const handleToggleHistoryCategoryShortcut = useCallback(
     (category: MessageCategory) => {
@@ -221,7 +263,7 @@ export function useHistoryInteractions({
     [setHistoryCategories, setSessionPage],
   );
 
-  const handleToggleCategoryMessagesExpanded = useCallback(
+  const handleToggleVisibleCategoryMessagesExpanded = useCallback(
     (category: MessageCategory) => {
       const categoryMessages = messagesByCategory.get(category) ?? [];
       if (categoryMessages.length === 0) {
@@ -233,7 +275,9 @@ export function useHistoryInteractions({
         );
         const next = { ...value };
         for (const message of categoryMessages) {
-          next[message.id] = expanded;
+          applyExpansionOverride(next, message.id, message.category, expanded, {
+            isExpandedByDefault,
+          });
         }
         return next;
       });
@@ -243,16 +287,61 @@ export function useHistoryInteractions({
 
   const handleToggleMessageExpanded = useCallback(
     (messageId: string, category: MessageCategory) => {
-      setMessageExpanded((value) => ({
-        ...value,
-        [messageId]: !(value[messageId] ?? isExpandedByDefault(category)),
-      }));
+      setMessageExpanded((value) => {
+        const nextExpanded = !(value[messageId] ?? isExpandedByDefault(category));
+        const next = { ...value };
+        applyExpansionOverride(next, messageId, category, nextExpanded, { isExpandedByDefault });
+        return next;
+      });
     },
     [isExpandedByDefault, setMessageExpanded],
   );
 
+  const handleToggleCategoryDefaultExpansion = useCallback(
+    (category: MessageCategory) => {
+      setCategoryDefaultExpansion(category, !isExpandedByDefault(category));
+    },
+    [isExpandedByDefault, setCategoryDefaultExpansion],
+  );
+
+  const handleToggleAllCategoryDefaultExpansion = useCallback(() => {
+    const expanded = !CATEGORIES.every((category) => isExpandedByDefault(category));
+    setExpandedByDefaultCategories(expanded ? [...CATEGORIES] : []);
+    setMessageExpanded((value) => {
+      let changed = false;
+      const next = { ...value };
+      for (const message of activeHistoryMessages) {
+        if (!(message.id in next)) {
+          continue;
+        }
+        delete next[message.id];
+        changed = true;
+      }
+      return changed ? next : value;
+    });
+  }, [
+    activeHistoryMessages,
+    isExpandedByDefault,
+    setExpandedByDefaultCategories,
+    setMessageExpanded,
+  ]);
+
   const handleRevealInSession = useCallback(
     (messageId: string, sourceId: string) => {
+      const shouldRevealViaProjectTree = sessionPaneCollapsed || hideSessionsPaneForTreeView;
+      const requestTreeReveal = (projectId: string, sessionId: string) => {
+        if (!shouldRevealViaProjectTree) {
+          return;
+        }
+        if (projectPaneCollapsed) {
+          setProjectPaneCollapsed(false);
+        }
+        if (projectViewMode !== "tree") {
+          setProjectViewMode("tree");
+        }
+        setAutoRevealSessionRequest({ projectId, sessionId });
+      };
+
       // Bookmarks/project-wide views route through pending search navigation because the controller
       // may need to switch projects or sessions before the message can be focused.
       if (historyMode === "bookmarks") {
@@ -260,6 +349,7 @@ export function useHistoryInteractions({
         if (!bookmarked) {
           return;
         }
+        requestTreeReveal(bookmarked.projectId, bookmarked.sessionId);
         setPendingSearchNavigation({
           projectId: bookmarked.projectId,
           sessionId: bookmarked.sessionId,
@@ -275,6 +365,7 @@ export function useHistoryInteractions({
         if (!projectMessage || !selectedProjectId) {
           return;
         }
+        requestTreeReveal(selectedProjectId, projectMessage.sessionId);
         setPendingSearchNavigation({
           projectId: selectedProjectId,
           sessionId: projectMessage.sessionId,
@@ -285,6 +376,9 @@ export function useHistoryInteractions({
         return;
       }
 
+      if (selectedProjectId && selectedSessionId) {
+        requestTreeReveal(selectedProjectId, selectedSessionId);
+      }
       setSessionQueryInput("");
       setFocusMessageId(messageId);
       setPendingRevealTarget({ messageId, sourceId });
@@ -292,12 +386,20 @@ export function useHistoryInteractions({
     [
       bookmarksByMessageId,
       historyCategories,
+      hideSessionsPaneForTreeView,
       historyMode,
+      projectPaneCollapsed,
       projectMessagesById,
+      projectViewMode,
+      sessionPaneCollapsed,
+      selectedSessionId,
       selectedProjectId,
+      setAutoRevealSessionRequest,
       setFocusMessageId,
       setPendingRevealTarget,
       setPendingSearchNavigation,
+      setProjectPaneCollapsed,
+      setProjectViewMode,
       setSessionQueryInput,
     ],
   );
@@ -513,8 +615,70 @@ export function useHistoryInteractions({
     ],
   );
 
+  const selectProjectTargetWithCommitMode = useCallback(
+    (
+      target: ReturnType<typeof getAdjacentVisibleProjectTarget>,
+      { preserveFocus = false }: AdjacentSelectionOptions = {},
+    ) => {
+      if (!target) {
+        return;
+      }
+      setTreeFocusedRow(
+        target.kind === "session"
+          ? { kind: "session", id: target.id, projectId: target.projectId }
+          : target.kind === "folder"
+            ? { kind: "folder", id: target.id }
+            : { kind: "project", id: target.id },
+      );
+      const commitMode = target.kind === "session" ? "debounced_session" : "debounced_project";
+      if (!preserveFocus) {
+        pendingProjectPaneFocusCommitModeRef.current = commitMode;
+        pendingProjectPaneFocusWaitForKeyboardIdleRef.current = true;
+        focusVisibleProjectTarget(projectListRef.current, target.element);
+        return;
+      }
+      if (target.kind === "project") {
+        selectProjectAllMessages(target.id, { commitMode, waitForKeyboardIdle: true });
+        return;
+      }
+      if (target.kind === "session") {
+        selectSessionView(target.id, target.projectId, {
+          commitMode,
+          waitForKeyboardIdle: true,
+        });
+        return;
+      }
+      queueProjectTreeNoopCommit({ commitMode, waitForKeyboardIdle: true });
+    },
+    [
+      pendingProjectPaneFocusCommitModeRef,
+      pendingProjectPaneFocusWaitForKeyboardIdleRef,
+      projectListRef,
+      queueProjectTreeNoopCommit,
+      setTreeFocusedRow,
+      selectProjectAllMessages,
+      selectSessionView,
+    ],
+  );
+
+  const getCurrentProjectNavigationTarget = useCallback((): ProjectNavigationTarget | null => {
+    const focusedTarget = getProjectNavigationTargetFromElement(
+      document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    );
+    if (focusedTarget) {
+      return focusedTarget;
+    }
+    if (projectViewMode === "tree" && treeFocusedRow) {
+      return treeFocusedRow;
+    }
+    return (
+      getProjectNavigationTargetFromContainer(projectListRef.current) ??
+      (selectedProjectId ? { kind: "project", id: selectedProjectId } : null)
+    );
+  }, [projectListRef, projectViewMode, selectedProjectId, treeFocusedRow]);
+
   const selectAdjacentSession = useCallback(
-    (direction: Direction) => {
+    (direction: Direction, { preserveFocus = false }: AdjacentSelectionOptions = {}) => {
       const currentNavigationId =
         historyMode === "project_all"
           ? PROJECT_ALL_NAV_ID
@@ -529,7 +693,9 @@ export function useHistoryInteractions({
       if (!nextNavigationId) {
         return;
       }
-      focusHistoryList(sessionListRef.current);
+      if (!preserveFocus) {
+        focusHistoryList(sessionListRef.current);
+      }
       if (nextNavigationId === PROJECT_ALL_NAV_ID) {
         selectProjectAllMessages(selectedProjectId, {
           commitMode: "debounced_session",
@@ -559,11 +725,52 @@ export function useHistoryInteractions({
   );
 
   const selectAdjacentProject = useCallback(
-    (direction: Direction) => {
-      const currentTarget =
-        getProjectNavigationTargetFromElement(
-          document.activeElement instanceof HTMLElement ? document.activeElement : null,
-        ) ?? getProjectNavigationTargetFromContainer(projectListRef.current);
+    (direction: Direction, { preserveFocus = false }: AdjacentSelectionOptions = {}) => {
+      if (projectViewMode === "list") {
+        const currentTarget = getCurrentProjectNavigationTarget();
+        const currentProjectId =
+          currentTarget?.kind === "project" ? currentTarget.id : selectedProjectId;
+        const nextProjectId = getAdjacentItemId(sortedProjects, currentProjectId, direction);
+        if (!nextProjectId) {
+          return;
+        }
+
+        if (preserveFocus) {
+          selectProjectAllMessages(nextProjectId, {
+            commitMode: "debounced_project",
+            waitForKeyboardIdle: true,
+          });
+          return;
+        }
+
+        pendingProjectPaneFocusCommitModeRef.current = "debounced_project";
+        pendingProjectPaneFocusWaitForKeyboardIdleRef.current = true;
+        const container = projectListRef.current;
+        if (!container) {
+          return;
+        }
+
+        const selector = `[data-project-nav-kind="project"][data-project-nav-id="${CSS.escape(nextProjectId)}"]`;
+        const targetElement = container.querySelector<HTMLElement>(selector);
+        if (targetElement) {
+          focusVisibleProjectTarget(container, targetElement);
+          return;
+        }
+
+        const targetIndex = sortedProjects.findIndex((project) => project.id === nextProjectId);
+        if (targetIndex < 0) {
+          return;
+        }
+
+        scrollVirtualListIndexIntoView(container, targetIndex, SIDEBAR_LIST_ROW_HEIGHT);
+        window.requestAnimationFrame(() => {
+          const nextTargetElement = container.querySelector<HTMLElement>(selector);
+          focusVisibleProjectTarget(container, nextTargetElement);
+        });
+        return;
+      }
+
+      const currentTarget = getCurrentProjectNavigationTarget();
       const visibleTarget = getAdjacentVisibleProjectTarget(
         projectListRef.current,
         currentTarget,
@@ -573,9 +780,19 @@ export function useHistoryInteractions({
         return;
       }
 
-      focusProjectTargetWithCommitMode(visibleTarget);
+      selectProjectTargetWithCommitMode(visibleTarget, { preserveFocus });
     },
-    [focusProjectTargetWithCommitMode, projectListRef],
+    [
+      getCurrentProjectNavigationTarget,
+      pendingProjectPaneFocusCommitModeRef,
+      pendingProjectPaneFocusWaitForKeyboardIdleRef,
+      projectListRef,
+      projectViewMode,
+      selectedProjectId,
+      selectProjectAllMessages,
+      selectProjectTargetWithCommitMode,
+      sortedProjects,
+    ],
   );
 
   const handleProjectTreeArrow = useCallback(
@@ -584,10 +801,7 @@ export function useHistoryInteractions({
       if (!container) {
         return;
       }
-      const currentTarget =
-        getProjectNavigationTargetFromElement(
-          document.activeElement instanceof HTMLElement ? document.activeElement : null,
-        ) ?? getProjectNavigationTargetFromContainer(container);
+      const currentTarget = getCurrentProjectNavigationTarget();
       if (!currentTarget) {
         return;
       }
@@ -674,6 +888,7 @@ export function useHistoryInteractions({
     },
     [
       focusProjectTargetWithCommitMode,
+      getCurrentProjectNavigationTarget,
       pendingProjectPaneFocusCommitModeRef,
       pendingProjectPaneFocusWaitForKeyboardIdleRef,
       projectListRef,
@@ -685,10 +900,7 @@ export function useHistoryInteractions({
     if (!container) {
       return;
     }
-    const currentTarget =
-      getProjectNavigationTargetFromElement(
-        document.activeElement instanceof HTMLElement ? document.activeElement : null,
-      ) ?? getProjectNavigationTargetFromContainer(container);
+    const currentTarget = getCurrentProjectNavigationTarget();
     if (!currentTarget) {
       return;
     }
@@ -714,26 +926,61 @@ export function useHistoryInteractions({
       );
       toggle?.click();
     }
-  }, [projectListRef]);
+  }, [getCurrentProjectNavigationTarget, projectListRef]);
 
   const goToPreviousHistoryPage = useCallback(() => {
     if (!canNavigatePages) {
       return;
     }
     refreshContextRef.current = null;
+    setPendingMessagePageNavigation(null);
     setSessionPage((value) => Math.max(0, value - 1));
-  }, [canNavigatePages, refreshContextRef, setSessionPage]);
+  }, [canNavigatePages, refreshContextRef, setPendingMessagePageNavigation, setSessionPage]);
 
   const goToNextHistoryPage = useCallback(() => {
     if (!canNavigatePages) {
       return;
     }
     refreshContextRef.current = null;
+    setPendingMessagePageNavigation(null);
     setSessionPage((value) => Math.min(totalPages - 1, value + 1));
-  }, [canNavigatePages, refreshContextRef, setSessionPage, totalPages]);
+  }, [
+    canNavigatePages,
+    refreshContextRef,
+    setPendingMessagePageNavigation,
+    setSessionPage,
+    totalPages,
+  ]);
+
+  const goToHistoryPage = useCallback(
+    (page: number) => {
+      if (!canNavigatePages) {
+        return;
+      }
+      const targetPage = Math.max(0, Math.min(totalPages - 1, Math.trunc(page)));
+      refreshContextRef.current = null;
+      setPendingMessagePageNavigation(null);
+      setSessionPage(targetPage);
+    },
+    [
+      canNavigatePages,
+      refreshContextRef,
+      setPendingMessagePageNavigation,
+      setSessionPage,
+      totalPages,
+    ],
+  );
+
+  const goToFirstHistoryPage = useCallback(() => {
+    goToHistoryPage(0);
+  }, [goToHistoryPage]);
+
+  const goToLastHistoryPage = useCallback(() => {
+    goToHistoryPage(totalPages - 1);
+  }, [goToHistoryPage, totalPages]);
 
   const focusAdjacentHistoryMessage = useCallback(
-    (direction: Direction) => {
+    (direction: Direction, { preserveFocus = false }: { preserveFocus?: boolean } = {}) => {
       if (activeHistoryMessages.length === 0) {
         return;
       }
@@ -741,7 +988,7 @@ export function useHistoryInteractions({
       if (!visibleFocusedMessageId) {
         const firstVisibleMessageId = getFirstVisibleMessageId(messageListRef.current);
         if (firstVisibleMessageId) {
-          setPendingMessageAreaFocus(true);
+          setPendingMessageAreaFocus(!preserveFocus);
           setFocusMessageId(firstVisibleMessageId);
         }
         return;
@@ -753,7 +1000,7 @@ export function useHistoryInteractions({
         direction,
       );
       if (adjacentMessageId) {
-        setPendingMessageAreaFocus(true);
+        setPendingMessageAreaFocus(!preserveFocus);
         setFocusMessageId(adjacentMessageId);
         return;
       }
@@ -761,7 +1008,7 @@ export function useHistoryInteractions({
       const canAdvancePage =
         direction === "next" ? canGoToNextHistoryPage : canGoToPreviousHistoryPage;
       if (!canAdvancePage) {
-        setPendingMessageAreaFocus(true);
+        setPendingMessageAreaFocus(!preserveFocus);
         return;
       }
 
@@ -772,7 +1019,7 @@ export function useHistoryInteractions({
       // Crossing a page boundary is deferred until the new page loads, then the controller picks
       // the first/last visible message on that page.
       refreshContextRef.current = null;
-      setPendingMessageAreaFocus(true);
+      setPendingMessageAreaFocus(!preserveFocus);
       setPendingMessagePageNavigation({ direction, targetPage });
       setSessionPage(targetPage);
     },
@@ -861,9 +1108,10 @@ export function useHistoryInteractions({
   );
 
   return {
-    handleToggleScopedMessagesExpanded,
     handleToggleHistoryCategoryShortcut,
-    handleToggleCategoryMessagesExpanded,
+    handleToggleVisibleCategoryMessagesExpanded,
+    handleToggleCategoryDefaultExpansion,
+    handleToggleAllCategoryDefaultExpansion,
     handleToggleMessageExpanded,
     handleRevealInSession,
     handleToggleBookmark,
@@ -878,6 +1126,9 @@ export function useHistoryInteractions({
     selectAdjacentProject,
     handleProjectTreeArrow,
     handleProjectTreeEnter,
+    goToHistoryPage,
+    goToFirstHistoryPage,
+    goToLastHistoryPage,
     goToPreviousHistoryPage,
     goToNextHistoryPage,
     focusAdjacentHistoryMessage,
@@ -887,4 +1138,18 @@ export function useHistoryInteractions({
     handleRefresh,
     navigateFromSearchResult,
   };
+}
+
+function applyExpansionOverride(
+  overrides: Record<string, boolean>,
+  messageId: string,
+  category: MessageCategory,
+  expanded: boolean,
+  options: { isExpandedByDefault: (category: MessageCategory) => boolean },
+): void {
+  if (expanded === options.isExpandedByDefault(category)) {
+    delete overrides[messageId];
+    return;
+  }
+  overrides[messageId] = expanded;
 }

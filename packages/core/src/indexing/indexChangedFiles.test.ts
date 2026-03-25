@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,6 +7,34 @@ import { describe, expect, it } from "vitest";
 import { openDatabase } from "../db/bootstrap";
 import { indexChangedFiles } from "./indexSessions";
 import { runIncrementalIndexing } from "./indexSessions";
+
+function readIndexedSnapshot(dbPath: string) {
+  const db = openDatabase(dbPath);
+  try {
+    return {
+      sessions: db
+        .prepare(
+          "SELECT provider, file_path, title, cwd, git_branch, session_identity FROM sessions ORDER BY file_path",
+        )
+        .all(),
+      messages: db
+        .prepare(
+          "SELECT source_id, category, content, created_at FROM messages ORDER BY created_at, id",
+        )
+        .all(),
+      indexedFiles: db
+        .prepare("SELECT file_path, file_size, file_mtime_ms FROM indexed_files ORDER BY file_path")
+        .all(),
+      checkpoints: db
+        .prepare(
+          "SELECT file_path, last_offset_bytes, last_line_number, last_event_index FROM index_checkpoints ORDER BY file_path",
+        )
+        .all(),
+    };
+  } finally {
+    db.close();
+  }
+}
 
 describe("indexChangedFiles", () => {
   it("indexes changed files correctly", () => {
@@ -119,6 +147,133 @@ describe("indexChangedFiles", () => {
     const second = indexChangedFiles({ dbPath, discoveryConfig }, [sessionFile]);
     expect(second.indexedFiles).toBe(0);
     expect(second.skippedFiles).toBe(1);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("indexes changed files identically with prefetched bytes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-changed-prefetch-"));
+    const baselineDbPath = join(dir, "baseline.db");
+    const prefetchedDbPath = join(dir, "prefetched.db");
+
+    const claudeRoot = join(dir, ".claude", "projects");
+    const claudeProject = join(claudeRoot, "project-a");
+    mkdirSync(claudeProject, { recursive: true });
+
+    writeFileSync(
+      join(claudeProject, "sessions-index.json"),
+      JSON.stringify({
+        version: 1,
+        entries: [{ sessionId: "s1", projectPath: "/workspace/app" }],
+      }),
+    );
+    const sessionFile = join(claudeProject, "s1.jsonl");
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        sessionId: "s1",
+        type: "user",
+        cwd: "/workspace/app",
+        gitBranch: "main",
+        timestamp: "2026-02-27T10:00:00Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Hello Claude 😀 cafe" }],
+        },
+      })}\n`,
+    );
+
+    const discoveryConfig = {
+      claudeRoot,
+      codexRoot: join(dir, ".codex", "sessions"),
+      geminiRoot: join(dir, ".gemini", "tmp"),
+      geminiHistoryRoot: join(dir, ".gemini", "history"),
+      geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+      cursorRoot: join(dir, ".cursor", "projects"),
+      copilotRoot: join(dir, ".copilot-workspace"),
+      includeClaudeSubagents: false,
+    };
+
+    indexChangedFiles({ dbPath: baselineDbPath, discoveryConfig }, [sessionFile]);
+    const fileStat = statSync(sessionFile);
+    indexChangedFiles({ dbPath: prefetchedDbPath, discoveryConfig }, [sessionFile], {
+      prefetchedJsonlChunks: [
+        {
+          filePath: sessionFile,
+          fileSize: fileStat.size,
+          fileMtimeMs: Math.trunc(fileStat.mtimeMs),
+          startOffsetBytes: 0,
+          bytes: new Uint8Array(readFileSync(sessionFile)),
+        },
+      ],
+    });
+
+    expect(readIndexedSnapshot(prefetchedDbPath)).toEqual(readIndexedSnapshot(baselineDbPath));
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("discards mismatched prefetched bytes and falls back to direct file reads", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-changed-prefetch-mismatch-"));
+    const dbPath = join(dir, "index.db");
+
+    const claudeRoot = join(dir, ".claude", "projects");
+    const claudeProject = join(claudeRoot, "project-a");
+    mkdirSync(claudeProject, { recursive: true });
+
+    writeFileSync(
+      join(claudeProject, "sessions-index.json"),
+      JSON.stringify({
+        version: 1,
+        entries: [{ sessionId: "s1", projectPath: "/workspace/app" }],
+      }),
+    );
+    const sessionFile = join(claudeProject, "s1.jsonl");
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        sessionId: "s1",
+        type: "user",
+        cwd: "/workspace/app",
+        gitBranch: "main",
+        timestamp: "2026-02-27T10:00:00Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Real transcript body" }],
+        },
+      })}\n`,
+    );
+
+    const discoveryConfig = {
+      claudeRoot,
+      codexRoot: join(dir, ".codex", "sessions"),
+      geminiRoot: join(dir, ".gemini", "tmp"),
+      geminiHistoryRoot: join(dir, ".gemini", "history"),
+      geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+      cursorRoot: join(dir, ".cursor", "projects"),
+      copilotRoot: join(dir, ".copilot-workspace"),
+      includeClaudeSubagents: false,
+    };
+
+    const fileStat = statSync(sessionFile);
+    indexChangedFiles({ dbPath, discoveryConfig }, [sessionFile], {
+      prefetchedJsonlChunks: [
+        {
+          filePath: sessionFile,
+          fileSize: fileStat.size + 1,
+          fileMtimeMs: Math.trunc(fileStat.mtimeMs),
+          startOffsetBytes: 0,
+          bytes: new Uint8Array(Buffer.from('{"broken":true}\n', "utf8")),
+        },
+      ],
+    });
+
+    const snapshot = readIndexedSnapshot(dbPath);
+    expect(snapshot.messages).toEqual([
+      expect.objectContaining({
+        content: "Real transcript body",
+      }),
+    ]);
 
     rmSync(dir, { recursive: true, force: true });
   });

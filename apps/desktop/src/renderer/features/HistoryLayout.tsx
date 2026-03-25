@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 
+import type { WatchLiveStatusResponse } from "../app/types";
 import { ProjectPane } from "../components/history/ProjectPane";
 import { SessionPane } from "../components/history/SessionPane";
 import { copyTextToClipboard } from "../lib/clipboard";
@@ -111,6 +112,8 @@ export function HistoryLayout({
   logError,
   onDeleteProject,
   onDeleteSession,
+  liveSessions = [],
+  liveRowHasBackground = true,
 }: {
   history: HistoryController;
   advancedSearchEnabled: boolean;
@@ -123,6 +126,8 @@ export function HistoryLayout({
   logError: (context: string, error: unknown) => void;
   onDeleteProject: (projectId?: string) => void;
   onDeleteSession: (sessionId?: string) => void;
+  liveSessions?: WatchLiveStatusResponse["sessions"];
+  liveRowHasBackground?: boolean;
 }) {
   return (
     <>
@@ -143,6 +148,11 @@ export function HistoryLayout({
           projectUpdates: history.projectUpdates,
           treeProjectSessionsByProjectId: history.treeProjectSessionsByProjectId,
           treeProjectSessionsLoadingByProjectId: history.treeProjectSessionsLoadingByProjectId,
+          folderGroups: history.folderGroups,
+          expandedFolderIdSet: history.expandedFolderIdSet,
+          expandedProjectIds: history.expandedProjectIds,
+          allVisibleFoldersExpanded: history.allVisibleFoldersExpanded,
+          treeFocusedRow: history.treeFocusedRow,
         }}
         sorting={{
           sortField: history.projectSortField,
@@ -150,6 +160,7 @@ export function HistoryLayout({
           sessionSortDirection: history.sessionSortDirection,
         }}
         preferences={{
+          hideSessionsPaneInTreeView: history.hideSessionsPaneInTreeView,
           singleClickFoldersExpand: history.singleClickFoldersExpand,
           singleClickProjectsExpand: history.singleClickProjectsExpand,
         }}
@@ -170,6 +181,8 @@ export function HistoryLayout({
             history.setSessionSortDirection((value) => (value === "asc" ? "desc" : "asc")),
           onToggleViewMode: () =>
             history.setProjectViewMode((value) => (value === "list" ? "tree" : "list")),
+          onToggleHideSessionsPaneInTreeView: () =>
+            history.setHideSessionsPaneInTreeView((value) => !value),
           onToggleSingleClickFoldersExpand: () =>
             history.setSingleClickFoldersExpand((value) => !value),
           onToggleSingleClickProjectsExpand: () =>
@@ -183,7 +196,10 @@ export function HistoryLayout({
           onSelectProjectBookmarks: history.openProjectBookmarksView,
           consumeFocusSelectionBehavior: history.consumeProjectPaneFocusSelectionBehavior,
           onQueueProjectTreeNoopCommit: history.queueProjectTreeNoopCommit,
-          onEnsureTreeProjectSessionsLoaded: history.ensureTreeProjectSessionsLoaded,
+          onSetTreeFocusedRow: history.setTreeFocusedRow,
+          onToggleFolder: history.handleToggleFolder,
+          onToggleAllFolders: history.handleToggleAllFolders,
+          onToggleProjectExpansion: history.handleToggleProjectExpansion,
           onDeleteProject,
           onOpenProjectLocation: (projectId) =>
             openProjectLocationById(history, logError, projectId),
@@ -198,40 +214,59 @@ export function HistoryLayout({
         }}
       />
 
-      <div className="pane-resizer" onPointerDown={history.beginResize("project")} />
-
-      <SessionPane
-        sortedSessions={history.visibleSessionPaneSessions}
-        selectedSessionId={history.uiSelectedSessionId}
-        listRef={history.refs.sessionListRef}
-        sortDirection={history.sessionSortDirection}
-        allSessionsCount={history.visibleSessionPaneAllSessionsCount}
-        allSessionsSelected={history.uiHistoryMode === "project_all"}
-        bookmarksCount={history.visibleSessionPaneBookmarksCount}
-        bookmarksSelected={history.uiHistoryMode === "bookmarks"}
-        collapsed={history.sessionPaneCollapsed}
-        // Session actions should only operate on committed data, even while the list highlight
-        // moves ahead during keyboard debounce.
-        canCopySession={history.historyMode === "session" && !!history.selectedSession}
-        canOpenSessionLocation={
-          history.historyMode === "session" && Boolean(history.selectedSession?.filePath?.trim())
+      <div
+        className={
+          history.projectPaneCollapsed ? "pane-resizer pane-resizer-disabled" : "pane-resizer"
         }
-        canDeleteSession={history.historyMode === "session" && !!history.selectedSession}
-        onToggleCollapsed={() => history.setSessionPaneCollapsed((value) => !value)}
-        onToggleSortDirection={() =>
-          history.setSessionSortDirection((value) => (value === "asc" ? "desc" : "asc"))
-        }
-        onCopySession={(sessionId) => copySessionDetailsById(history, logError, sessionId)}
-        onDeleteSession={onDeleteSession}
-        onOpenSessionLocation={(sessionId) => openSessionLocationById(history, logError, sessionId)}
-        onSelectAllSessions={() => {
-          history.selectProjectAllMessages(history.selectedProjectId);
-        }}
-        onSelectBookmarks={history.selectBookmarksView}
-        onSelectSession={history.selectSessionView}
+        onPointerDown={history.projectPaneCollapsed ? undefined : history.beginResize("project")}
       />
 
-      <div className="pane-resizer" onPointerDown={history.beginResize("session")} />
+      {history.hideSessionsPaneForTreeView ? null : (
+        <>
+          <SessionPane
+            sortedSessions={history.visibleSessionPaneSessions}
+            selectedSessionId={history.uiSelectedSessionId}
+            listRef={history.refs.sessionListRef}
+            sortDirection={history.sessionSortDirection}
+            allSessionsCount={history.visibleSessionPaneAllSessionsCount}
+            allSessionsSelected={history.uiHistoryMode === "project_all"}
+            bookmarksCount={history.visibleSessionPaneBookmarksCount}
+            bookmarksSelected={history.uiHistoryMode === "bookmarks"}
+            collapsed={history.sessionPaneCollapsed}
+            // Session actions should only operate on committed data, even while the list highlight
+            // moves ahead during keyboard debounce.
+            canCopySession={history.historyMode === "session" && !!history.selectedSession}
+            canOpenSessionLocation={
+              history.historyMode === "session" &&
+              Boolean(history.selectedSession?.filePath?.trim())
+            }
+            canDeleteSession={history.historyMode === "session" && !!history.selectedSession}
+            onToggleCollapsed={() => history.setSessionPaneCollapsed((value) => !value)}
+            onToggleSortDirection={() =>
+              history.setSessionSortDirection((value) => (value === "asc" ? "desc" : "asc"))
+            }
+            onCopySession={(sessionId) => copySessionDetailsById(history, logError, sessionId)}
+            onDeleteSession={onDeleteSession}
+            onOpenSessionLocation={(sessionId) =>
+              openSessionLocationById(history, logError, sessionId)
+            }
+            onSelectAllSessions={() => {
+              history.selectProjectAllMessages(history.selectedProjectId);
+            }}
+            onSelectBookmarks={history.selectBookmarksView}
+            onSelectSession={history.selectSessionView}
+          />
+
+          <div
+            className={
+              history.sessionPaneCollapsed ? "pane-resizer pane-resizer-disabled" : "pane-resizer"
+            }
+            onPointerDown={
+              history.sessionPaneCollapsed ? undefined : history.beginResize("session")
+            }
+          />
+        </>
+      )}
 
       <section className="pane content-pane history-focus-pane">
         <HistoryDetailPane
@@ -243,6 +278,8 @@ export function HistoryLayout({
           canZoomOut={canZoomOut}
           applyZoomAction={applyZoomAction}
           setZoomPercent={setZoomPercent}
+          liveSessions={liveSessions}
+          liveRowHasBackground={liveRowHasBackground}
         />
       </section>
     </>

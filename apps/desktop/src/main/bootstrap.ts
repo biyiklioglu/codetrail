@@ -4,13 +4,16 @@ import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:pa
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 
 import {
+  CLAUDE_HOOK_EVENT_NAME_VALUES,
   DATABASE_SCHEMA_VERSION,
   DEFAULT_DISCOVERY_CONFIG,
+  type DiscoveryConfig,
   type IndexingFileIssue,
   type IndexingNotice,
   type IpcResponse,
   PROVIDER_LIST,
   type Provider,
+  createProviderRecord,
   indexerConfigBaseSchema,
   initializeDatabase,
   listDiscoverySettingsPaths,
@@ -37,6 +40,7 @@ import {
 import { exportHistoryMessages } from "./historyExport";
 import { WorkerIndexingRunner } from "./indexingRunner";
 import { registerIpcHandlers } from "./ipc";
+import { LiveSessionStore } from "./liveSessionStore";
 import { WatchStatsStore } from "./watchStatsStore";
 
 const MIN_ZOOM_PERCENT = 60;
@@ -61,6 +65,7 @@ export type BootstrapResult = {
 type MainProcessRuntimeState = {
   queryService: QueryService | null;
   fileWatcher: FileWatcherService | null;
+  liveSessionStore: LiveSessionStore | null;
   watcherDebounceMs: 1000 | 3000 | 5000 | null;
 };
 
@@ -72,8 +77,54 @@ function createRuntimeState(): MainProcessRuntimeState {
   return {
     queryService: null,
     fileWatcher: null,
+    liveSessionStore: null,
     watcherDebounceMs: null,
   };
+}
+
+function createDefaultClaudeHookState(input: {
+  appUserDataPath: string;
+  appHomePath: string;
+  lastError?: string | null;
+}): IpcResponse<"watcher:getLiveStatus">["claudeHookState"] {
+  return {
+    settingsPath: join(input.appHomePath, ".claude", "settings.json"),
+    logPath: join(input.appUserDataPath, "live-status", "claude-hooks.jsonl"),
+    installed: false,
+    managed: false,
+    managedEventNames: [],
+    missingEventNames: [...CLAUDE_HOOK_EVENT_NAME_VALUES],
+    lastError: input.lastError ?? null,
+  };
+}
+
+function filterPotentialLiveTranscriptPaths(
+  changedPaths: string[],
+  discoveryConfig: Pick<DiscoveryConfig, "claudeRoot" | "codexRoot">,
+): string[] {
+  return changedPaths.filter((changedPath) => {
+    if (!changedPath.endsWith(".jsonl")) {
+      return false;
+    }
+    return (
+      isPathWithinOptionalRoot(changedPath, discoveryConfig.claudeRoot) ||
+      isPathWithinOptionalRoot(changedPath, discoveryConfig.codexRoot)
+    );
+  });
+}
+
+function isPathWithinOptionalRoot(
+  candidatePath: string,
+  rootPath: string | null | undefined,
+): boolean {
+  if (!rootPath) {
+    return false;
+  }
+  const normalizedRoot = normalize(rootPath);
+  const normalizedCandidate = normalize(candidatePath);
+  return (
+    normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`)
+  );
 }
 
 async function disposeRuntimeState(state: MainProcessRuntimeState | null): Promise<void> {
@@ -83,6 +134,10 @@ async function disposeRuntimeState(state: MainProcessRuntimeState | null): Promi
   if (state.fileWatcher) {
     await state.fileWatcher.stop();
     state.fileWatcher = null;
+  }
+  if (state.liveSessionStore) {
+    await state.liveSessionStore.stop();
+    state.liveSessionStore = null;
   }
   state.watcherDebounceMs = null;
   state.queryService?.close();
@@ -140,6 +195,19 @@ export async function bootstrapMainProcess(
   });
   const queryService = createQueryService(dbPath, { bookmarksDbPath });
   runtime.queryService = queryService;
+  runtime.liveSessionStore = new LiveSessionStore({
+    queryService,
+    userDataDir: app.getPath("userData"),
+    homeDir: app.getPath("home"),
+    ...(options.onBackgroundError ? { onBackgroundError: options.onBackgroundError } : {}),
+  });
+  await runtime.liveSessionStore.prepareClaudeHookLogForAppStart().catch((error: unknown) => {
+    if (options.onBackgroundError) {
+      options.onBackgroundError("Failed preparing Claude hook log", error);
+      return;
+    }
+    console.error("[codetrail] failed preparing Claude hook log", error);
+  });
   let allowedRootsCache: { roots: string[]; expiresAt: number } | null = null;
   const readAllowedRoots = (): string[] => {
     const now = Date.now();
@@ -166,12 +234,64 @@ export async function bootstrapMainProcess(
     providers
       ? providers.filter((provider) => getEnabledProviders().includes(provider))
       : [...getEnabledProviders()];
+  const isLiveWatchEnabled = (): boolean =>
+    options.appStateStore?.getPaneState()?.liveWatchEnabled ?? true;
+  let liveSessionStoreSync: Promise<void> = Promise.resolve();
+  const syncLiveSessionStore = async () => {
+    liveSessionStoreSync = liveSessionStoreSync
+      .catch((error) => {
+        if (options.onBackgroundError) {
+          options.onBackgroundError("live session store sync failed", error);
+          return;
+        }
+        console.error("[codetrail] live session store sync failed", error);
+      })
+      .then(async () => {
+        if (!runtime.liveSessionStore) {
+          return;
+        }
+        if (!runtime.fileWatcher || runtime.watcherDebounceMs === null || !isLiveWatchEnabled()) {
+          await runtime.liveSessionStore.stop();
+          return;
+        }
+        await runtime.liveSessionStore.start({
+          discoveryConfig: getEffectiveDiscoveryConfig(),
+        });
+      });
+    return liveSessionStoreSync;
+  };
+
+  const flushDurablePaneStateFlagsIfChanged = (
+    previousPaneState: ReturnType<NonNullable<typeof options.appStateStore>["getPaneState"]>,
+    nextPaneState: ReturnType<NonNullable<typeof options.appStateStore>["getPaneState"]>,
+  ) => {
+    if (!options.appStateStore) {
+      return;
+    }
+    if (
+      previousPaneState?.liveWatchEnabled !== nextPaneState?.liveWatchEnabled ||
+      previousPaneState?.claudeHooksPrompted !== nextPaneState?.claudeHooksPrompted
+    ) {
+      options.appStateStore.flush();
+    }
+  };
+
+  const syncLiveSessionStoreForPaneStateChange = async (
+    previousLiveWatchEnabled: boolean,
+    nextLiveWatchEnabled: boolean,
+  ) => {
+    if (previousLiveWatchEnabled === nextLiveWatchEnabled) {
+      return;
+    }
+    await syncLiveSessionStore();
+  };
 
   const startWatcherWithConfig = async (debounceMs: 1000 | 3000 | 5000) => {
     if (runtime.fileWatcher) {
       await runtime.fileWatcher.stop();
       runtime.fileWatcher = null;
     }
+    await runtime.liveSessionStore?.stop();
 
     const watcherRoots = listDiscoveryWatchRoots(getEffectiveDiscoveryConfig());
     const createFileWatcher = (watcherOptions: FileWatcherOptions) =>
@@ -179,20 +299,34 @@ export async function bootstrapMainProcess(
         watcherRoots,
         async (batch: FileWatcherBatch) => {
           invalidateAllowedRootsCache();
+          const changedPaths = [...new Set(batch.changedPaths)];
+          const liveChangedPaths = filterPotentialLiveTranscriptPaths(
+            changedPaths,
+            getEffectiveDiscoveryConfig(),
+          );
+          if (liveChangedPaths.length > 0) {
+            await runtime.liveSessionStore?.handleWatcherBatch({
+              ...batch,
+              changedPaths: liveChangedPaths,
+            });
+          }
+          const prefetchedJsonlChunks =
+            runtime.liveSessionStore?.takeIndexingPrefetchedJsonlChunks(changedPaths) ?? [];
           watchStatsStore.recordWatcherTrigger({
-            changedPathCount: batch.changedPaths.length,
+            changedPathCount: changedPaths.length,
             requiresFullScan: batch.requiresFullScan,
           });
           const enqueuePromise = batch.requiresFullScan
             ? indexingRunner.enqueue({ force: false }, { source: "watch_fallback_incremental" })
-            : indexingRunner.enqueueChangedFiles(batch.changedPaths, {
+            : indexingRunner.enqueueChangedFiles(changedPaths, {
                 source: "watch_targeted",
+                ...(prefetchedJsonlChunks.length > 0 ? { prefetchedJsonlChunks } : {}),
               });
           await enqueuePromise.catch((error: unknown) => {
             if (options.onBackgroundError) {
               options.onBackgroundError("watcher-triggered indexing failed", error, {
                 requiresFullScan: batch.requiresFullScan,
-                changedPathCount: batch.changedPaths.length,
+                changedPathCount: changedPaths.length,
               });
               return;
             }
@@ -213,6 +347,7 @@ export async function bootstrapMainProcess(
       await fileWatcher.start();
       runtime.fileWatcher = fileWatcher;
       runtime.watcherDebounceMs = debounceMs;
+      await syncLiveSessionStore();
       watchStatsStore.recordWatcherStart({
         backend,
         watchedRootCount: fileWatcher.getWatchedRoots().length,
@@ -238,329 +373,403 @@ export async function bootstrapMainProcess(
     return startWatcher({}, "default");
   };
 
-  registerIpcHandlers(ipcMain, {
-    "app:getHealth": () => ({
-      status: "ok",
-      version: app.getVersion(),
-    }),
-    "app:getSettingsInfo": () => ({
-      storage: {
-        settingsFile: settingsFilePath,
-        cacheDir: app.getPath("sessionData"),
-        databaseFile: dbPath,
-        bookmarksDatabaseFile: bookmarksDbPath,
-        userDataDir: app.getPath("userData"),
+  registerIpcHandlers(
+    ipcMain,
+    {
+      "app:getHealth": () => ({
+        status: "ok",
+        version: app.getVersion(),
+      }),
+      "app:flushState": () => {
+        options.appStateStore?.flush();
+        return { ok: true };
       },
-      discovery: {
-        providers: PROVIDER_LIST.map((provider) => ({
-          provider: provider.id,
-          label: provider.label,
-          paths: discoverySettingsPaths
-            .filter((path) => path.provider === provider.id)
-            .map((path) => ({
-              key: path.key,
-              label: path.label,
-              value: path.value,
-              watch: path.watch,
-            })),
-        })),
+      "app:getSettingsInfo": () => ({
+        storage: {
+          settingsFile: settingsFilePath,
+          cacheDir: app.getPath("sessionData"),
+          databaseFile: dbPath,
+          bookmarksDatabaseFile: bookmarksDbPath,
+          userDataDir: app.getPath("userData"),
+        },
+        discovery: {
+          providers: PROVIDER_LIST.map((provider) => ({
+            provider: provider.id,
+            label: provider.label,
+            paths: discoverySettingsPaths
+              .filter((path) => path.provider === provider.id)
+              .map((path) => ({
+                key: path.key,
+                label: path.label,
+                value: path.value,
+                watch: path.watch,
+              })),
+          })),
+        },
+      }),
+      "db:getSchemaVersion": () => ({
+        schemaVersion: dbBootstrap.schemaVersion,
+      }),
+      "indexer:refresh": async (payload) => {
+        invalidateAllowedRootsCache();
+        const job = await indexingRunner.enqueue(
+          { force: payload.force },
+          {
+            source: payload.force ? "manual_force_reindex" : "manual_incremental",
+          },
+        );
+        return { jobId: job.jobId };
       },
-    }),
-    "db:getSchemaVersion": () => ({
-      schemaVersion: dbBootstrap.schemaVersion,
-    }),
-    "indexer:refresh": async (payload) => {
-      invalidateAllowedRootsCache();
-      const job = await indexingRunner.enqueue(
-        { force: payload.force },
-        {
-          source: payload.force ? "manual_force_reindex" : "manual_incremental",
-        },
-      );
-      return { jobId: job.jobId };
-    },
-    "indexer:getStatus": () => indexingRunner.getStatus(),
-    "projects:list": (payload) =>
-      queryService.listProjects({
-        ...payload,
-        providers: applyEnabledProviderFilter(payload.providers),
-      }),
-    "projects:delete": (payload) => {
-      const result = queryService.deleteProject(payload);
-      invalidateAllowedRootsCache();
-      return result;
-    },
-    "projects:getCombinedDetail": (payload) => queryService.getProjectCombinedDetail(payload),
-    "sessions:list": (payload) => queryService.listSessions(payload),
-    "sessions:listMany": (payload) => queryService.listSessionsMany(payload),
-    "sessions:getDetail": (payload) => queryService.getSessionDetail(payload),
-    "sessions:delete": (payload) => {
-      const result = queryService.deleteSession(payload);
-      invalidateAllowedRootsCache();
-      return result;
-    },
-    "bookmarks:listProject": (payload) => queryService.listProjectBookmarks(payload),
-    "bookmarks:getStates": (payload) => queryService.getBookmarkStates(payload),
-    "bookmarks:toggle": (payload) => queryService.toggleBookmark(payload),
-    "history:exportMessages": async (payload, event) =>
-      exportHistoryMessages({
-        browserWindow: BrowserWindow.fromWebContents(event.sender),
-        onProgress: (progress) => {
-          event.sender.send(HISTORY_EXPORT_PROGRESS_CHANNEL, progress);
-        },
-        queryService,
-        request: payload,
-      }),
-    "search:query": (payload) =>
-      queryService.runSearchQuery({
-        ...payload,
-        providers: applyEnabledProviderFilter(payload.providers),
-      }),
-    "path:openInFileManager": async (payload) => {
-      if (!isAbsolute(payload.path)) {
-        return { ok: false, error: "Path must be absolute." };
-      }
-      const targetPath = await resolveCanonicalPath(payload.path);
-      // Only permit shell-open for indexed workspaces and app-owned storage to avoid turning IPC
-      // into a generic arbitrary-path opener.
-      const allowedRoots = readAllowedRoots();
-      if (!isPathAllowedByRoots(targetPath, allowedRoots)) {
-        return {
-          ok: false,
-          error: "Path is outside indexed projects and app storage roots.",
-        };
-      }
-      try {
-        const fileStat = await stat(targetPath);
-        if (fileStat.isFile()) {
-          shell.showItemInFolder(targetPath);
-          return { ok: true, error: null };
+      "indexer:getStatus": () => indexingRunner.getStatus(),
+      "projects:list": (payload) =>
+        queryService.listProjects({
+          ...payload,
+          providers: applyEnabledProviderFilter(payload.providers),
+        }),
+      "projects:delete": (payload) => {
+        const result = queryService.deleteProject(payload);
+        invalidateAllowedRootsCache();
+        return result;
+      },
+      "projects:getCombinedDetail": (payload) => queryService.getProjectCombinedDetail(payload),
+      "sessions:list": (payload) => queryService.listSessions(payload),
+      "sessions:listMany": (payload) => queryService.listSessionsMany(payload),
+      "sessions:getDetail": (payload) => queryService.getSessionDetail(payload),
+      "sessions:delete": (payload) => {
+        const result = queryService.deleteSession(payload);
+        invalidateAllowedRootsCache();
+        return result;
+      },
+      "bookmarks:listProject": (payload) => queryService.listProjectBookmarks(payload),
+      "bookmarks:getStates": (payload) => queryService.getBookmarkStates(payload),
+      "bookmarks:toggle": (payload) => queryService.toggleBookmark(payload),
+      "history:exportMessages": async (payload, event) =>
+        exportHistoryMessages({
+          browserWindow: BrowserWindow.fromWebContents(event.sender),
+          onProgress: (progress) => {
+            event.sender.send(HISTORY_EXPORT_PROGRESS_CHANNEL, progress);
+          },
+          queryService,
+          request: payload,
+        }),
+      "search:query": (payload) =>
+        queryService.runSearchQuery({
+          ...payload,
+          providers: applyEnabledProviderFilter(payload.providers),
+        }),
+      "path:openInFileManager": async (payload) => {
+        if (!isAbsolute(payload.path)) {
+          return { ok: false, error: "Path must be absolute." };
         }
-      } catch {
-        // Fall through to generic shell open.
-      }
-
-      const error = await shell.openPath(targetPath);
-      return {
-        ok: error.length === 0,
-        error: error.length > 0 ? error : null,
-      };
-    },
-    "dialog:pickExternalToolCommand": async () => {
-      const dialogResult = await dialog.showOpenDialog({
-        title: "Choose External Tool Command",
-        buttonLabel: "Choose Command",
-        properties: process.platform === "darwin" ? ["openFile", "openDirectory"] : ["openFile"],
-      });
-      if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
-        return { canceled: true, path: null, error: null };
-      }
-
-      const selectedPath = dialogResult.filePaths[0] ?? null;
-      if (!selectedPath) {
-        return { canceled: true, path: null, error: null };
-      }
-
-      const validationError = await validateExternalToolCommandPath(selectedPath);
-      if (validationError) {
-        return { canceled: false, path: null, error: validationError };
-      }
-
-      return { canceled: false, path: selectedPath, error: null };
-    },
-    "editor:listAvailable": (payload) => {
-      const paneState = options.appStateStore?.getPaneState() ?? null;
-      return listAvailableEditors(
-        payload.externalTools
-          ? {
-              ...(paneState ?? {}),
-              externalTools: payload.externalTools,
-            }
-          : paneState,
-      );
-    },
-    "editor:open": async (payload) => {
-      if ("filePath" in payload && payload.filePath) {
-        if (!isAbsolute(payload.filePath)) {
-          return {
-            ok: false,
-            error: "File path must be absolute.",
-          };
-        }
-        const targetPath = await resolveCanonicalPath(payload.filePath);
-        if (!isPathAllowedByRoots(targetPath, readAllowedRoots())) {
+        const targetPath = await resolveCanonicalPath(payload.path);
+        // Only permit shell-open for indexed workspaces and app-owned storage to avoid turning IPC
+        // into a generic arbitrary-path opener.
+        const allowedRoots = readAllowedRoots();
+        if (!isPathAllowedByRoots(targetPath, allowedRoots)) {
           return {
             ok: false,
             error: "Path is outside indexed projects and app storage roots.",
           };
         }
-      }
-      const paneState = options.appStateStore?.getPaneState() ?? null;
-      const paneStateOverride =
-        paneState ||
-        payload.externalTools ||
-        payload.preferredExternalEditor ||
-        payload.preferredExternalDiffTool ||
-        payload.terminalAppCommand
-          ? {
-              ...(paneState ?? {}),
-              ...(payload.externalTools ? { externalTools: payload.externalTools } : {}),
-              ...(payload.preferredExternalEditor
-                ? { preferredExternalEditor: payload.preferredExternalEditor }
-                : {}),
-              ...(payload.preferredExternalDiffTool
-                ? { preferredExternalDiffTool: payload.preferredExternalDiffTool }
-                : {}),
-              ...(payload.terminalAppCommand !== undefined
-                ? { terminalAppCommand: payload.terminalAppCommand }
-                : {}),
-            }
-          : null;
-      return openInEditor(payload, paneStateOverride);
-    },
-    "ui:getPaneState": () => {
-      const paneState = options.appStateStore?.getPaneState();
-      const result = Object.fromEntries(
-        Object.keys(paneStateBaseSchema.shape)
-          .filter((key) => key !== "systemMessageRegexRules")
-          .map((key) => [key, paneState?.[key as keyof typeof paneState] ?? null]),
-      );
-      return {
-        ...result,
-        // systemMessageRegexRules needs special resolution to fill in defaults for new providers.
-        systemMessageRegexRules: resolveSystemMessageRegexRules(paneState?.systemMessageRegexRules),
-      } as IpcResponse<"ui:getPaneState">;
-    },
-    "ui:setPaneState": (payload) => {
-      options.appStateStore?.setPaneState(payload);
-      return { ok: true };
-    },
-    "indexer:getConfig": () => {
-      const indexingState = options.appStateStore?.getIndexingState();
-      const result = Object.fromEntries(
-        Object.keys(indexerConfigBaseSchema.shape).map((key) => [
-          key,
-          indexingState?.[key as keyof typeof indexingState] ?? null,
-        ]),
-      );
-      return {
-        ...result,
-        enabledProviders: getEnabledProviders(),
-        removeMissingSessionsDuringIncrementalIndexing:
-          getRemoveMissingSessionsDuringIncrementalIndexing(),
-      } as IpcResponse<"indexer:getConfig">;
-    },
-    "indexer:setConfig": async (payload) => {
-      const previousEnabledProviders = getEnabledProviders();
-      options.appStateStore?.setIndexingState(payload);
-      const nextEnabledProviders = getEnabledProviders();
-      const enabledProvidersChanged =
-        previousEnabledProviders.length !== nextEnabledProviders.length ||
-        previousEnabledProviders.some((provider) => !nextEnabledProviders.includes(provider));
-      if (enabledProvidersChanged) {
-        const disabledProviders = previousEnabledProviders.filter(
-          (provider) => !nextEnabledProviders.includes(provider),
-        );
-        invalidateAllowedRootsCache();
-        if (disabledProviders.length > 0) {
-          try {
-            await indexingRunner.purgeProviders(disabledProviders, {
-              source: "manual_incremental",
-            });
-          } catch (error) {
-            if (options.onBackgroundError) {
-              options.onBackgroundError("provider disable cleanup failed", error, {
-                providers: disabledProviders,
-              });
-            } else {
-              console.error("[codetrail] provider disable cleanup failed", error);
-            }
+        try {
+          const fileStat = await stat(targetPath);
+          if (fileStat.isFile()) {
+            shell.showItemInFolder(targetPath);
+            return { ok: true, error: null };
           }
+        } catch {
+          // Fall through to generic shell open.
         }
-        if (runtime.fileWatcher && runtime.watcherDebounceMs !== null) {
-          try {
-            await startWatcherWithConfig(runtime.watcherDebounceMs);
-          } catch {
-            runtime.watcherDebounceMs = null;
-          }
-        }
-      }
-      void indexingRunner
-        .enqueue({ force: false }, { source: "manual_incremental" })
-        .catch((error) => {
-          if (options.onBackgroundError) {
-            options.onBackgroundError("provider enablement refresh failed", error);
-          } else {
-            console.error("[codetrail] provider enablement refresh failed", error);
-          }
-        });
-      return { ok: true };
-    },
-    "ui:getZoom": (_payload, event) => ({
-      percent: Math.round(event.sender.getZoomFactor() * 100),
-    }),
-    "ui:setZoom": (payload, event) => {
-      const currentPercent = Math.round(event.sender.getZoomFactor() * 100);
-      let nextPercent = currentPercent;
-      if ("percent" in payload) {
-        nextPercent = payload.percent;
-      } else if (payload.action === "reset") {
-        nextPercent = DEFAULT_ZOOM_PERCENT;
-      } else if (payload.action === "in") {
-        nextPercent = currentPercent + ZOOM_STEP_PERCENT;
-      } else {
-        nextPercent = currentPercent - ZOOM_STEP_PERCENT;
-      }
-      const clampedPercent = Math.round(
-        Math.max(MIN_ZOOM_PERCENT, Math.min(MAX_ZOOM_PERCENT, nextPercent)),
-      );
-      event.sender.setZoomFactor(clampedPercent / 100);
-      return {
-        percent: clampedPercent,
-      };
-    },
-    "watcher:start": async (payload) => {
-      try {
-        const startedWatcher = await startWatcherWithConfig(payload.debounceMs);
 
-        // Run one full incremental scan to bring the DB up to date before relying on events
-        void indexingRunner
-          .enqueue({ force: false }, { source: "watch_initial_scan" })
-          .catch((error: unknown) => {
-            if (options.onBackgroundError) {
-              options.onBackgroundError("watcher initial scan failed", error);
-              return;
-            }
-            console.error("[codetrail] watcher initial scan failed", error);
-          });
+        const error = await shell.openPath(targetPath);
         return {
-          ok: true,
-          watchedRoots: startedWatcher.watchedRoots,
-          backend: startedWatcher.backend,
+          ok: error.length === 0,
+          error: error.length > 0 ? error : null,
         };
-      } catch {
-        return { ok: false, watchedRoots: [], backend: "default" as const };
-      }
-    },
-    "watcher:getStatus": async () => {
-      return (
-        runtime.fileWatcher?.getStatus() ?? {
-          running: false,
-          processing: false,
-          pendingPathCount: 0,
+      },
+      "dialog:pickExternalToolCommand": async () => {
+        const dialogResult = await dialog.showOpenDialog({
+          title: "Choose External Tool Command",
+          buttonLabel: "Choose Command",
+          properties: process.platform === "darwin" ? ["openFile", "openDirectory"] : ["openFile"],
+        });
+        if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
+          return { canceled: true, path: null, error: null };
         }
-      );
+
+        const selectedPath = dialogResult.filePaths[0] ?? null;
+        if (!selectedPath) {
+          return { canceled: true, path: null, error: null };
+        }
+
+        const validationError = await validateExternalToolCommandPath(selectedPath);
+        if (validationError) {
+          return { canceled: false, path: null, error: validationError };
+        }
+
+        return { canceled: false, path: selectedPath, error: null };
+      },
+      "editor:listAvailable": (payload) => {
+        const paneState = options.appStateStore?.getPaneState() ?? null;
+        return listAvailableEditors(
+          payload.externalTools
+            ? {
+                ...(paneState ?? {}),
+                externalTools: payload.externalTools,
+              }
+            : paneState,
+        );
+      },
+      "editor:open": async (payload) => {
+        if ("filePath" in payload && payload.filePath) {
+          if (!isAbsolute(payload.filePath)) {
+            return {
+              ok: false,
+              error: "File path must be absolute.",
+            };
+          }
+          const targetPath = await resolveCanonicalPath(payload.filePath);
+          if (!isPathAllowedByRoots(targetPath, readAllowedRoots())) {
+            return {
+              ok: false,
+              error: "Path is outside indexed projects and app storage roots.",
+            };
+          }
+        }
+        const paneState = options.appStateStore?.getPaneState() ?? null;
+        const paneStateOverride =
+          paneState ||
+          payload.externalTools ||
+          payload.preferredExternalEditor ||
+          payload.preferredExternalDiffTool ||
+          payload.terminalAppCommand
+            ? {
+                ...(paneState ?? {}),
+                ...(payload.externalTools ? { externalTools: payload.externalTools } : {}),
+                ...(payload.preferredExternalEditor
+                  ? { preferredExternalEditor: payload.preferredExternalEditor }
+                  : {}),
+                ...(payload.preferredExternalDiffTool
+                  ? { preferredExternalDiffTool: payload.preferredExternalDiffTool }
+                  : {}),
+                ...(payload.terminalAppCommand !== undefined
+                  ? { terminalAppCommand: payload.terminalAppCommand }
+                  : {}),
+              }
+            : null;
+        return openInEditor(payload, paneStateOverride);
+      },
+      "ui:getPaneState": () => {
+        const paneState = options.appStateStore?.getPaneState();
+        const result = Object.fromEntries(
+          Object.keys(paneStateBaseSchema.shape)
+            .filter((key) => key !== "systemMessageRegexRules")
+            .map((key) => [key, paneState?.[key as keyof typeof paneState] ?? null]),
+        );
+        return {
+          ...result,
+          // systemMessageRegexRules needs special resolution to fill in defaults for new providers.
+          systemMessageRegexRules: resolveSystemMessageRegexRules(
+            paneState?.systemMessageRegexRules,
+          ),
+        } as IpcResponse<"ui:getPaneState">;
+      },
+      "ui:setPaneState": (payload) => {
+        const previousPaneState = options.appStateStore?.getPaneState() ?? null;
+        const previousLiveWatchEnabled = isLiveWatchEnabled();
+        options.appStateStore?.setPaneStateRuntimeOnly(payload);
+        const nextPaneState = options.appStateStore?.getPaneState() ?? null;
+        const nextLiveWatchEnabled = isLiveWatchEnabled();
+        flushDurablePaneStateFlagsIfChanged(previousPaneState, nextPaneState);
+        void syncLiveSessionStoreForPaneStateChange(
+          previousLiveWatchEnabled,
+          nextLiveWatchEnabled,
+        ).catch((error: unknown) => {
+          if (options.onBackgroundError) {
+            options.onBackgroundError("live watch feature toggle failed", error);
+            return;
+          }
+          console.error("[codetrail] live watch feature toggle failed", error);
+        });
+        return { ok: true };
+      },
+      "indexer:getConfig": () => {
+        const indexingState = options.appStateStore?.getIndexingState();
+        const result = Object.fromEntries(
+          Object.keys(indexerConfigBaseSchema.shape).map((key) => [
+            key,
+            indexingState?.[key as keyof typeof indexingState] ?? null,
+          ]),
+        );
+        return {
+          ...result,
+          enabledProviders: getEnabledProviders(),
+          removeMissingSessionsDuringIncrementalIndexing:
+            getRemoveMissingSessionsDuringIncrementalIndexing(),
+        } as IpcResponse<"indexer:getConfig">;
+      },
+      "indexer:setConfig": async (payload) => {
+        const previousEnabledProviders = getEnabledProviders();
+        options.appStateStore?.setIndexingState(payload);
+        const nextEnabledProviders = getEnabledProviders();
+        const enabledProvidersChanged =
+          previousEnabledProviders.length !== nextEnabledProviders.length ||
+          previousEnabledProviders.some((provider) => !nextEnabledProviders.includes(provider));
+        if (enabledProvidersChanged) {
+          const disabledProviders = previousEnabledProviders.filter(
+            (provider) => !nextEnabledProviders.includes(provider),
+          );
+          invalidateAllowedRootsCache();
+          if (disabledProviders.length > 0) {
+            try {
+              await indexingRunner.purgeProviders(disabledProviders, {
+                source: "manual_incremental",
+              });
+            } catch (error) {
+              if (options.onBackgroundError) {
+                options.onBackgroundError("provider disable cleanup failed", error, {
+                  providers: disabledProviders,
+                });
+              } else {
+                console.error("[codetrail] provider disable cleanup failed", error);
+              }
+            }
+          }
+          if (runtime.fileWatcher && runtime.watcherDebounceMs !== null) {
+            try {
+              await startWatcherWithConfig(runtime.watcherDebounceMs);
+            } catch {
+              runtime.watcherDebounceMs = null;
+            }
+          }
+        }
+        void indexingRunner
+          .enqueue({ force: false }, { source: "manual_incremental" })
+          .catch((error) => {
+            if (options.onBackgroundError) {
+              options.onBackgroundError("provider enablement refresh failed", error);
+            } else {
+              console.error("[codetrail] provider enablement refresh failed", error);
+            }
+          });
+        return { ok: true };
+      },
+      "ui:getZoom": (_payload, event) => ({
+        percent: Math.round(event.sender.getZoomFactor() * 100),
+      }),
+      "ui:setZoom": (payload, event) => {
+        const currentPercent = Math.round(event.sender.getZoomFactor() * 100);
+        let nextPercent = currentPercent;
+        if ("percent" in payload) {
+          nextPercent = payload.percent;
+        } else if (payload.action === "reset") {
+          nextPercent = DEFAULT_ZOOM_PERCENT;
+        } else if (payload.action === "in") {
+          nextPercent = currentPercent + ZOOM_STEP_PERCENT;
+        } else {
+          nextPercent = currentPercent - ZOOM_STEP_PERCENT;
+        }
+        const clampedPercent = Math.round(
+          Math.max(MIN_ZOOM_PERCENT, Math.min(MAX_ZOOM_PERCENT, nextPercent)),
+        );
+        event.sender.setZoomFactor(clampedPercent / 100);
+        return {
+          percent: clampedPercent,
+        };
+      },
+      "watcher:start": async (payload) => {
+        try {
+          const startedWatcher = await startWatcherWithConfig(payload.debounceMs);
+
+          // Run one full incremental scan to bring the DB up to date before relying on events
+          void indexingRunner
+            .enqueue({ force: false }, { source: "watch_initial_scan" })
+            .catch((error: unknown) => {
+              if (options.onBackgroundError) {
+                options.onBackgroundError("watcher initial scan failed", error);
+                return;
+              }
+              console.error("[codetrail] watcher initial scan failed", error);
+            });
+          return {
+            ok: true,
+            watchedRoots: startedWatcher.watchedRoots,
+            backend: startedWatcher.backend,
+          };
+        } catch {
+          return { ok: false, watchedRoots: [], backend: "default" as const };
+        }
+      },
+      "watcher:getStatus": async () => {
+        return (
+          runtime.fileWatcher?.getStatus() ?? {
+            running: false,
+            processing: false,
+            pendingPathCount: 0,
+          }
+        );
+      },
+      "watcher:getStats": async () => watchStatsStore.snapshot(),
+      "watcher:stop": async () => {
+        if (runtime.fileWatcher) {
+          await runtime.fileWatcher.stop();
+          runtime.fileWatcher = null;
+        }
+        runtime.watcherDebounceMs = null;
+        await syncLiveSessionStore();
+        return { ok: true };
+      },
+      "watcher:getLiveStatus": async () =>
+        runtime.liveSessionStore?.snapshot() ?? {
+          enabled: false,
+          revision: 0,
+          updatedAt: new Date().toISOString(),
+          providerCounts: createProviderRecord(() => 0),
+          sessions: [],
+          claudeHookState: createDefaultClaudeHookState({
+            appHomePath: app.getPath("home"),
+            appUserDataPath: app.getPath("userData"),
+          }),
+        },
+      "claudeHooks:install": async () => {
+        const liveSessionStore = runtime.liveSessionStore;
+        return {
+          ok: true as const,
+          state: liveSessionStore
+            ? await liveSessionStore.installClaudeHooks()
+            : createDefaultClaudeHookState({
+                appHomePath: app.getPath("home"),
+                appUserDataPath: app.getPath("userData"),
+                lastError: "Live watch is not available.",
+              }),
+        };
+      },
+      "claudeHooks:remove": async () => {
+        const liveSessionStore = runtime.liveSessionStore;
+        return {
+          ok: true as const,
+          state: liveSessionStore
+            ? await liveSessionStore.removeClaudeHooks()
+            : createDefaultClaudeHookState({
+                appHomePath: app.getPath("home"),
+                appUserDataPath: app.getPath("userData"),
+                lastError: "Live watch is not available.",
+              }),
+        };
+      },
     },
-    "watcher:getStats": async () => watchStatsStore.snapshot(),
-    "watcher:stop": async () => {
-      if (runtime.fileWatcher) {
-        await runtime.fileWatcher.stop();
-        runtime.fileWatcher = null;
-      }
-      runtime.watcherDebounceMs = null;
-      return { ok: true };
+    {
+      onValidationError: ({ channel, stage, error, payload }) => {
+        if (options.onBackgroundError) {
+          options.onBackgroundError(`IPC ${stage} validation failed for ${channel}`, error, {
+            payload,
+          });
+          return;
+        }
+        console.error(`[codetrail] IPC ${stage} validation failed for ${channel}`, error, payload);
+      },
     },
-  });
+  );
 
   if (options.runStartupIndexing ?? true) {
     void indexingRunner

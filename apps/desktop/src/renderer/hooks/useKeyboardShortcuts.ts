@@ -45,9 +45,9 @@ export function useKeyboardShortcuts(args: {
   focusGlobalSearch: () => void;
   focusSessionSearch: () => void;
   toggleFocusMode: () => void;
-  toggleScopedMessagesExpanded: () => void;
+  toggleAllMessagesExpanded: () => void;
   toggleHistoryCategory: (category: MessageCategory) => void;
-  toggleHistoryCategoryExpanded: (category: MessageCategory) => void;
+  toggleHistoryCategoryDefaultExpansion: (category: MessageCategory) => void;
   toggleProjectPaneCollapsed: () => void;
   toggleSessionPaneCollapsed: () => void;
   focusPreviousHistoryMessage: () => void;
@@ -58,6 +58,10 @@ export function useKeyboardShortcuts(args: {
   selectNextSession: () => void;
   selectPreviousProject: () => void;
   selectNextProject: () => void;
+  selectPreviousFocusedSession: () => void;
+  selectNextFocusedSession: () => void;
+  selectPreviousFocusedProject: () => void;
+  selectNextFocusedProject: () => void;
   handleProjectTreeArrow: (direction: "left" | "right") => void;
   handleProjectTreeEnter: () => void;
   pageHistoryMessagesUp: (options?: MessagePageOptions) => void;
@@ -90,7 +94,7 @@ export function useKeyboardShortcuts(args: {
               message: args.messageListRef.current,
             })
           : null;
-      const command = event.metaKey || event.ctrlKey;
+      const command = event.metaKey;
       const shift = event.shiftKey;
       const key = event.key.toLowerCase();
       const code = event.code;
@@ -116,7 +120,7 @@ export function useKeyboardShortcuts(args: {
         command,
         requireAlt: true,
         code,
-        onToggleCategory: args.toggleHistoryCategoryExpanded,
+        onToggleCategory: args.toggleHistoryCategoryDefaultExpansion,
       });
       if (handledExpandedCategory) {
         return;
@@ -242,12 +246,12 @@ function handleFocusedPaneArrowShortcut(context: ShortcutContext): boolean {
   }
   if (context.focusedPane === "project" && context.event.key === "ArrowUp") {
     context.event.preventDefault();
-    context.selectPreviousProject();
+    context.selectPreviousFocusedProject();
     return true;
   }
   if (context.focusedPane === "project" && context.event.key === "ArrowDown") {
     context.event.preventDefault();
-    context.selectNextProject();
+    context.selectNextFocusedProject();
     return true;
   }
   if (context.focusedPane === "project" && context.event.key === "ArrowLeft") {
@@ -267,12 +271,12 @@ function handleFocusedPaneArrowShortcut(context: ShortcutContext): boolean {
   }
   if (context.focusedPane === "session" && context.event.key === "ArrowUp") {
     context.event.preventDefault();
-    context.selectPreviousSession();
+    context.selectPreviousFocusedSession();
     return true;
   }
   if (context.focusedPane === "session" && context.event.key === "ArrowDown") {
     context.event.preventDefault();
-    context.selectNextSession();
+    context.selectNextFocusedSession();
     return true;
   }
   return false;
@@ -588,7 +592,7 @@ function handleHistoryCommandShortcut(context: ShortcutContext): boolean {
   }
   if (context.mainView === "history" && context.key === "e") {
     context.event.preventDefault();
-    context.toggleScopedMessagesExpanded();
+    context.toggleAllMessagesExpanded();
     return true;
   }
   if (context.mainView === "history" && context.shift && context.key === "b") {

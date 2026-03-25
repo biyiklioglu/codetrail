@@ -2,6 +2,7 @@ import { vi } from "vitest";
 
 import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core/browser";
 
+import type { AppCommand } from "../../shared/appCommands";
 import type { HistoryExportProgressPayload } from "../../shared/historyExport";
 import type { CodetrailClient } from "../lib/codetrailClient";
 
@@ -15,6 +16,7 @@ export type MockCodetrailClient = CodetrailClient & {
   onHistoryExportProgress: ReturnType<
     typeof vi.fn<(listener: (payload: HistoryExportProgressPayload) => void) => () => void>
   >;
+  onAppCommand: ReturnType<typeof vi.fn<(listener: (command: AppCommand) => void) => () => void>>;
 };
 
 export function createMockCodetrailClient(): MockCodetrailClient {
@@ -24,6 +26,9 @@ export function createMockCodetrailClient(): MockCodetrailClient {
   const onHistoryExportProgress = vi.fn<
     (listener: (payload: HistoryExportProgressPayload) => void) => () => void
   >(() => () => undefined);
+  const onAppCommand = vi.fn<(listener: (command: AppCommand) => void) => () => void>(
+    () => () => undefined,
+  );
 
-  return { invoke, onHistoryExportProgress };
+  return { invoke, onHistoryExportProgress, onAppCommand };
 }

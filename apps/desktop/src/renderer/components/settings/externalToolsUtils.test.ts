@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createCustomExternalTool, createKnownExternalTool } from "../../../shared/uiPreferences";
-import {
-  moveToolById,
-  parseSingleLineArgs,
-  serializeSingleLineArgs,
-} from "./externalToolsUtils";
+import { moveToolById, parseSingleLineArgs, serializeSingleLineArgs } from "./externalToolsUtils";
 
 describe("externalToolsUtils", () => {
   it("keeps preset moves inside the preset section", () => {

@@ -24,6 +24,11 @@ const tableStatements = [
     provider TEXT NOT NULL,
     name TEXT NOT NULL,
     path TEXT NOT NULL,
+    provider_project_key TEXT,
+    repository_url TEXT,
+    resolution_state TEXT,
+    resolution_source TEXT,
+    metadata_json TEXT,
     name_folded TEXT GENERATED ALWAYS AS (LOWER(name)) STORED,
     path_folded TEXT GENERATED ALWAYS AS (LOWER(path)) STORED,
     created_at TEXT NOT NULL,
@@ -41,6 +46,20 @@ const tableStatements = [
     duration_ms INTEGER,
     git_branch TEXT,
     cwd TEXT,
+    session_identity TEXT,
+    provider_session_id TEXT,
+    session_kind TEXT,
+    canonical_project_path TEXT,
+    repository_url TEXT,
+    git_commit_hash TEXT,
+    lineage_parent_id TEXT,
+    provider_client TEXT,
+    provider_source TEXT,
+    provider_client_version TEXT,
+    resolution_source TEXT,
+    metadata_json TEXT,
+    worktree_label TEXT,
+    worktree_source TEXT,
     message_count INTEGER NOT NULL DEFAULT 0,
     token_input_total INTEGER NOT NULL DEFAULT 0,
     token_output_total INTEGER NOT NULL DEFAULT 0,
@@ -466,7 +485,11 @@ function tableExists(db: SqliteDatabase, tableName: string): boolean {
   return row?.found === 1;
 }
 
-function tableHasColumns(db: SqliteDatabase, tableName: string, requiredColumns: string[]): boolean {
+function tableHasColumns(
+  db: SqliteDatabase,
+  tableName: string,
+  requiredColumns: string[],
+): boolean {
   const columns = new Set(
     (
       db.prepare(`PRAGMA table_xinfo(${JSON.stringify(tableName)})`).all() as Array<{

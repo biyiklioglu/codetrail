@@ -1,58 +1,128 @@
 // @vitest-environment jsdom
 
 import type { ComponentProps } from "react";
+import { useMemo } from "react";
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import type { ProjectSummary, SessionSummary, TreeAutoRevealSessionRequest } from "../../app/types";
 import { SEARCH_PLACEHOLDERS } from "../../lib/searchLabels";
 import { ProjectPane } from "./ProjectPane";
+import { useProjectPaneTreeState } from "./useProjectPaneTreeState";
 
 type ProjectPaneOverrides = {
-  data?: Partial<ComponentProps<typeof ProjectPane>["data"]>;
+  data?: Partial<ComponentProps<typeof ProjectPane>["data"]> & {
+    autoRevealSessionRequest?: TreeAutoRevealSessionRequest | null;
+  };
   sorting?: Partial<ComponentProps<typeof ProjectPane>["sorting"]>;
   preferences?: Partial<ComponentProps<typeof ProjectPane>["preferences"]>;
   capabilities?: Partial<ComponentProps<typeof ProjectPane>["capabilities"]>;
-  actions?: Partial<ComponentProps<typeof ProjectPane>["actions"]>;
+  actions?: Partial<ComponentProps<typeof ProjectPane>["actions"]> & {
+    onEnsureTreeProjectSessionsLoaded?: (projectId: string) => void;
+    onConsumeAutoRevealSessionRequest?: () => void;
+  };
 };
 
-const projects = [
-  {
+function createProjectSummary(
+  overrides: Partial<ProjectSummary> & Pick<ProjectSummary, "id" | "provider" | "name" | "path">,
+): ProjectSummary {
+  const { id, provider, name, path, ...rest } = overrides;
+  return {
+    id,
+    provider,
+    name,
+    path,
+    providerProjectKey: null,
+    repositoryUrl: null,
+    resolutionState: null,
+    resolutionSource: null,
+    sessionCount: 1,
+    messageCount: 0,
+    bookmarkCount: 0,
+    lastActivity: null,
+    ...rest,
+  };
+}
+
+function createSessionSummary(
+  overrides: Partial<SessionSummary> & Pick<SessionSummary, "id" | "projectId">,
+): SessionSummary {
+  const { id, projectId, ...rest } = overrides;
+  return {
+    id,
+    projectId,
+    provider: "claude",
+    filePath: `/tmp/${id}.jsonl`,
+    title: id,
+    modelNames: "claude-opus",
+    startedAt: "2026-03-01T10:00:00.000Z",
+    endedAt: "2026-03-01T10:00:05.000Z",
+    durationMs: 5000,
+    gitBranch: "main",
+    cwd: "/workspace",
+    sessionIdentity: null,
+    providerSessionId: null,
+    sessionKind: null,
+    canonicalProjectPath: null,
+    repositoryUrl: null,
+    gitCommitHash: null,
+    lineageParentId: null,
+    providerClient: null,
+    providerSource: null,
+    providerClientVersion: null,
+    resolutionSource: null,
+    worktreeLabel: null,
+    worktreeSource: null,
+    messageCount: 0,
+    bookmarkCount: 0,
+    tokenInputTotal: 0,
+    tokenOutputTotal: 0,
+    ...rest,
+  };
+}
+
+const projects: ProjectSummary[] = [
+  createProjectSummary({
     id: "project_1",
-    provider: "claude" as const,
+    provider: "claude",
     name: "Project One",
     path: "/Users/test/project-one",
     sessionCount: 2,
     messageCount: 12,
-    bookmarkCount: 0,
     lastActivity: "2026-03-01T12:00:00.000Z",
-  },
-  {
+  }),
+  createProjectSummary({
     id: "project_2",
-    provider: "codex" as const,
+    provider: "codex",
     name: "Project Two",
     path: "/Users/test/project-two",
     sessionCount: 1,
     messageCount: 6,
-    bookmarkCount: 0,
     lastActivity: "2026-03-01T13:00:00.000Z",
-  },
-  {
+  }),
+  createProjectSummary({
     id: "project_3",
-    provider: "gemini" as const,
+    provider: "gemini",
     name: "Project Three",
     path: "/tmp/project-three",
     sessionCount: 7,
     messageCount: 22,
-    bookmarkCount: 0,
     lastActivity: "2026-03-01T10:00:00.000Z",
-  },
+  }),
 ];
 
 function createProjectPaneProps(
   overrides: ProjectPaneOverrides = {},
 ): ComponentProps<typeof ProjectPane> {
+  const { autoRevealSessionRequest: _autoRevealSessionRequest, ...dataOverrides } =
+    overrides.data ?? {};
+  const {
+    onEnsureTreeProjectSessionsLoaded: _onEnsureTreeProjectSessionsLoaded,
+    onConsumeAutoRevealSessionRequest: _onConsumeAutoRevealSessionRequest,
+    ...actionOverrides
+  } = overrides.actions ?? {};
   const data: ComponentProps<typeof ProjectPane>["data"] = {
     sortedProjects: projects,
     selectedProjectId: "project_1",
@@ -85,6 +155,7 @@ function createProjectPaneProps(
     onSetSortField: vi.fn(),
     onToggleSortDirection: vi.fn(),
     onToggleViewMode: vi.fn(),
+    onToggleHideSessionsPaneInTreeView: vi.fn(),
     onToggleSingleClickFoldersExpand: vi.fn(),
     onToggleSingleClickProjectsExpand: vi.fn(),
     onCopyProjectDetails: vi.fn(),
@@ -97,16 +168,58 @@ function createProjectPaneProps(
   };
 
   return {
-    data: { ...data, ...overrides.data },
+    data: { ...data, ...dataOverrides },
     sorting: { ...sorting, ...overrides.sorting },
     preferences: { ...preferences, ...overrides.preferences },
     capabilities: { ...capabilities, ...overrides.capabilities },
-    actions: { ...actions, ...overrides.actions },
+    actions: { ...actions, ...actionOverrides },
   };
 }
 
+function ProjectPaneHarness({ overrides }: { overrides?: ProjectPaneOverrides }) {
+  const props = useMemo(() => createProjectPaneProps(overrides), [overrides]);
+  const treeState = useProjectPaneTreeState({
+    sortedProjects: props.data.sortedProjects,
+    selectedProjectId: props.data.selectedProjectId,
+    selectedSessionId: props.data.selectedSessionId ?? "",
+    sortField: props.sorting.sortField,
+    sortDirection: props.sorting.sortDirection,
+    viewMode: props.data.viewMode,
+    updateSource: props.data.updateSource,
+    historyMode: props.data.historyMode ?? "project_all",
+    projectProvidersKey: props.data.projectProviders.join(","),
+    projectQueryInput: props.data.projectQueryInput,
+    onEnsureTreeProjectSessionsLoaded:
+      overrides?.actions?.onEnsureTreeProjectSessionsLoaded ?? vi.fn(),
+    autoRevealSessionRequest: overrides?.data?.autoRevealSessionRequest ?? null,
+    onConsumeAutoRevealSessionRequest:
+      overrides?.actions?.onConsumeAutoRevealSessionRequest ?? vi.fn(),
+  });
+
+  return (
+    <ProjectPane
+      {...props}
+      data={{
+        ...props.data,
+        folderGroups: treeState.folderGroups,
+        expandedFolderIdSet: treeState.expandedFolderIdSet,
+        expandedProjectIds: treeState.expandedProjectIds,
+        allVisibleFoldersExpanded: treeState.allVisibleFoldersExpanded,
+        treeFocusedRow: treeState.treeFocusedRow,
+      }}
+      actions={{
+        ...props.actions,
+        onSetTreeFocusedRow: treeState.setTreeFocusedRow,
+        onToggleFolder: treeState.handleToggleFolder,
+        onToggleAllFolders: treeState.handleToggleAllFolders,
+        onToggleProjectExpansion: treeState.handleToggleProjectExpansion,
+      }}
+    />
+  );
+}
+
 function renderProjectPane(overrides: ProjectPaneOverrides = {}) {
-  return render(<ProjectPane {...createProjectPaneProps(overrides)} />);
+  return render(<ProjectPaneHarness overrides={overrides} />);
 }
 
 describe("ProjectPane", () => {
@@ -136,6 +249,7 @@ describe("ProjectPane", () => {
     const onSetSortField = vi.fn();
     const onToggleSortDirection = vi.fn();
     const onToggleViewMode = vi.fn();
+    const onToggleHideSessionsPaneInTreeView = vi.fn();
     const onProjectQueryChange = vi.fn();
     const onToggleProvider = vi.fn();
     const onSelectProject = vi.fn();
@@ -148,6 +262,7 @@ describe("ProjectPane", () => {
         onSetSortField,
         onToggleSortDirection,
         onToggleViewMode,
+        onToggleHideSessionsPaneInTreeView,
         onProjectQueryChange,
         onToggleProvider,
         onSelectProject,
@@ -161,7 +276,7 @@ describe("ProjectPane", () => {
     expect(screen.getByText("+3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Collapse Projects pane" })).toHaveAttribute(
       "title",
-      "Collapse Projects (Cmd/Ctrl+B)",
+      "Collapse Projects  ⌘B",
     );
 
     await user.click(screen.getByRole("button", { name: "Collapse Projects pane" }));
@@ -183,6 +298,7 @@ describe("ProjectPane", () => {
     expect(onSetSortField).toHaveBeenCalledWith("name");
     expect(onToggleSortDirection).toHaveBeenCalledTimes(1);
     expect(onToggleViewMode).toHaveBeenCalledTimes(1);
+    expect(onToggleHideSessionsPaneInTreeView).not.toHaveBeenCalled();
     expect(onProjectQueryChange).toHaveBeenCalled();
     expect(onToggleProvider).toHaveBeenCalledWith("gemini");
     expect(onSelectProject).toHaveBeenCalledWith("project_2");
@@ -210,7 +326,7 @@ describe("ProjectPane", () => {
     expect(screen.getByRole("button", { name: "Expand Projects pane" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand Projects pane" })).toHaveAttribute(
       "title",
-      "Expand Projects (Cmd/Ctrl+B)",
+      "Expand Projects  ⌘B",
     );
     expect(screen.queryByRole("button", { name: "Project sort field: Last Active" })).toBeNull();
     expect(
@@ -261,10 +377,29 @@ describe("ProjectPane", () => {
     expect(screen.getByRole("button", { name: "Expand all folders" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Project One/i })).toBeNull();
 
-    rerender(<ProjectPane {...createProjectPaneProps({ data: { viewMode: "list" } })} />);
+    rerender(<ProjectPaneHarness overrides={{ data: { viewMode: "list" } }} />);
 
     expect(screen.queryByRole("button", { name: "Expand all folders" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Collapse all folders" })).toBeNull();
+  });
+
+  it("offers a tree-view toggle to hide the Sessions pane from the project overflow menu", async () => {
+    const user = userEvent.setup();
+    const onToggleHideSessionsPaneInTreeView = vi.fn();
+
+    renderProjectPane({
+      data: {
+        viewMode: "tree",
+      },
+      actions: {
+        onToggleHideSessionsPaneInTreeView,
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Project options" }));
+    await user.click(screen.getByRole("button", { name: "Hide Sessions pane in tree view" }));
+
+    expect(onToggleHideSessionsPaneInTreeView).toHaveBeenCalledTimes(1);
   });
 
   it("resets seen folders when switching away from tree view and back", async () => {
@@ -279,17 +414,9 @@ describe("ProjectPane", () => {
     });
     expect(screen.queryByRole("button", { name: /Project One/i })).toBeNull();
 
-    rerender(
-      <ProjectPane
-        {...createProjectPaneProps({ data: { viewMode: "list", projectUpdates: {} } })}
-      />,
-    );
+    rerender(<ProjectPaneHarness overrides={{ data: { viewMode: "list", projectUpdates: {} } }} />);
 
-    rerender(
-      <ProjectPane
-        {...createProjectPaneProps({ data: { viewMode: "tree", projectUpdates: {} } })}
-      />,
-    );
+    rerender(<ProjectPaneHarness overrides={{ data: { viewMode: "tree", projectUpdates: {} } }} />);
 
     expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
   });
@@ -308,40 +435,26 @@ describe("ProjectPane", () => {
         selectedSessionId: "session_2",
         treeProjectSessionsByProjectId: {
           project_1: [
-            {
+            createSessionSummary({
               id: "session_1",
               projectId: "project_1",
-              provider: "claude",
               filePath: "/tmp/session-1.jsonl",
               title: "Session One",
-              modelNames: "claude-opus",
-              startedAt: "2026-03-01T10:00:00.000Z",
-              endedAt: "2026-03-01T10:00:05.000Z",
-              durationMs: 5000,
-              gitBranch: "main",
-              cwd: "/workspace",
               messageCount: 3,
-              bookmarkCount: 0,
               tokenInputTotal: 10,
               tokenOutputTotal: 8,
-            },
-            {
+            }),
+            createSessionSummary({
               id: "session_2",
               projectId: "project_1",
-              provider: "claude",
               filePath: "/tmp/session-2.jsonl",
               title: "Session Two",
-              modelNames: "claude-opus",
               startedAt: "2026-03-01T11:00:00.000Z",
               endedAt: "2026-03-01T11:00:05.000Z",
-              durationMs: 5000,
-              gitBranch: "main",
-              cwd: "/workspace",
               messageCount: 4,
-              bookmarkCount: 0,
               tokenInputTotal: 12,
               tokenOutputTotal: 9,
-            },
+            }),
           ],
         },
       },
@@ -369,40 +482,26 @@ describe("ProjectPane", () => {
         selectedProjectId: "project_1",
         treeProjectSessionsByProjectId: {
           project_1: [
-            {
+            createSessionSummary({
               id: "session_1",
               projectId: "project_1",
-              provider: "claude",
               filePath: "/tmp/session-1.jsonl",
               title: "Session One",
-              modelNames: "claude-opus",
-              startedAt: "2026-03-01T10:00:00.000Z",
-              endedAt: "2026-03-01T10:00:05.000Z",
-              durationMs: 5000,
-              gitBranch: "main",
-              cwd: "/workspace",
               messageCount: 3,
-              bookmarkCount: 0,
               tokenInputTotal: 10,
               tokenOutputTotal: 8,
-            },
-            {
+            }),
+            createSessionSummary({
               id: "session_2",
               projectId: "project_1",
-              provider: "claude",
               filePath: "/tmp/session-2.jsonl",
               title: "Session Two",
-              modelNames: "claude-opus",
               startedAt: "2026-03-01T11:00:00.000Z",
               endedAt: "2026-03-01T11:00:05.000Z",
-              durationMs: 5000,
-              gitBranch: "main",
-              cwd: "/workspace",
               messageCount: 4,
-              bookmarkCount: 0,
               tokenInputTotal: 12,
               tokenOutputTotal: 9,
-            },
+            }),
           ],
         },
       },
@@ -422,8 +521,8 @@ describe("ProjectPane", () => {
     scrollIntoView.mockClear();
 
     rerender(
-      <ProjectPane
-        {...createProjectPaneProps({
+      <ProjectPaneHarness
+        overrides={{
           data: {
             selectedSessionId: "session_2",
             viewMode: "tree",
@@ -431,40 +530,26 @@ describe("ProjectPane", () => {
             projectUpdates: {},
             treeProjectSessionsByProjectId: {
               project_1: [
-                {
+                createSessionSummary({
                   id: "session_1",
                   projectId: "project_1",
-                  provider: "claude",
                   filePath: "/tmp/session-1.jsonl",
                   title: "Session One",
-                  modelNames: "claude-opus",
-                  startedAt: "2026-03-01T10:00:00.000Z",
-                  endedAt: "2026-03-01T10:00:05.000Z",
-                  durationMs: 5000,
-                  gitBranch: "main",
-                  cwd: "/workspace",
                   messageCount: 3,
-                  bookmarkCount: 0,
                   tokenInputTotal: 10,
                   tokenOutputTotal: 8,
-                },
-                {
+                }),
+                createSessionSummary({
                   id: "session_2",
                   projectId: "project_1",
-                  provider: "claude",
                   filePath: "/tmp/session-2.jsonl",
                   title: "Session Two",
-                  modelNames: "claude-opus",
                   startedAt: "2026-03-01T11:00:00.000Z",
                   endedAt: "2026-03-01T11:00:05.000Z",
-                  durationMs: 5000,
-                  gitBranch: "main",
-                  cwd: "/workspace",
                   messageCount: 4,
-                  bookmarkCount: 0,
                   tokenInputTotal: 12,
                   tokenOutputTotal: 9,
-                },
+                }),
               ],
             },
           },
@@ -474,11 +559,66 @@ describe("ProjectPane", () => {
             onSelectProjectBookmarks: vi.fn(),
             onEnsureTreeProjectSessionsLoaded: vi.fn(),
           },
-        })}
+        }}
       />,
     );
 
     expect(screen.getByRole("button", { name: /Session Two/i })).toBeInTheDocument();
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("auto-expands and reveals a session only for explicit tree reveal requests", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      value: scrollIntoView,
+      configurable: true,
+    });
+    const onEnsureTreeProjectSessionsLoaded = vi.fn();
+    const onConsumeAutoRevealSessionRequest = vi.fn();
+
+    renderProjectPane({
+      data: {
+        viewMode: "tree",
+        historyMode: "project_all",
+        selectedProjectId: "project_1",
+        autoRevealSessionRequest: {
+          projectId: "project_1",
+          sessionId: "session_2",
+        },
+        treeProjectSessionsByProjectId: {
+          project_1: [
+            createSessionSummary({
+              id: "session_1",
+              projectId: "project_1",
+              filePath: "/tmp/session-1.jsonl",
+              title: "Session One",
+              messageCount: 3,
+              tokenInputTotal: 10,
+              tokenOutputTotal: 8,
+            }),
+            createSessionSummary({
+              id: "session_2",
+              projectId: "project_1",
+              filePath: "/tmp/session-2.jsonl",
+              title: "Session Two",
+              startedAt: "2026-03-01T11:00:00.000Z",
+              endedAt: "2026-03-01T11:00:05.000Z",
+              messageCount: 4,
+              tokenInputTotal: 12,
+              tokenOutputTotal: 9,
+            }),
+          ],
+        },
+      },
+      actions: {
+        onEnsureTreeProjectSessionsLoaded,
+        onConsumeAutoRevealSessionRequest,
+      },
+    });
+
+    expect(await screen.findByRole("button", { name: /Session Two/i })).toBeInTheDocument();
+    expect(onEnsureTreeProjectSessionsLoaded).toHaveBeenCalledWith("project_1");
+    expect(onConsumeAutoRevealSessionRequest).toHaveBeenCalled();
     expect(scrollIntoView).toHaveBeenCalled();
   });
 
@@ -594,8 +734,8 @@ describe("ProjectPane", () => {
     expect(onToggleSingleClickProjectsExpand).toHaveBeenCalledTimes(1);
 
     rerender(
-      <ProjectPane
-        {...createProjectPaneProps({
+      <ProjectPaneHarness
+        overrides={{
           data: {
             viewMode: "tree",
             historyMode: "project_all",
@@ -628,7 +768,7 @@ describe("ProjectPane", () => {
             onDeleteProject: vi.fn(),
             onDeleteSession: vi.fn(),
           },
-        })}
+        }}
       />,
     );
 
@@ -637,8 +777,8 @@ describe("ProjectPane", () => {
     expect(screen.queryByRole("button", { name: /Project One/i })).toBeNull();
 
     rerender(
-      <ProjectPane
-        {...createProjectPaneProps({
+      <ProjectPaneHarness
+        overrides={{
           data: {
             viewMode: "tree",
             historyMode: "project_all",
@@ -671,7 +811,7 @@ describe("ProjectPane", () => {
             onDeleteProject: vi.fn(),
             onDeleteSession: vi.fn(),
           },
-        })}
+        }}
       />,
     );
 
@@ -699,10 +839,9 @@ describe("ProjectPane", () => {
         sortedProjects: [{ ...projects[0]!, bookmarkCount: 3 }],
         treeProjectSessionsByProjectId: {
           project_1: [
-            {
+            createSessionSummary({
               id: "session_1",
               projectId: "project_1",
-              provider: "claude",
               filePath: "/Users/test/project-one/session.jsonl",
               title: "Investigate markdown rendering",
               modelNames: "claude-opus-4-1",
@@ -715,7 +854,7 @@ describe("ProjectPane", () => {
               bookmarkCount: 2,
               tokenInputTotal: 10,
               tokenOutputTotal: 20,
-            },
+            }),
           ],
         },
       },
@@ -759,10 +898,9 @@ describe("ProjectPane", () => {
         sortedProjects: [projects[0]!],
         treeProjectSessionsByProjectId: {
           project_1: [
-            {
+            createSessionSummary({
               id: "session_1",
               projectId: "project_1",
-              provider: "claude",
               filePath: "/Users/test/project-one/session.jsonl",
               title: "Investigate markdown rendering",
               modelNames: "claude-opus-4-1",
@@ -775,7 +913,7 @@ describe("ProjectPane", () => {
               bookmarkCount: 2,
               tokenInputTotal: 10,
               tokenOutputTotal: 20,
-            },
+            }),
           ],
         },
       },
@@ -830,8 +968,8 @@ describe("ProjectPane", () => {
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
     rerender(
-      <ProjectPane
-        {...createProjectPaneProps({
+      <ProjectPaneHarness
+        overrides={{
           data: {
             sortedProjects: [projects[2]!, projects[0]!, projects[1]!],
             selectedProjectId: "project_1",
@@ -856,7 +994,7 @@ describe("ProjectPane", () => {
             onDeleteProject: vi.fn(),
             onDeleteSession: vi.fn(),
           },
-        })}
+        }}
       />,
     );
 
@@ -886,8 +1024,8 @@ describe("ProjectPane", () => {
     await user.click(screen.getByRole("button", { name: "~/project-one, 1 projects" }));
 
     rerender(
-      <ProjectPane
-        {...createProjectPaneProps({
+      <ProjectPaneHarness
+        overrides={{
           data: {
             sortedProjects: [projects[0]!, projects[1]!],
             selectedProjectId: "",
@@ -913,7 +1051,7 @@ describe("ProjectPane", () => {
             onDeleteProject: vi.fn(),
             onDeleteSession: vi.fn(),
           },
-        })}
+        }}
       />,
     );
 

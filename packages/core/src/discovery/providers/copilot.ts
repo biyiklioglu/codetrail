@@ -1,5 +1,6 @@
 import { basename, extname, join } from "node:path";
 
+import { compactMetadata } from "../../metadata";
 import {
   type ResolvedDiscoveryDependencies,
   decodeFileUrlPath,
@@ -59,10 +60,20 @@ function toDiscoveredCopilotFile(
   const unresolvedProject = !projectPath;
   const sourceSessionId = basename(filePath, ".json");
   const sessionIdentity = providerSessionIdentity("copilot", sourceSessionId, filePath);
+  const sessionContent = parseJsonFile<{
+    version?: number;
+    initialLocation?: string;
+    isImported?: boolean;
+    sessionId?: string;
+  }>(filePath, dependencies);
+  const initialLocation =
+    typeof sessionContent?.initialLocation === "string" ? sessionContent.initialLocation : null;
+  const isImported = sessionContent?.isImported === true;
 
   return {
     provider: "copilot",
     projectPath: projectPath ?? "",
+    canonicalProjectPath: projectPath ?? "",
     projectName,
     sessionIdentity,
     sourceSessionId,
@@ -75,6 +86,26 @@ function toDiscoveredCopilotFile(
       unresolvedProject,
       gitBranch: null,
       cwd: projectPath || null,
+      worktreeLabel: null,
+      worktreeSource: null,
+      repositoryUrl: null,
+      forkedFromSessionId: null,
+      parentSessionCwd: null,
+      providerProjectKey: workspaceId,
+      providerSessionId:
+        typeof sessionContent?.sessionId === "string" ? sessionContent.sessionId : sourceSessionId,
+      sessionKind: isImported ? "imported" : "regular",
+      gitCommitHash: null,
+      providerClient: "GitHub Copilot",
+      providerSource: null,
+      providerClientVersion:
+        typeof sessionContent?.version === "number" ? String(sessionContent.version) : null,
+      lineageParentId: null,
+      resolutionSource: projectPath ? "workspace_json" : "unresolved",
+      projectMetadata: null,
+      sessionMetadata: compactMetadata({
+        initialLocation: initialLocation && initialLocation !== "panel" ? initialLocation : null,
+      }),
     },
   };
 }

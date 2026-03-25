@@ -16,7 +16,10 @@ export type ToolbarIconName =
   | "zoomReset"
   | "expandAll"
   | "collapseAll"
+  | "chevronsLeft"
   | "chevronLeft"
+  | "chevronRight"
+  | "chevronsRight"
   | "bookmark"
   | "folderOpen"
   | "trash"
@@ -36,7 +39,8 @@ const TOOLBAR_ICON_PATHS = {
   help: "M12 22a10 10 0 1 0 0-20a10 10 0 0 0 0 20M9.1 9a3 3 0 1 1 5.8 1c0 2-3 2-3 4M12 17h.01",
   theme:
     "M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41M12 16a4 4 0 1 0 0-8a4 4 0 0 0 0 8",
-  codeTheme: "M4 5h16v14H4zM4 9h16M7 7h2M9 13l-2 2 2 2M15 13l2 2-2 2M12.5 12l-1 8",
+  codeTheme:
+    "M5 9.5c1.5-2 3.3-3 5.4-3 2.7 0 4.4 1.2 6.5 1.2 1 0 1.9-.3 2.9-.9M5 14.5c1.5-2 3.3-3 5.4-3 2.7 0 4.4 1.2 6.5 1.2 1 0 1.9-.3 2.9-.9M5 19.5c1.5-2 3.3-3 5.4-3 2.7 0 4.4 1.2 6.5 1.2 1 0 1.9-.3 2.9-.9",
   settings:
     "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 15a3 3 0 1 1 0-6a3 3 0 0 1 0 6z",
   zoomIn: "M12 7v10M7 12h10",
@@ -44,8 +48,11 @@ const TOOLBAR_ICON_PATHS = {
   zoomReset: "M12 6v5l3 2M6 5h12v14H6z",
   expandAll: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
   collapseAll: "M7 7h10v10H7z",
+  chevronsLeft: "M11 5l-6 7 6 7M19 5l-6 7 6 7",
   chevronLeft: "M15 5l-6 7 6 7",
+  chevronRight: "M9 5l6 7-6 7",
   bookmark: "M6 4h12v16l-6-4-6 4z",
+  chevronsRight: "M5 5l6 7-6 7M13 5l6 7-6 7",
   export: "M12 3v11M8 10l4 4 4-4M5 19h14",
   sortAsc: "M7 17V6M7 6l-3 3M7 6l3 3M12 17h8M12 13h6M12 9h4M12 5h2",
   sortDesc: "M7 6v11M7 17l-3-3M7 17l3-3M12 17h2M12 13h4M12 9h6M12 5h8",
@@ -69,7 +76,10 @@ const TOOLBAR_ICON_TITLES: Record<ToolbarIconName, string> = {
   zoomReset: "Reset zoom",
   expandAll: "Expand all",
   collapseAll: "Collapse all",
+  chevronsLeft: "First page",
   chevronLeft: "Back",
+  chevronRight: "Next",
+  chevronsRight: "Last page",
   bookmark: "Bookmark",
   folderOpen: "Open folder",
   trash: "Delete",

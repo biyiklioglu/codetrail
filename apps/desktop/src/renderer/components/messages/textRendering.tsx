@@ -5,6 +5,7 @@ import {
   cloneElement,
   isValidElement,
   startTransition,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -246,7 +247,9 @@ function resolveViewerShikiThemes(themeVariant: string, shikiTheme: string) {
   const defaultTheme = getDefaultShikiThemeForUiTheme(
     themeVariant as Parameters<typeof getDefaultShikiThemeForUiTheme>[0],
   );
-  const family = getThemeFamily(themeVariant as Parameters<typeof getDefaultShikiThemeForUiTheme>[0]);
+  const family = getThemeFamily(
+    themeVariant as Parameters<typeof getDefaultShikiThemeForUiTheme>[0],
+  );
   const selectedTheme = resolveShikiThemeForUiTheme(
     themeVariant as Parameters<typeof resolveShikiThemeForUiTheme>[0],
     family === "dark" ? shikiTheme : null,
@@ -1145,14 +1148,12 @@ function ContentViewer({
     [diffModel, kind, visibleCount],
   );
   const diffVisualOffsets = useMemo(
-    () =>
-      kind === "diff" ? buildDiffVisualOffsets(visibleDiffRows, diffMode) : [0],
+    () => (kind === "diff" ? buildDiffVisualOffsets(visibleDiffRows, diffMode) : [0]),
     [diffMode, kind, visibleDiffRows],
   );
   const diffVisualRowCount =
-    kind === "diff" ? diffVisualOffsets[diffVisualOffsets.length - 1] ?? 0 : 0;
-  const virtualizeDiff =
-    !wrap && kind === "diff" && diffVisualRowCount > DIFF_VIRTUALIZE_ROW_COUNT;
+    kind === "diff" ? (diffVisualOffsets[diffVisualOffsets.length - 1] ?? 0) : 0;
+  const virtualizeDiff = !wrap && kind === "diff" && diffVisualRowCount > DIFF_VIRTUALIZE_ROW_COUNT;
   const viewportRowCount = 40;
   const startIndex = virtualize ? Math.max(0, Math.floor(scrollTop / APPROX_ROW_HEIGHT) - 10) : 0;
   const endIndex = virtualize
@@ -1220,11 +1221,7 @@ function ContentViewer({
               className={`content-viewer-action message-action-button${
                 diffMode === "split" ? " is-active" : ""
               }`}
-              title={
-                diffMode === "unified"
-                  ? "Currently showing unified diff. Click to switch to split diff view."
-                  : "Currently showing split diff. Click to switch to unified diff view."
-              }
+              title={diffMode === "unified" ? "Unified diff" : "Split diff"}
               onClick={() => setDiffMode((value) => (value === "unified" ? "split" : "unified"))}
             >
               {diffMode === "unified" ? "Unified" : "Split"}
@@ -1233,11 +1230,7 @@ function ContentViewer({
           <button
             type="button"
             className="content-viewer-action message-action-button"
-            title={
-              wrap
-                ? "Currently wrapping long lines. Click to disable line wrapping."
-                : "Currently not wrapping long lines. Click to enable line wrapping."
-            }
+            title={wrap ? "Wrap lines" : "Do not wrap lines"}
             onClick={() => setWrap((value) => !value)}
           >
             {wrap ? "Wrap" : "No Wrap"}
@@ -1256,7 +1249,7 @@ function ContentViewer({
             <button
               type="button"
               className="content-viewer-action message-action-button"
-              title="Open in external editor"
+              title="Open in editor"
               onClick={() => void handleOpenFileOrContent(defaultEditorApp?.id)}
             >
               Open
@@ -1266,7 +1259,7 @@ function ContentViewer({
             <button
               type="button"
               className="content-viewer-action message-action-button"
-              title="Open in external editor"
+              title="Open in editor"
               onClick={() => void handleOpenFileOrContent()}
             >
               Open
@@ -1283,7 +1276,7 @@ function ContentViewer({
             <button
               type="button"
               className="content-viewer-action message-action-button"
-              title="Open in external diff tool"
+              title="Open in diff tool"
               onClick={() => void handleOpenDiff()}
             >
               Diff
@@ -1307,7 +1300,7 @@ function ContentViewer({
             <button
               type="button"
               className="content-viewer-action message-action-button"
-              title="Reveal in file manager"
+              title="Reveal in Finder"
               onClick={() => {
                 void openPath(absoluteFilePath);
               }}
@@ -1478,8 +1471,9 @@ function buildDiffVisualOffsets(
   const offsets = new Array<number>(rows.length + 1);
   offsets[0] = 0;
   for (let index = 0; index < rows.length; index += 1) {
+    const previousOffset = offsets[index] ?? 0;
     offsets[index + 1] =
-      offsets[index]! + (diffMode === "unified" && rows[index]?.kind === "paired" ? 2 : 1);
+      previousOffset + (diffMode === "unified" && rows[index]?.kind === "paired" ? 2 : 1);
   }
   return offsets;
 }
@@ -1489,7 +1483,8 @@ function findDiffRowIndexByVisualOffset(offsets: number[], visualIndex: number):
   let high = offsets.length - 1;
   while (low < high) {
     const middle = Math.floor((low + high) / 2);
-    if (offsets[middle + 1]! <= visualIndex) {
+    const nextOffset = offsets[middle + 1] ?? Number.POSITIVE_INFINITY;
+    if (nextOffset <= visualIndex) {
       low = middle + 1;
     } else {
       high = middle;
@@ -1521,12 +1516,12 @@ function ViewerAppMenu({
     minWidth: number;
   } | null>(null);
 
-  const closeMenu = (restoreFocus = true) => {
+  const closeMenu = useCallback((restoreFocus = true) => {
     setOpen(false);
     if (restoreFocus) {
       returnFocusRef.current?.focus({ preventScroll: true });
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (!open) {
@@ -1584,7 +1579,7 @@ function ViewerAppMenu({
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
     };
-  }, [open]);
+  }, [closeMenu, open]);
 
   return (
     <div ref={menuRef} className="content-viewer-menu">
@@ -1915,8 +1910,7 @@ function DiffViewerBody({
         }
         if (row.kind === "paired") {
           const tokenRow = unifiedTokenRows?.[rowIndex];
-          const removeTokenLine =
-            tokenRow?.kind === "paired" ? tokenRow.leftTokenLine : undefined;
+          const removeTokenLine = tokenRow?.kind === "paired" ? tokenRow.leftTokenLine : undefined;
           const addTokenLine = tokenRow?.kind === "paired" ? tokenRow.rightTokenLine : undefined;
           return (
             <Fragment key={key}>

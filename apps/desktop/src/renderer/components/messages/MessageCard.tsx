@@ -25,8 +25,10 @@ type MessageCardProps = {
   isOrphaned?: boolean;
   isExpanded: boolean;
   onToggleExpanded: (messageId: string, category: MessageCategory) => void;
+  onToggleCategoryExpanded?: (category: MessageCategory) => void;
   onToggleBookmark?: (message: SessionMessage) => void;
   onRevealInSession?: (messageId: string, sourceId: string) => void;
+  onPreservePaneFocus?: () => void;
   cardRef?: Ref<HTMLDivElement> | null;
 };
 
@@ -40,8 +42,10 @@ function MessageCardComponent({
   isOrphaned = false,
   isExpanded,
   onToggleExpanded,
+  onToggleCategoryExpanded,
   onToggleBookmark,
   onRevealInSession,
+  onPreservePaneFocus,
   cardRef,
 }: MessageCardProps) {
   const parsedToolPayload = useMemo(
@@ -65,6 +69,17 @@ function MessageCardComponent({
     [message.operationDurationConfidence, message.operationDurationMs],
   );
   const toggleExpanded = () => onToggleExpanded(message.id, message.category);
+  const toggleCategoryExpanded = () => onToggleCategoryExpanded?.(message.category);
+
+  const handleExpansionToggleClick = (event: MouseEvent<HTMLElement>) => {
+    if (event.metaKey && onToggleCategoryExpanded) {
+      toggleCategoryExpanded();
+      onPreservePaneFocus?.();
+      return;
+    }
+    toggleExpanded();
+    onPreservePaneFocus?.();
+  };
 
   const handleHeaderClick = (event: MouseEvent<HTMLElement>) => {
     const target = event.target as HTMLElement | null;
@@ -74,27 +89,31 @@ function MessageCardComponent({
     if (target?.closest(".message-toggle-button")) {
       return;
     }
-    toggleExpanded();
+    handleExpansionToggleClick(event);
   };
 
   const handleCopyRawButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     void copyTextToClipboard(JSON.stringify(message, null, 2));
+    onPreservePaneFocus?.();
   };
 
   const handleCopyBodyButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     void copyTextToClipboard(formatMessageBodyForClipboard(message, parsedToolPayload));
+    onPreservePaneFocus?.();
   };
 
   const handleRevealButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     onRevealInSession?.(message.id, message.sourceId);
+    onPreservePaneFocus?.();
   };
 
   const handleBookmarkButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     onToggleBookmark?.(message);
+    onPreservePaneFocus?.();
   };
 
   const handleHeaderKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -126,7 +145,7 @@ function MessageCardComponent({
           className="message-toggle-button"
           onClick={(event) => {
             event.stopPropagation();
-            toggleExpanded();
+            handleExpansionToggleClick(event);
           }}
           aria-expanded={isExpanded}
           aria-label={isExpanded ? "Collapse message" : "Expand message"}
@@ -165,7 +184,7 @@ function MessageCardComponent({
             className="message-action-button"
             onClick={handleCopyBodyButtonClick}
             aria-label="Copy formatted message body"
-            title="Copy the formatted message body"
+            title="Copy message"
           >
             Copy
           </button>
@@ -174,7 +193,7 @@ function MessageCardComponent({
             className="message-action-button"
             onClick={handleCopyRawButtonClick}
             aria-label="Copy raw message data"
-            title="Copy the raw message data"
+            title="Copy raw message"
           >
             Copy Raw
           </button>
@@ -184,7 +203,7 @@ function MessageCardComponent({
               className="message-action-button message-reveal-button"
               onClick={handleRevealButtonClick}
               aria-label="Reveal this message in session"
-              title="Reveal this message in its session"
+              title="Reveal in Session"
             >
               Reveal in Session
             </button>
@@ -199,7 +218,7 @@ function MessageCardComponent({
               aria-label={
                 isBookmarked ? "Remove bookmark from this message" : "Bookmark this message"
               }
-              title={isBookmarked ? "Remove bookmark from this message" : "Bookmark this message"}
+              title={isBookmarked ? "Remove bookmark" : "Bookmark message"}
             >
               <BookmarkIcon filled={isBookmarked} />
             </button>

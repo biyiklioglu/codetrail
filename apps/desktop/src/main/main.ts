@@ -5,11 +5,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   BrowserWindow,
   type BrowserWindowConstructorOptions,
+  Menu,
   app,
   nativeImage,
   shell,
 } from "electron";
 
+import { APP_COMMAND_CHANNEL, type AppCommand } from "../shared/appCommands";
+import { buildAppMenuTemplate } from "./appMenu";
 import { type AppStateStore, createAppStateStore } from "./appStateStore";
 import { bootstrapMainProcess, shutdownMainProcess } from "./bootstrap";
 import { appendDebugLog } from "./debugLog";
@@ -19,6 +22,7 @@ import { serializeError } from "./serializeError";
 
 let mainWindowRef: BrowserWindow | null = null;
 let debugLogPathCache: string | null = null;
+const APP_NAME = "Code Trail";
 const sideBySideInstance = resolveSideBySideInstance(
   process.argv,
   process.env,
@@ -28,6 +32,7 @@ if (sideBySideInstance) {
   app.setPath("userData", sideBySideInstance.userDataPath);
   app.setPath("sessionData", sideBySideInstance.sessionDataPath);
 }
+app.setName(APP_NAME);
 const verboseLoggingEnabled =
   process.argv.includes("--verbose") || app.commandLine.hasSwitch("verbose");
 const singleInstanceModeEnabled = sideBySideInstance === null;
@@ -90,7 +95,7 @@ function logIndexingNotice(message: string, details: Record<string, unknown>): v
 
 function createWindow(appStateStore: AppStateStore): BrowserWindow {
   const preloadPath = resolvePreloadPath();
-  const iconPath = resolveAppIconPath();
+  const windowIconPath = resolveWindowIconPath();
   const persistedPaneState = appStateStore.getPaneState();
   const persistedWindowState = appStateStore.getWindowState();
   const isMac = process.platform === "darwin";
@@ -115,7 +120,7 @@ function createWindow(appStateStore: AppStateStore): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    ...(iconPath ? { icon: iconPath } : {}),
+    ...(windowIconPath ? { icon: windowIconPath } : {}),
     ...(persistedWindowState?.x !== undefined ? { x: persistedWindowState.x } : {}),
     ...(persistedWindowState?.y !== undefined ? { y: persistedWindowState.y } : {}),
   } satisfies BrowserWindowConstructorOptions;
@@ -248,6 +253,22 @@ function createWindow(appStateStore: AppStateStore): BrowserWindow {
   return mainWindow;
 }
 
+function dispatchAppCommand(command: AppCommand): void {
+  const targetWindow = BrowserWindow.getFocusedWindow() ?? mainWindowRef ?? null;
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+  targetWindow.webContents.send(APP_COMMAND_CHANNEL, command);
+}
+
+function withFocusedWindow(action: (window: BrowserWindow) => void): void {
+  const targetWindow = BrowserWindow.getFocusedWindow() ?? mainWindowRef ?? null;
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+  action(targetWindow);
+}
+
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     if (verboseLoggingEnabled) {
@@ -258,9 +279,9 @@ if (hasSingleInstanceLock) {
       writeDebugLog("side-by-side instance enabled", sideBySideInstance, { force: true });
     }
     const appStateStore = createAppStateStore(join(app.getPath("userData"), "ui-state.json"));
-    const iconPath = resolveAppIconPath();
-    if (iconPath && process.platform === "darwin") {
-      const icon = nativeImage.createFromPath(iconPath);
+    const dockIconPath = resolveWindowIconPath();
+    if (dockIconPath && process.platform === "darwin") {
+      const icon = nativeImage.createFromPath(dockIconPath);
       if (!icon.isEmpty()) {
         app.dock.setIcon(icon);
       }
@@ -295,6 +316,30 @@ if (hasSingleInstanceLock) {
       });
       writeDebugLog("bootstrapMainProcess success");
       mainWindowRef = createWindow(appStateStore);
+      Menu.setApplicationMenu(
+        Menu.buildFromTemplate(
+          buildAppMenuTemplate({
+            appName: APP_NAME,
+            isDevelopment: !app.isPackaged,
+            dispatchAppCommand,
+            reloadFocusedWindow: () => {
+              withFocusedWindow((window) => {
+                window.webContents.reload();
+              });
+            },
+            forceReloadFocusedWindow: () => {
+              withFocusedWindow((window) => {
+                window.webContents.reloadIgnoringCache();
+              });
+            },
+            toggleFocusedWindowDevTools: () => {
+              withFocusedWindow((window) => {
+                window.webContents.toggleDevTools();
+              });
+            },
+          }),
+        ),
+      );
       writeDebugLog("createWindow success");
     } catch (error) {
       logAppError("bootstrap failure", error);
@@ -390,7 +435,7 @@ function resolvePreloadPath(): string {
   throw new Error(`Preload script not found. Tried: ${candidates.join(", ")}`);
 }
 
-function resolveAppIconPath(): string | null {
+function resolveWindowIconPath(): string | null {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const candidates = [
     join(moduleDir, "..", "..", "assets", "icons", "build", "codetrail-1024.png"),

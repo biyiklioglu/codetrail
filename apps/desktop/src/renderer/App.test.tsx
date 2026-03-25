@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { createClaudeHookStateFixture, createLiveStatusFixture } from "@codetrail/core/testing";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -58,7 +59,7 @@ describe("App shell", () => {
     const user = userEvent.setup();
     const client = createAppClient();
 
-    renderWithClient(
+    const { container } = renderWithClient(
       <App
         initialPaneState={
           {
@@ -97,19 +98,941 @@ describe("App shell", () => {
     });
   });
 
-  it("routes Cmd/Ctrl+Left/Right to history and global search pagination", async () => {
+  it("defaults session message sorting to newest first", async () => {
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: "Newest first (session). Switch to oldest first",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a compact live session row in the message pane for the selected session", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "watcher:getLiveStatus": () =>
+        createLiveStatusFixture({
+          enabled: true,
+          providerCounts: {
+            claude: 1,
+            codex: 0,
+            gemini: 0,
+            cursor: 0,
+            copilot: 0,
+          },
+          sessions: [
+            {
+              provider: "claude",
+              sessionIdentity: "live-session-1",
+              sourceSessionId: "provider-session-1",
+              filePath: "/workspace/project-one/session-1.jsonl",
+              projectName: "Project One",
+              projectPath: "/workspace/project-one",
+              cwd: "/workspace/project-one",
+              statusKind: "waiting_for_input",
+              statusText: "Waiting for input",
+              detailText: "updating topbar layout",
+              sourcePrecision: "hook",
+              lastActivityAt: new Date(Date.now() - 12_000).toISOString(),
+              bestEffort: false,
+            },
+          ],
+          claudeHookState: createClaudeHookStateFixture({
+            logPath: "/tmp/claude-hooks.jsonl",
+            installed: true,
+            managedEventNames: [],
+            missingEventNames: [],
+          }),
+        }),
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            liveWatchEnabled: true,
+            preferredAutoRefreshStrategy: "watch-1s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("button", { name: "Watch (1s debounce)" }));
+
+    await waitFor(() => {
+      const liveRow = container.querySelector<HTMLElement>(".msg-live-row");
+      expect(liveRow).not.toBeNull();
+      expect(liveRow).toHaveTextContent("Live");
+      expect(liveRow).toHaveTextContent("Waiting for input");
+      expect(liveRow).toHaveTextContent("updating topbar layout");
+      expect(liveRow).toHaveTextContent(/\d{2}s ago/);
+    });
+  });
+
+  it("renders the flat live row style when the background preference is disabled", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "watcher:getLiveStatus": () =>
+        createLiveStatusFixture({
+          enabled: true,
+          providerCounts: {
+            claude: 1,
+            codex: 0,
+            gemini: 0,
+            cursor: 0,
+            copilot: 0,
+          },
+          sessions: [
+            {
+              provider: "claude",
+              sessionIdentity: "live-session-1",
+              sourceSessionId: "provider-session-1",
+              filePath: "/workspace/project-one/session-1.jsonl",
+              projectName: "Project One",
+              projectPath: "/workspace/project-one",
+              cwd: "/workspace/project-one",
+              statusKind: "working",
+              statusText: "Working",
+              detailText: "updating styles",
+              sourcePrecision: "hook",
+              lastActivityAt: new Date(Date.now() - 12_000).toISOString(),
+              bestEffort: false,
+            },
+          ],
+          claudeHookState: createClaudeHookStateFixture({
+            logPath: "/tmp/claude-hooks.jsonl",
+            installed: true,
+            managedEventNames: [],
+            missingEventNames: [],
+          }),
+        }),
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            liveWatchEnabled: true,
+            liveWatchRowHasBackground: false,
+            preferredAutoRefreshStrategy: "watch-1s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("button", { name: "Watch (1s debounce)" }));
+
+    await waitFor(() => {
+      expect(container.querySelector(".msg-live-row.is-flat")).not.toBeNull();
+    });
+  });
+
+  it("applies the message-type auto-expand pill immediately and clears current-page manual overrides for that type", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "sessions:getDetail": () => ({
+        session: {
+          id: "session_1",
+          projectId: "project_1",
+          provider: "claude",
+          filePath: "/workspace/project-one/session-1.jsonl",
+          title: "Investigate markdown rendering",
+          modelNames: "claude-opus-4-1",
+          startedAt: "2026-03-01T10:00:00.000Z",
+          endedAt: "2026-03-01T10:00:05.000Z",
+          durationMs: 5000,
+          gitBranch: "main",
+          cwd: "/workspace/project-one",
+          messageCount: 2,
+          tokenInputTotal: 14,
+          tokenOutputTotal: 8,
+        },
+        totalCount: 2,
+        categoryCounts: {
+          user: 0,
+          assistant: 0,
+          tool_use: 2,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: 0,
+        pageSize: 100,
+        focusIndex: null,
+        messages: [
+          {
+            id: "tool_1",
+            sourceId: "tool_src_1",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "tool_use",
+            content: JSON.stringify({
+              tool_name: "Read",
+              input: { file_path: "/workspace/project-one/src/app.ts" },
+            }),
+            createdAt: "2026-03-01T10:00:00.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+          {
+            id: "tool_2",
+            sourceId: "tool_src_2",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "tool_use",
+            content: JSON.stringify({
+              tool_name: "Write",
+              input: { file_path: "/workspace/project-one/src/app.ts" },
+            }),
+            createdAt: "2026-03-01T10:00:05.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+        ],
+      }),
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    const toolUseExpandToggle = () =>
+      container.querySelector<HTMLButtonElement>(
+        ".msg-filter.tool_use-filter .msg-filter-expand-toggle",
+      );
+
+    await waitFor(() => {
+      expect(toolUseExpandToggle()).not.toBeNull();
+    });
+    expect(container.querySelectorAll(".message.category-tool_use.expanded")).toHaveLength(0);
+
+    await user.click(toolUseExpandToggle()!);
+    await waitFor(() => {
+      expect(container.querySelectorAll(".message.category-tool_use.expanded")).toHaveLength(2);
+    });
+
+    await user.click(screen.getAllByRole("button", { name: "Collapse message" })[0]!);
+    expect(container.querySelectorAll(".message.category-tool_use.expanded")).toHaveLength(1);
+
+    await user.click(toolUseExpandToggle()!);
+    await user.click(toolUseExpandToggle()!);
+
+    await waitFor(() => {
+      expect(container.querySelectorAll(".message.category-tool_use.expanded")).toHaveLength(2);
+    });
+  });
+
+  it("uses the toolbar expand and collapse button to align all message types with the shared default-expansion model", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "sessions:getDetail": () => ({
+        session: {
+          id: "session_1",
+          projectId: "project_1",
+          provider: "claude",
+          filePath: "/workspace/project-one/session-1.jsonl",
+          title: "Investigate markdown rendering",
+          modelNames: "claude-opus-4-1",
+          startedAt: "2026-03-01T10:00:00.000Z",
+          endedAt: "2026-03-01T10:00:05.000Z",
+          durationMs: 5000,
+          gitBranch: "main",
+          cwd: "/workspace/project-one",
+          messageCount: 3,
+          tokenInputTotal: 14,
+          tokenOutputTotal: 8,
+        },
+        totalCount: 3,
+        categoryCounts: {
+          user: 1,
+          assistant: 0,
+          tool_use: 2,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: 0,
+        pageSize: 100,
+        focusIndex: null,
+        messages: [
+          {
+            id: "user_1",
+            sourceId: "user_src_1",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "user",
+            content: "User body",
+            createdAt: "2026-03-01T10:00:00.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+          {
+            id: "tool_1",
+            sourceId: "tool_src_1",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "tool_use",
+            content: JSON.stringify({
+              tool_name: "Read",
+              input: { file_path: "/workspace/project-one/src/app.ts" },
+            }),
+            createdAt: "2026-03-01T10:00:02.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+          {
+            id: "tool_2",
+            sourceId: "tool_src_2",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "tool_use",
+            content: JSON.stringify({
+              tool_name: "Write",
+              input: { file_path: "/workspace/project-one/src/app.ts" },
+            }),
+            createdAt: "2026-03-01T10:00:05.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+        ],
+      }),
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("User body")).toBeInTheDocument();
+      expect(container.querySelectorAll(".message.expanded")).toHaveLength(1);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Expand all messages" }));
+    await waitFor(() => {
+      expect(container.querySelectorAll(".message.expanded")).toHaveLength(3);
+    });
+
+    await user.click(screen.getAllByRole("button", { name: "Collapse message" })[0]!);
+    expect(container.querySelectorAll(".message.expanded")).toHaveLength(2);
+
+    await user.click(screen.getByRole("button", { name: "Collapse all messages" }));
+    await waitFor(() => {
+      expect(container.querySelectorAll(".message.expanded")).toHaveLength(0);
+    });
+  });
+
+  it("Cmd+click on a message header toggles all visible messages of the same type", async () => {
+    installScrollIntoViewMock();
+
+    const client = createAppClient({
+      "sessions:getDetail": () => ({
+        session: {
+          id: "session_1",
+          projectId: "project_1",
+          provider: "claude",
+          filePath: "/workspace/project-one/session-1.jsonl",
+          title: "Investigate markdown rendering",
+          modelNames: "claude-opus-4-1",
+          startedAt: "2026-03-01T10:00:00.000Z",
+          endedAt: "2026-03-01T10:00:05.000Z",
+          durationMs: 5000,
+          gitBranch: "main",
+          cwd: "/workspace/project-one",
+          messageCount: 3,
+          tokenInputTotal: 14,
+          tokenOutputTotal: 8,
+        },
+        totalCount: 3,
+        categoryCounts: {
+          user: 1,
+          assistant: 2,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: 0,
+        pageSize: 100,
+        focusIndex: null,
+        messages: [
+          {
+            id: "assistant_1",
+            sourceId: "assistant_src_1",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "assistant",
+            content: "First assistant body",
+            createdAt: "2026-03-01T10:00:00.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+          {
+            id: "assistant_2",
+            sourceId: "assistant_src_2",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "assistant",
+            content: "Second assistant body",
+            createdAt: "2026-03-01T10:00:02.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+          {
+            id: "user_1",
+            sourceId: "user_src_1",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "user",
+            content: "User body",
+            createdAt: "2026-03-01T10:00:05.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+        ],
+      }),
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("First assistant body")).toBeInTheDocument();
+      expect(screen.getByText("Second assistant body")).toBeInTheDocument();
+      expect(screen.getByText("User body")).toBeInTheDocument();
+    });
+
+    const assistantHeader = container.querySelector<HTMLElement>(
+      ".message.category-assistant .message-header",
+    );
+    expect(assistantHeader).not.toBeNull();
+    fireEvent.click(assistantHeader!, { metaKey: true });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll(".message.category-assistant.expanded")).toHaveLength(0);
+    });
+    expect(container.querySelectorAll(".message.category-user.expanded")).toHaveLength(1);
+  });
+
+  it("clears message expansion overrides when navigating away from the loaded page", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "sessions:getDetail": (request) => {
+        const page = typeof request === "object" && request && "page" in request ? request.page : 0;
+        return {
+          session: {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Investigate markdown rendering",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 4,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+          totalCount: 4,
+          categoryCounts: {
+            user: 0,
+            assistant: 4,
+            tool_use: 0,
+            tool_edit: 0,
+            tool_result: 0,
+            thinking: 0,
+            system: 0,
+          },
+          page: typeof page === "number" ? page : 0,
+          pageSize: 2,
+          focusIndex: null,
+          messages:
+            page === 0
+              ? [
+                  {
+                    id: "assistant_1",
+                    sourceId: "assistant_src_1",
+                    sessionId: "session_1",
+                    provider: "claude",
+                    category: "assistant",
+                    content: "First assistant body",
+                    createdAt: "2026-03-01T10:00:00.000Z",
+                    tokenInput: null,
+                    tokenOutput: null,
+                    operationDurationMs: null,
+                    operationDurationSource: null,
+                    operationDurationConfidence: null,
+                  },
+                  {
+                    id: "assistant_2",
+                    sourceId: "assistant_src_2",
+                    sessionId: "session_1",
+                    provider: "claude",
+                    category: "assistant",
+                    content: "Second assistant body",
+                    createdAt: "2026-03-01T10:00:02.000Z",
+                    tokenInput: null,
+                    tokenOutput: null,
+                    operationDurationMs: null,
+                    operationDurationSource: null,
+                    operationDurationConfidence: null,
+                  },
+                ]
+              : [
+                  {
+                    id: "assistant_3",
+                    sourceId: "assistant_src_3",
+                    sessionId: "session_1",
+                    provider: "claude",
+                    category: "assistant",
+                    content: "Third assistant body",
+                    createdAt: "2026-03-01T10:00:04.000Z",
+                    tokenInput: null,
+                    tokenOutput: null,
+                    operationDurationMs: null,
+                    operationDurationSource: null,
+                    operationDurationConfidence: null,
+                  },
+                  {
+                    id: "assistant_4",
+                    sourceId: "assistant_src_4",
+                    sessionId: "session_1",
+                    provider: "claude",
+                    category: "assistant",
+                    content: "Fourth assistant body",
+                    createdAt: "2026-03-01T10:00:06.000Z",
+                    tokenInput: null,
+                    tokenOutput: null,
+                    operationDurationMs: null,
+                    operationDurationSource: null,
+                    operationDurationConfidence: null,
+                  },
+                ],
+        };
+      },
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            messagePageSize: 2,
+          } as unknown as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("First assistant body")).toBeInTheDocument();
+      expect(screen.getByText("4 messages")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
+    });
+
+    await user.click(screen.getAllByRole("button", { name: "Collapse message" })[0]!);
+    expect(container.querySelectorAll(".message.category-assistant.expanded")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() => {
+      expect(screen.getByText("Third assistant body")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Previous page" }));
+    await waitFor(() => {
+      expect(screen.getByText("First assistant body")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
+    });
+
+    expect(container.querySelectorAll(".message.category-assistant.expanded")).toHaveLength(2);
+  });
+
+  it("keeps footer paging controls focused on messages and only commits page input on Enter", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "sessions:getDetail": (request) => {
+        const page = typeof request === "object" && request && "page" in request ? request.page : 0;
+        return {
+          session: {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Investigate markdown rendering",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 4,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+          totalCount: 4,
+          categoryCounts: {
+            user: 0,
+            assistant: 4,
+            tool_use: 0,
+            tool_edit: 0,
+            tool_result: 0,
+            thinking: 0,
+            system: 0,
+          },
+          page: typeof page === "number" ? page : 0,
+          pageSize: 2,
+          focusIndex: null,
+          messages:
+            page === 0
+              ? [
+                  {
+                    id: "assistant_1",
+                    sourceId: "assistant_src_1",
+                    sessionId: "session_1",
+                    provider: "claude",
+                    category: "assistant",
+                    content: "First assistant body",
+                    createdAt: "2026-03-01T10:00:00.000Z",
+                    tokenInput: null,
+                    tokenOutput: null,
+                    operationDurationMs: null,
+                    operationDurationSource: null,
+                    operationDurationConfidence: null,
+                  },
+                  {
+                    id: "assistant_2",
+                    sourceId: "assistant_src_2",
+                    sessionId: "session_1",
+                    provider: "claude",
+                    category: "assistant",
+                    content: "Second assistant body",
+                    createdAt: "2026-03-01T10:00:02.000Z",
+                    tokenInput: null,
+                    tokenOutput: null,
+                    operationDurationMs: null,
+                    operationDurationSource: null,
+                    operationDurationConfidence: null,
+                  },
+                ]
+              : [
+                  {
+                    id: "assistant_3",
+                    sourceId: "assistant_src_3",
+                    sessionId: "session_1",
+                    provider: "claude",
+                    category: "assistant",
+                    content: "Third assistant body",
+                    createdAt: "2026-03-01T10:00:04.000Z",
+                    tokenInput: null,
+                    tokenOutput: null,
+                    operationDurationMs: null,
+                    operationDurationSource: null,
+                    operationDurationConfidence: null,
+                  },
+                  {
+                    id: "assistant_4",
+                    sourceId: "assistant_src_4",
+                    sessionId: "session_1",
+                    provider: "claude",
+                    category: "assistant",
+                    content: "Fourth assistant body",
+                    createdAt: "2026-03-01T10:00:06.000Z",
+                    tokenInput: null,
+                    tokenOutput: null,
+                    operationDurationMs: null,
+                    operationDurationSource: null,
+                    operationDurationConfidence: null,
+                  },
+                ],
+        };
+      },
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            messagePageSize: 2,
+          } as unknown as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    const messageList = container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+    const footer = container.querySelector<HTMLDivElement>(".msg-pagination");
+
+    await waitFor(() => {
+      expect(screen.getByText("First assistant body")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
+    });
+
+    expect(messageList).not.toBeNull();
+    expect(footer).not.toBeNull();
+
+    messageList?.focus();
+    expect(document.activeElement).toBe(messageList);
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
+    });
+    expect(document.activeElement).toBe(messageList);
+
+    fireEvent.mouseDown(footer!);
+    expect(document.activeElement).toBe(messageList);
+
+    const pageInput = screen.getByRole("textbox", { name: "Page number" });
+
+    await user.click(pageInput);
+    await user.clear(pageInput);
+    await user.type(pageInput, "1");
+    await user.keyboard("{Tab}");
+    expect(pageInput).toHaveValue("2");
+    expect(document.activeElement).toBe(messageList);
+
+    await user.click(pageInput);
+    await user.clear(pageInput);
+    await user.type(pageInput, "1");
+    await user.keyboard("{Escape}");
+    expect(pageInput).toHaveValue("2");
+    expect(document.activeElement).toBe(messageList);
+
+    await user.click(pageInput);
+    await user.clear(pageInput);
+    await user.type(pageInput, "1{Enter}");
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
+      expect(screen.getByText("First assistant body")).toBeInTheDocument();
+    });
+    expect(document.activeElement).toBe(messageList);
+  });
+
+  it("does not show a project-level live row while viewing a different session", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "watcher:getLiveStatus": () =>
+        createLiveStatusFixture({
+          enabled: true,
+          providerCounts: {
+            claude: 1,
+            codex: 0,
+            gemini: 0,
+            cursor: 0,
+            copilot: 0,
+          },
+          sessions: [
+            {
+              provider: "claude",
+              sessionIdentity: "other-live-session",
+              sourceSessionId: "provider-session-2",
+              filePath: "/workspace/project-one/session-2.jsonl",
+              projectName: "Project One",
+              projectPath: "/workspace/project-one",
+              cwd: "/workspace/project-one",
+              statusKind: "working",
+              statusText: "Responding",
+              detailText: "working in another session",
+              sourcePrecision: "hook",
+              lastActivityAt: new Date(Date.now() - 12_000).toISOString(),
+              bestEffort: false,
+            },
+          ],
+          claudeHookState: createClaudeHookStateFixture({
+            logPath: "/tmp/claude-hooks.jsonl",
+            installed: true,
+            managedEventNames: [],
+            missingEventNames: [],
+          }),
+        }),
+    });
+
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            liveWatchEnabled: true,
+            preferredAutoRefreshStrategy: "watch-1s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("button", { name: "Watch (1s debounce)" }));
+
+    await waitFor(() => {
+      expect(container.querySelector(".msg-live-row")).toBeNull();
+    });
+  });
+
+  it("flushes app state when settings closes", async () => {
     const user = userEvent.setup();
     const client = createAppClient();
 
     renderWithClient(<App />, client);
 
     await waitFor(() => {
-      expect(screen.getByText("Page 1 / 5 (250 messages)")).toBeInTheDocument();
+      expect(screen.getByText("Project One")).toBeInTheDocument();
     });
 
-    fireEvent.keyDown(window, { key: "ArrowRight", ctrlKey: true });
+    expect(
+      client.invoke.mock.calls.filter(([channel]) => channel === "app:flushState"),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Open settings" }));
     await waitFor(() => {
-      expect(screen.getByText("Page 2 / 5 (250 messages)")).toBeInTheDocument();
+      expect(screen.getByText("Discovery Roots")).toBeInTheDocument();
+    });
+
+    expect(
+      client.invoke.mock.calls.filter(([channel]) => channel === "app:flushState"),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Return to history view" }));
+
+    await waitFor(() => {
+      expect(
+        client.invoke.mock.calls.filter(([channel]) => channel === "app:flushState"),
+      ).toHaveLength(1);
+    });
+  });
+
+  it("routes Cmd+Left/Right to history and global search pagination", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("250 messages")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
+    });
+
+    fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
 
     await user.click(screen.getByRole("button", { name: "Search" }));
@@ -118,7 +1041,7 @@ describe("App shell", () => {
       expect(screen.getByText("Page 1 of 3")).toBeInTheDocument();
     });
 
-    fireEvent.keyDown(window, { key: "ArrowRight", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
     await waitFor(() => {
       expect(screen.getByText("Page 2 of 3")).toBeInTheDocument();
     });
@@ -130,7 +1053,7 @@ describe("App shell", () => {
       );
     });
 
-    fireEvent.keyDown(window, { key: "ArrowLeft", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "ArrowLeft", metaKey: true });
     await waitFor(() => {
       expect(screen.getByText("Page 1 of 3")).toBeInTheDocument();
     });
@@ -198,7 +1121,7 @@ describe("App shell", () => {
       }),
     });
 
-    renderWithClient(
+    const { container } = renderWithClient(
       <App
         initialPaneState={
           {
@@ -224,7 +1147,7 @@ describe("App shell", () => {
     const user = userEvent.setup();
     const client = createAppClient();
 
-    renderWithClient(
+    const { container } = renderWithClient(
       <App
         initialPaneState={
           {
@@ -420,7 +1343,7 @@ describe("App shell", () => {
     });
   });
 
-  it("restores the last selected auto-refresh mode with Cmd/Ctrl+Shift+R", async () => {
+  it("restores the last selected auto-refresh mode with Cmd+Shift+R", async () => {
     const user = userEvent.setup();
     const client = createAppClient();
 
@@ -503,6 +1426,32 @@ describe("App shell", () => {
     });
   });
 
+  it("restores active watch auto-refresh on startup", async () => {
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            projectPaneWidth: 300,
+            sessionPaneWidth: 320,
+            currentAutoRefreshStrategy: "watch-3s",
+            preferredAutoRefreshStrategy: "watch-3s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Auto-refresh strategy" }).textContent).toContain(
+        "Watch (3s debounce)",
+      );
+      expect(client.invoke).toHaveBeenCalledWith("watcher:start", { debounceMs: 3000 });
+    });
+  });
+
   it("shows the watcher queue count on the auto-refresh control", async () => {
     const user = userEvent.setup();
     const client = createAppClient({
@@ -523,11 +1472,7 @@ describe("App shell", () => {
     await user.click(screen.getByRole("button", { name: "Watch (1s debounce)" }));
 
     await waitFor(() => {
-      expect(
-        screen.getByTitle(
-          "Number of changed files currently queued by the watcher before auto-refresh runs.",
-        ),
-      ).toHaveTextContent("2");
+      expect(screen.getByTitle("Watcher queue: 2 files")).toHaveTextContent("2");
     });
   });
 
@@ -665,7 +1610,7 @@ describe("App shell", () => {
       }),
     });
 
-    renderWithClient(
+    const { container } = renderWithClient(
       <App
         initialPaneState={
           {
@@ -689,7 +1634,8 @@ describe("App shell", () => {
       expect(screen.getByRole("button", { name: "Close bookmarks" })).toBeInTheDocument();
     });
     expect(screen.getByText("Saved markdown summary")).toBeInTheDocument();
-    expect(screen.getByText("Page 1 / 3 (25 bookmarks)")).toBeInTheDocument();
+    expect(screen.getByText("25 bookmarks")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
 
     await user.click(screen.getByRole("button", { name: "Close bookmarks" }));
 
@@ -697,6 +1643,218 @@ describe("App shell", () => {
       expect(screen.getByRole("button", { name: "2 bookmarks" })).toBeInTheDocument();
     });
     expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+  });
+
+  it("shows filtered and total message counts for session and all-sessions views", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "projects:list": () => ({
+        projects: [
+          {
+            id: "project_1",
+            provider: "claude",
+            name: "Project One",
+            path: "/workspace/project-one",
+            sessionCount: 1,
+            messageCount: 7,
+            bookmarkCount: 0,
+            lastActivity: "2026-03-01T10:00:05.000Z",
+          },
+        ],
+      }),
+      "sessions:list": () => ({
+        sessions: [
+          {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Investigate markdown rendering",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 3,
+            bookmarkCount: 0,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+        ],
+      }),
+      "sessions:getDetail": () => ({
+        session: {
+          id: "session_1",
+          projectId: "project_1",
+          provider: "claude",
+          filePath: "/workspace/project-one/session-1.jsonl",
+          title: "Investigate markdown rendering",
+          modelNames: "claude-opus-4-1",
+          startedAt: "2026-03-01T10:00:00.000Z",
+          endedAt: "2026-03-01T10:00:05.000Z",
+          durationMs: 5000,
+          gitBranch: "main",
+          cwd: "/workspace/project-one",
+          messageCount: 3,
+          tokenInputTotal: 14,
+          tokenOutputTotal: 8,
+        },
+        totalCount: 1,
+        categoryCounts: {
+          user: 1,
+          assistant: 0,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: 0,
+        pageSize: 100,
+        focusIndex: null,
+        messages: [
+          {
+            id: "m1",
+            sourceId: "src1",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "user",
+            content: "Please review markdown table rendering",
+            createdAt: "2026-03-01T10:00:00.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+        ],
+      }),
+      "projects:getCombinedDetail": () => ({
+        projectId: "project_1",
+        totalCount: 2,
+        categoryCounts: {
+          user: 1,
+          assistant: 1,
+          tool_use: 0,
+          tool_edit: 0,
+          tool_result: 0,
+          thinking: 0,
+          system: 0,
+        },
+        page: 0,
+        pageSize: 100,
+        focusIndex: null,
+        messages: [
+          {
+            id: "m1",
+            sourceId: "src1",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "user",
+            content: "Please review markdown table rendering",
+            createdAt: "2026-03-01T10:00:00.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+            sessionTitle: "Investigate markdown rendering",
+            sessionActivity: "2026-03-01T10:00:05.000Z",
+            sessionStartedAt: "2026-03-01T10:00:00.000Z",
+            sessionEndedAt: "2026-03-01T10:00:05.000Z",
+            sessionGitBranch: "main",
+            sessionCwd: "/workspace/project-one",
+          },
+          {
+            id: "m2",
+            sourceId: "src2",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "assistant",
+            content: "Everything checks out.",
+            createdAt: "2026-03-01T10:00:05.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+            sessionTitle: "Investigate markdown rendering",
+            sessionActivity: "2026-03-01T10:00:05.000Z",
+            sessionStartedAt: "2026-03-01T10:00:00.000Z",
+            sessionEndedAt: "2026-03-01T10:00:05.000Z",
+            sessionGitBranch: "main",
+            sessionCwd: "/workspace/project-one",
+          },
+        ],
+      }),
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("1 of 3 messages")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /All Sessions/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("2 of 7 messages")).toBeInTheDocument();
+    });
+  });
+
+  it("reveals messages in the project tree when the Sessions pane is collapsed", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            projectPaneCollapsed: true,
+            projectViewMode: "list",
+            sessionPaneCollapsed: true,
+            selectedProjectId: "project_1",
+            historyMode: "project_all",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+    const [revealButton] = screen.getAllByRole("button", {
+      name: "Reveal this message in session",
+    });
+    expect(revealButton).toBeDefined();
+    if (!revealButton) {
+      throw new Error("Expected reveal button");
+    }
+
+    await user.click(revealButton);
+
+    await waitFor(() => {
+      const treeSessionButton = container.querySelector<HTMLButtonElement>(
+        '.project-tree-session-row[data-session-id="session_1"]',
+      );
+      expect(treeSessionButton).not.toBeNull();
+      expect(treeSessionButton?.classList.contains("active")).toBe(true);
+    });
+
+    expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
   });
 
   it("reveals session leaves in the project tree and keeps the Sessions pane collapsed", async () => {
@@ -738,12 +1896,84 @@ describe("App shell", () => {
     await user.click(treeSessionButton);
 
     await waitFor(() => {
-      expect(screen.getByText("2 messages")).toBeInTheDocument();
+      expect(screen.getByText("2 of 2 messages")).toBeInTheDocument();
     });
 
     const workspace = container.querySelector<HTMLElement>(".workspace.history-layout");
     expect(workspace?.style.getPropertyValue("--session-pane-width")).toBe("36px");
     expect(screen.queryByRole("button", { name: /Switch to All Sessions/i })).toBeNull();
+  });
+
+  it("does not start resizing the Sessions pane while it is collapsed", async () => {
+    installScrollIntoViewMock();
+    const client = createAppClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            historyMode: "project_all",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
+    });
+
+    const resizers = Array.from(container.querySelectorAll<HTMLElement>(".pane-resizer"));
+    expect(resizers).toHaveLength(2);
+    const sessionResizer = resizers[1];
+    expect(sessionResizer).toBeDefined();
+    if (!sessionResizer) {
+      throw new Error("Expected session resizer");
+    }
+    expect(sessionResizer.classList.contains("pane-resizer-disabled")).toBe(true);
+
+    fireEvent.pointerDown(sessionResizer, { clientX: 500 });
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 620 }));
+
+    expect(document.body.classList.contains("resizing-panels")).toBe(false);
+
+    const workspace = container.querySelector<HTMLElement>(".workspace.history-layout");
+    expect(workspace?.style.getPropertyValue("--session-pane-width")).toBe("36px");
+  });
+
+  it("hides the Sessions pane in tree view when toggled from project options", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            projectViewMode: "tree",
+            selectedProjectId: "project_1",
+            historyMode: "project_all",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
+    });
+
+    expect(container.querySelector(".session-pane")).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Project options" }));
+    await user.click(screen.getByRole("button", { name: "Hide Sessions pane in tree view" }));
+
+    await waitFor(() => {
+      expect(container.querySelector(".session-pane")).toBeNull();
+    });
+
+    const workspace = container.querySelector<HTMLElement>(".workspace.history-layout");
+    expect(workspace?.classList.contains("tree-sessions-hidden")).toBe(true);
+    expect(container.querySelectorAll(".pane-resizer")).toHaveLength(1);
   });
 
   it("opens the project delete dialog with JSONL-specific guidance and invokes project deletion", async () => {

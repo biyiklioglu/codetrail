@@ -67,9 +67,9 @@ function createProps(
     focusGlobalSearch: vi.fn(),
     focusSessionSearch: vi.fn(),
     toggleFocusMode: vi.fn(),
-    toggleScopedMessagesExpanded: vi.fn(),
+    toggleAllMessagesExpanded: vi.fn(),
     toggleHistoryCategory: vi.fn(),
-    toggleHistoryCategoryExpanded: vi.fn(),
+    toggleHistoryCategoryDefaultExpansion: vi.fn(),
     toggleProjectPaneCollapsed: vi.fn(),
     toggleSessionPaneCollapsed: vi.fn(),
     focusPreviousHistoryMessage: vi.fn(),
@@ -80,6 +80,10 @@ function createProps(
     selectNextSession: vi.fn(),
     selectPreviousProject: vi.fn(),
     selectNextProject: vi.fn(),
+    selectPreviousFocusedSession: vi.fn(),
+    selectNextFocusedSession: vi.fn(),
+    selectPreviousFocusedProject: vi.fn(),
+    selectNextFocusedProject: vi.fn(),
     handleProjectTreeArrow: vi.fn(),
     handleProjectTreeEnter: vi.fn(),
     pageHistoryMessagesUp: vi.fn(),
@@ -137,9 +141,9 @@ describe("useKeyboardShortcuts", () => {
     expect(props.setMainView).toHaveBeenCalledWith("settings");
     expect(props.applyZoomAction).toHaveBeenCalledWith("in");
     expect(props.toggleFocusMode).toHaveBeenCalledTimes(1);
-    expect(props.toggleScopedMessagesExpanded).toHaveBeenCalledTimes(1);
+    expect(props.toggleAllMessagesExpanded).toHaveBeenCalledTimes(1);
     expect(props.toggleHistoryCategory).toHaveBeenCalledWith("user");
-    expect(props.toggleHistoryCategoryExpanded).toHaveBeenCalledWith("user");
+    expect(props.toggleHistoryCategoryDefaultExpansion).toHaveBeenCalledWith("user");
     expect(props.toggleProjectPaneCollapsed).toHaveBeenCalledTimes(1);
     expect(props.toggleSessionPaneCollapsed).toHaveBeenCalledTimes(1);
     expect(props.goToPreviousHistoryPage).toHaveBeenCalledTimes(1);
@@ -184,7 +188,7 @@ describe("useKeyboardShortcuts", () => {
     expect(props.goToNextSearchPage).toHaveBeenCalledTimes(1);
     expect(props.goToPreviousHistoryPage).not.toHaveBeenCalled();
     expect(props.goToNextHistoryPage).not.toHaveBeenCalled();
-    expect(props.toggleHistoryCategoryExpanded).not.toHaveBeenCalled();
+    expect(props.toggleHistoryCategoryDefaultExpansion).not.toHaveBeenCalled();
     expect(props.pageHistoryMessagesUp).not.toHaveBeenCalled();
     expect(props.pageHistoryMessagesDown).not.toHaveBeenCalled();
   });
@@ -441,9 +445,9 @@ describe("useKeyboardShortcuts", () => {
     sessionList.focus();
     sessionList.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
 
-    expect(props.selectNextProject).toHaveBeenCalledTimes(1);
+    expect(props.selectNextFocusedProject).toHaveBeenCalledTimes(1);
     expect(props.handleProjectTreeArrow).toHaveBeenCalledWith("right");
-    expect(props.selectPreviousSession).toHaveBeenCalledTimes(1);
+    expect(props.selectPreviousFocusedSession).toHaveBeenCalledTimes(1);
 
     projectList.focus();
     projectList.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));

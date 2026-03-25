@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync } from "node:fs";
+import { basename } from "node:path";
 import { z } from "zod";
 
 import {
@@ -18,9 +19,12 @@ import {
 import {
   DEFAULT_DISCOVERY_CONFIG,
   type DiscoveryConfig,
+  type WorktreeSource,
   discoverSessionFiles,
   discoverSingleFile,
 } from "../discovery";
+import { projectNameFromPath } from "../discovery/shared";
+import { stringifyCompactMetadata } from "../metadata";
 import { type ParserDiagnostic, parseSession, parseSessionEvent } from "../parsing";
 import { asArray, asRecord, readString } from "../parsing/helpers";
 import {
@@ -65,6 +69,7 @@ export type IndexingDependencies = {
   ensureDatabaseSchema?: typeof ensureDatabaseSchema;
   clearIndexedData?: typeof clearIndexedData;
   readFileText?: ReadFileText;
+  prefetchedJsonlChunks?: PrefetchedJsonlChunk[];
   now?: () => Date;
   onFileIssue?: (issue: IndexingFileIssue) => void;
   onNotice?: (notice: IndexingNotice) => void;
@@ -76,9 +81,18 @@ type ResolvedIndexingDependencies = {
   ensureDatabaseSchema: typeof ensureDatabaseSchema;
   clearIndexedData: typeof clearIndexedData;
   readFileText: ReadFileText;
+  prefetchedJsonlChunkByPath: Map<string, PrefetchedJsonlChunk>;
   now: () => Date;
   onFileIssue: (issue: IndexingFileIssue) => void;
   onNotice: (notice: IndexingNotice) => void;
+};
+
+export type PrefetchedJsonlChunk = {
+  filePath: string;
+  fileSize: number;
+  fileMtimeMs: number;
+  startOffsetBytes: number;
+  bytes: Uint8Array;
 };
 
 type IndexedFileRow = {
@@ -134,6 +148,13 @@ type DeletedProjectRow = {
 type SessionFileRow = {
   id: string;
   file_path: string;
+};
+
+type ExistingProjectCandidateRow = {
+  provider: Provider;
+  path: string;
+  name: string;
+  repository_url: string | null;
 };
 
 type IndexedMessage = ReturnType<typeof parseSession>["messages"][number];
@@ -236,7 +257,21 @@ export type IndexingNotice = {
 };
 
 type IndexingStatements = {
-  upsertProject: PreparedStatement<[string, Provider, string, string, string, string]>;
+  upsertProject: PreparedStatement<
+    [
+      string,
+      Provider,
+      string,
+      string,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      string,
+      string,
+    ]
+  >;
   upsertSession: PreparedStatement<
     [
       string,
@@ -250,6 +285,20 @@ type IndexingStatements = {
       number | null,
       string | null,
       string | null,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      WorktreeSource | null,
       number,
       number,
       number,
@@ -385,12 +434,13 @@ export function runIncrementalIndexing(
 ): IndexingResult {
   const resolvedDependencies = resolveIndexingDependencies(dependencies);
   const discoveryConfig = resolveIndexingDiscoveryConfig(config);
-  const discoveredFiles = resolvedDependencies.discoverSessionFiles(discoveryConfig);
-  const discoveredByFilePath = new Map(discoveredFiles.map((file) => [file.filePath, file]));
+  const initiallyDiscoveredFiles = resolvedDependencies.discoverSessionFiles(discoveryConfig);
 
   const db = resolvedDependencies.openDatabase(config.dbPath);
   try {
     const schema = resolvedDependencies.ensureDatabaseSchema(db);
+    const discoveredFiles = normalizeDiscoveredProjectPaths(db, initiallyDiscoveredFiles);
+    const discoveredByFilePath = new Map(discoveredFiles.map((file) => [file.filePath, file]));
 
     if (config.forceReindex) {
       // Force reindex intentionally drops delete tombstones too so this pass fully trusts disk and
@@ -500,13 +550,14 @@ export function indexChangedFiles(
   const resolvedDependencies = resolveIndexingDependencies(dependencies);
   const discoveryConfig = resolveIndexingDiscoveryConfig(config);
 
-  const discoveredFiles = changedFilePaths
+  const initiallyDiscoveredFiles = changedFilePaths
     .map((filePath) => discoverSingleFile(filePath, discoveryConfig))
     .filter((file): file is NonNullable<typeof file> => file !== null);
 
   const db = resolvedDependencies.openDatabase(config.dbPath);
   try {
     const schema = resolvedDependencies.ensureDatabaseSchema(db);
+    const discoveredFiles = normalizeDiscoveredProjectPaths(db, initiallyDiscoveredFiles);
 
     // Query only the specific rows for the targeted files — no full table scans.
     const getIndexedFile = db.prepare(
@@ -613,14 +664,185 @@ export function indexChangedFiles(
   }
 }
 
+function normalizeDiscoveredProjectPaths(
+  db: SqliteDatabase,
+  discoveredFiles: ReturnType<typeof discoverSessionFiles>,
+): ReturnType<typeof discoverSessionFiles> {
+  if (discoveredFiles.length === 0) {
+    return discoveredFiles;
+  }
+
+  const existingProjects = db
+    .prepare(
+      `SELECT provider, path, name
+      , repository_url
+       FROM projects`,
+    )
+    .all() as ExistingProjectCandidateRow[];
+  const codexCandidateProjects = buildCodexCandidateProjects(discoveredFiles, existingProjects);
+
+  return discoveredFiles.map((discovered) => {
+    const canonicalProjectPath = discovered.canonicalProjectPath || discovered.projectPath;
+    if (discovered.provider !== "codex") {
+      return canonicalProjectPath === discovered.projectPath
+        ? discovered
+        : {
+            ...discovered,
+            projectPath: canonicalProjectPath,
+            canonicalProjectPath,
+            projectName: projectNameFromPath(canonicalProjectPath),
+          };
+    }
+
+    const normalized = normalizeCodexDiscoveredProjectPath(discovered, codexCandidateProjects);
+    return {
+      ...normalized,
+      projectName: projectNameFromPath(normalized.canonicalProjectPath),
+      projectPath: normalized.canonicalProjectPath,
+    };
+  });
+}
+
+function normalizeCodexDiscoveredProjectPath(
+  discovered: ReturnType<typeof discoverSessionFiles>[number],
+  candidates: CodexCandidateProject[],
+): ReturnType<typeof discoverSessionFiles>[number] {
+  const currentCanonicalPath = discovered.canonicalProjectPath || discovered.projectPath;
+  const currentCwd = discovered.metadata.cwd;
+  if (
+    currentCanonicalPath &&
+    currentCwd &&
+    currentCanonicalPath !== currentCwd &&
+    discovered.metadata.worktreeSource
+  ) {
+    return discovered;
+  }
+
+  const currentRepoName = currentCwd ? basename(currentCwd) : "";
+  const repositoryUrl = discovered.metadata.repositoryUrl;
+  const repoUrlMatches =
+    repositoryUrl && currentRepoName
+      ? candidates.filter(
+          (candidate) =>
+            candidate.repositoryUrl === repositoryUrl &&
+            basename(candidate.path) === currentRepoName,
+        )
+      : [];
+  const repoUrlMatch = repoUrlMatches[0];
+  if (repoUrlMatches.length === 1 && repoUrlMatch) {
+    return {
+      ...discovered,
+      canonicalProjectPath: repoUrlMatch.path,
+      metadata: {
+        ...discovered.metadata,
+        worktreeLabel: discovered.metadata.worktreeLabel,
+        worktreeSource: discovered.metadata.worktreeLabel ? "repo_url_match" : null,
+        resolutionSource: "repo_url_match",
+      },
+    };
+  }
+
+  const basenameMatches = currentRepoName
+    ? candidates.filter((candidate) => basename(candidate.path) === currentRepoName)
+    : [];
+  const basenameMatch = basenameMatches[0];
+  if (basenameMatches.length === 1 && basenameMatch) {
+    return {
+      ...discovered,
+      canonicalProjectPath: basenameMatch.path,
+      metadata: {
+        ...discovered.metadata,
+        worktreeLabel: discovered.metadata.worktreeLabel,
+        worktreeSource: discovered.metadata.worktreeLabel ? "basename_match" : null,
+        resolutionSource: "basename_match",
+      },
+    };
+  }
+
+  return {
+    ...discovered,
+    canonicalProjectPath: currentCanonicalPath,
+    metadata: {
+      ...discovered.metadata,
+      worktreeLabel:
+        currentCanonicalPath && currentCwd && currentCanonicalPath !== currentCwd
+          ? discovered.metadata.worktreeLabel
+          : null,
+      worktreeSource:
+        currentCanonicalPath && currentCwd && currentCanonicalPath !== currentCwd
+          ? discovered.metadata.worktreeSource
+          : null,
+      resolutionSource:
+        currentCanonicalPath && currentCwd && currentCanonicalPath !== currentCwd
+          ? (discovered.metadata.resolutionSource ?? null)
+          : null,
+    },
+  };
+}
+
+type CodexCandidateProject = {
+  path: string;
+  repositoryUrl: string | null;
+};
+
+function buildCodexCandidateProjects(
+  discoveredFiles: ReturnType<typeof discoverSessionFiles>,
+  existingProjects: ExistingProjectCandidateRow[],
+): CodexCandidateProject[] {
+  const candidates = new Map<string, CodexCandidateProject>();
+
+  for (const discovered of discoveredFiles) {
+    if (discovered.provider !== "codex") {
+      continue;
+    }
+    const cwd = discovered.metadata.cwd;
+    if (!cwd || cwd !== discovered.canonicalProjectPath || discovered.metadata.worktreeLabel) {
+      continue;
+    }
+    candidates.set(discovered.canonicalProjectPath, {
+      path: discovered.canonicalProjectPath,
+      repositoryUrl: discovered.metadata.repositoryUrl,
+    });
+  }
+
+  for (const project of existingProjects) {
+    if (project.provider !== "codex") {
+      continue;
+    }
+    candidates.set(project.path, {
+      path: project.path,
+      repositoryUrl: project.repository_url,
+    });
+  }
+
+  return [...candidates.values()];
+}
+
 function createIndexingStatements(db: SqliteDatabase): IndexingStatements {
   return {
     upsertProject: db.prepare(
-      `INSERT INTO projects (id, provider, name, path, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO projects (
+         id,
+         provider,
+         name,
+         path,
+         provider_project_key,
+         repository_url,
+         resolution_state,
+         resolution_source,
+         metadata_json,
+         created_at,
+         updated_at
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          path = excluded.path,
+         provider_project_key = excluded.provider_project_key,
+         repository_url = excluded.repository_url,
+         resolution_state = excluded.resolution_state,
+         resolution_source = excluded.resolution_source,
+         metadata_json = excluded.metadata_json,
          updated_at = excluded.updated_at`,
     ),
     upsertSession: db.prepare(
@@ -636,10 +858,24 @@ function createIndexingStatements(db: SqliteDatabase): IndexingStatements {
          duration_ms,
          git_branch,
          cwd,
+         session_identity,
+         provider_session_id,
+         session_kind,
+         canonical_project_path,
+         repository_url,
+         git_commit_hash,
+         lineage_parent_id,
+         provider_client,
+         provider_source,
+         provider_client_version,
+         resolution_source,
+         metadata_json,
+         worktree_label,
+         worktree_source,
          message_count,
          token_input_total,
          token_output_total
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          project_id = excluded.project_id,
          provider = excluded.provider,
@@ -651,6 +887,20 @@ function createIndexingStatements(db: SqliteDatabase): IndexingStatements {
          duration_ms = excluded.duration_ms,
          git_branch = excluded.git_branch,
          cwd = excluded.cwd,
+         session_identity = excluded.session_identity,
+         provider_session_id = excluded.provider_session_id,
+         session_kind = excluded.session_kind,
+         canonical_project_path = excluded.canonical_project_path,
+         repository_url = excluded.repository_url,
+         git_commit_hash = excluded.git_commit_hash,
+         lineage_parent_id = excluded.lineage_parent_id,
+         provider_client = excluded.provider_client,
+         provider_source = excluded.provider_source,
+         provider_client_version = excluded.provider_client_version,
+         resolution_source = excluded.resolution_source,
+         metadata_json = excluded.metadata_json,
+         worktree_label = excluded.worktree_label,
+         worktree_source = excluded.worktree_source,
          message_count = excluded.message_count,
          token_input_total = excluded.token_input_total,
          token_output_total = excluded.token_output_total`,
@@ -784,7 +1034,7 @@ function processDiscoveredFiles(args: {
     const existing = args.lookupExisting(discovered.filePath);
     const sessionDbId = makeSessionId(discovered.provider, discovered.sessionIdentity);
     const deletedProject = args.deletedProjectByKey.get(
-      deletedProjectKey(discovered.provider, discovered.projectPath),
+      deletedProjectKey(discovered.provider, discovered.canonicalProjectPath),
     );
     const unchanged =
       args.forceSkipUnchanged &&
@@ -867,6 +1117,9 @@ function processDiscoveredFiles(args: {
                 args.compiledSystemMessageRules.compiledByProvider[discovered.provider],
               statements: args.statements,
               resumeCheckpoint,
+              prefetchedJsonlChunk:
+                args.resolvedDependencies.prefetchedJsonlChunkByPath.get(discovered.filePath) ??
+                null,
               onNotice: args.resolvedDependencies.onNotice,
             });
       accumulateParserDiagnostics(args.diagnostics, fileDiagnostics);
@@ -891,6 +1144,9 @@ function resolveIndexingDependencies(
     ensureDatabaseSchema: dependencies.ensureDatabaseSchema ?? ensureDatabaseSchema,
     clearIndexedData: dependencies.clearIndexedData ?? clearIndexedData,
     readFileText: dependencies.readFileText ?? ((filePath) => readFileSync(filePath, "utf8")),
+    prefetchedJsonlChunkByPath: new Map(
+      (dependencies.prefetchedJsonlChunks ?? []).map((chunk) => [chunk.filePath, chunk]),
+    ),
     now: dependencies.now ?? (() => new Date()),
     onFileIssue: dependencies.onFileIssue ?? defaultOnFileIssue,
     onNotice: dependencies.onNotice ?? defaultOnNotice,
@@ -1042,7 +1298,7 @@ function indexMaterializedSessionFile(args: {
     });
   }
 
-  const projectId = makeProjectId(args.discovered.provider, args.discovered.projectPath);
+  const projectId = makeProjectId(args.discovered.provider, args.discovered.canonicalProjectPath);
   const sourceMeta = adapter.extractSourceMetadata(source.payload);
   const normalizedMessages = reclassifySystemMessages(parsed.messages, args.systemMessageRules);
   const messagesWithDuration = deriveOperationDurations(normalizedMessages);
@@ -1081,6 +1337,7 @@ function indexStreamedJsonlSessionFile(args: {
   systemMessageRules: RegExp[];
   statements: IndexingStatements;
   resumeCheckpoint: ResumeCheckpoint | null;
+  prefetchedJsonlChunk: PrefetchedJsonlChunk | null;
   onNotice: (notice: IndexingNotice) => void;
 }): ParserDiagnostic[] {
   const adapter = getProviderAdapter(args.discovered.provider);
@@ -1094,7 +1351,7 @@ function indexStreamedJsonlSessionFile(args: {
     args.systemMessageRules,
     args.resumeCheckpoint?.processingState,
   );
-  const projectId = makeProjectId(args.discovered.provider, args.discovered.projectPath);
+  const projectId = makeProjectId(args.discovered.provider, args.discovered.canonicalProjectPath);
   const shouldResume = args.resumeCheckpoint !== null;
 
   try {
@@ -1116,6 +1373,7 @@ function indexStreamedJsonlSessionFile(args: {
         sourceMetaAccumulator,
         statements: args.statements,
         resumeCheckpoint: args.resumeCheckpoint,
+        prefetchedJsonlChunk: args.prefetchedJsonlChunk,
         onNotice: args.onNotice,
       });
 
@@ -1148,12 +1406,27 @@ function indexStreamedJsonlSessionFile(args: {
         fileMtimeMs: args.discovered.fileMtimeMs,
         gitBranch: sourceMeta.gitBranch ?? args.discovered.metadata.gitBranch,
         cwd: sourceMeta.cwd ?? args.discovered.metadata.cwd,
+        sessionIdentity: args.discovered.sessionIdentity,
+        providerSessionId:
+          args.discovered.metadata.providerSessionId ?? args.discovered.sourceSessionId,
+        sessionKind: args.discovered.metadata.sessionKind ?? "regular",
+        canonicalProjectPath: args.discovered.canonicalProjectPath,
+        repositoryUrl: args.discovered.metadata.repositoryUrl,
+        gitCommitHash: args.discovered.metadata.gitCommitHash ?? null,
+        lineageParentId: args.discovered.metadata.lineageParentId ?? null,
+        providerClient: args.discovered.metadata.providerClient ?? null,
+        providerSource: args.discovered.metadata.providerSource ?? null,
+        providerClientVersion: args.discovered.metadata.providerClientVersion ?? null,
+        resolutionSource: args.discovered.metadata.resolutionSource ?? null,
+        metadataJson: stringifyCompactMetadata(args.discovered.metadata.sessionMetadata),
+        worktreeLabel: args.discovered.metadata.worktreeLabel,
+        worktreeSource: args.discovered.metadata.worktreeSource,
       });
 
       args.statements.upsertIndexedFile.run(
         args.discovered.filePath,
         args.discovered.provider,
-        args.discovered.projectPath,
+        args.discovered.canonicalProjectPath,
         args.discovered.sessionIdentity,
         args.discovered.fileSize,
         args.discovered.fileMtimeMs,
@@ -1235,7 +1508,7 @@ function persistOversizedMaterializedSessionFile(args: {
     nowIso: args.nowIso,
     statements: args.statements,
     onNotice: args.onNotice,
-    projectId: makeProjectId(args.discovered.provider, args.discovered.projectPath),
+    projectId: makeProjectId(args.discovered.provider, args.discovered.canonicalProjectPath),
     sessionTitle: "Oversized transcript omitted",
     modelNames: "",
     gitBranch: args.discovered.metadata.gitBranch,
@@ -1292,7 +1565,12 @@ function persistMaterializedMessages(args: {
         args.projectId,
         args.discovered.provider,
         args.discovered.projectName,
-        args.discovered.projectPath,
+        args.discovered.canonicalProjectPath,
+        args.discovered.metadata.providerProjectKey ?? null,
+        args.discovered.metadata.repositoryUrl,
+        deriveResolutionState(args.discovered),
+        args.discovered.metadata.resolutionSource ?? null,
+        stringifyCompactMetadata(args.discovered.metadata.projectMetadata),
         args.nowIso,
         args.nowIso,
       );
@@ -1308,6 +1586,20 @@ function persistMaterializedMessages(args: {
         args.aggregate.durationMs,
         args.gitBranch,
         args.cwd,
+        args.discovered.sessionIdentity,
+        args.discovered.metadata.providerSessionId ?? args.discovered.sourceSessionId,
+        args.discovered.metadata.sessionKind ?? "regular",
+        args.discovered.canonicalProjectPath,
+        args.discovered.metadata.repositoryUrl,
+        args.discovered.metadata.gitCommitHash ?? null,
+        args.discovered.metadata.lineageParentId ?? null,
+        args.discovered.metadata.providerClient ?? null,
+        args.discovered.metadata.providerSource ?? null,
+        args.discovered.metadata.providerClientVersion ?? null,
+        args.discovered.metadata.resolutionSource ?? null,
+        stringifyCompactMetadata(args.discovered.metadata.sessionMetadata),
+        args.discovered.metadata.worktreeLabel,
+        args.discovered.metadata.worktreeSource,
         args.aggregate.messageCount,
         args.aggregate.tokenInputTotal,
         args.aggregate.tokenOutputTotal,
@@ -1325,7 +1617,7 @@ function persistMaterializedMessages(args: {
       args.statements.upsertIndexedFile.run(
         args.discovered.filePath,
         args.discovered.provider,
-        args.discovered.projectPath,
+        args.discovered.canonicalProjectPath,
         args.discovered.sessionIdentity,
         args.discovered.fileSize,
         args.discovered.fileMtimeMs,
@@ -1365,7 +1657,12 @@ function prepareStreamedSessionPersistence(
     projectId,
     args.discovered.provider,
     args.discovered.projectName,
-    args.discovered.projectPath,
+    args.discovered.canonicalProjectPath,
+    args.discovered.metadata.providerProjectKey ?? null,
+    args.discovered.metadata.repositoryUrl,
+    deriveResolutionState(args.discovered),
+    args.discovered.metadata.resolutionSource ?? null,
+    stringifyCompactMetadata(args.discovered.metadata.projectMetadata),
     args.nowIso,
     args.nowIso,
   );
@@ -1386,6 +1683,21 @@ function prepareStreamedSessionPersistence(
     fileMtimeMs: args.discovered.fileMtimeMs,
     gitBranch: sourceMetaAccumulator.gitBranch ?? args.discovered.metadata.gitBranch,
     cwd: sourceMetaAccumulator.cwd ?? args.discovered.metadata.cwd,
+    sessionIdentity: args.discovered.sessionIdentity,
+    providerSessionId:
+      args.discovered.metadata.providerSessionId ?? args.discovered.sourceSessionId,
+    sessionKind: args.discovered.metadata.sessionKind ?? "regular",
+    canonicalProjectPath: args.discovered.canonicalProjectPath,
+    repositoryUrl: args.discovered.metadata.repositoryUrl,
+    gitCommitHash: args.discovered.metadata.gitCommitHash ?? null,
+    lineageParentId: args.discovered.metadata.lineageParentId ?? null,
+    providerClient: args.discovered.metadata.providerClient ?? null,
+    providerSource: args.discovered.metadata.providerSource ?? null,
+    providerClientVersion: args.discovered.metadata.providerClientVersion ?? null,
+    resolutionSource: args.discovered.metadata.resolutionSource ?? null,
+    metadataJson: stringifyCompactMetadata(args.discovered.metadata.sessionMetadata),
+    worktreeLabel: args.discovered.metadata.worktreeLabel,
+    worktreeSource: args.discovered.metadata.worktreeSource,
   });
 }
 
@@ -1398,6 +1710,7 @@ function streamAndPersistJsonlEvents(args: {
   sourceMetaAccumulator: ProviderSourceMetadataAccumulator;
   statements: IndexingStatements;
   resumeCheckpoint: ResumeCheckpoint | null;
+  prefetchedJsonlChunk: PrefetchedJsonlChunk | null;
   onNotice: (notice: IndexingNotice) => void;
 }): { sequence: number; emittedEvents: number; streamResult: StreamJsonlResult } {
   let sequence = args.resumeCheckpoint?.nextMessageSequence ?? 0;
@@ -1408,6 +1721,14 @@ function streamAndPersistJsonlEvents(args: {
       startOffsetBytes: args.resumeCheckpoint?.lastOffsetBytes ?? 0,
       startLineNumber: args.resumeCheckpoint?.lastLineNumber ?? 0,
       startEventIndex: args.resumeCheckpoint?.lastEventIndex ?? 0,
+      prefetchedJsonlChunk:
+        args.prefetchedJsonlChunk &&
+        args.prefetchedJsonlChunk.startOffsetBytes ===
+          (args.resumeCheckpoint?.lastOffsetBytes ?? 0) &&
+        args.prefetchedJsonlChunk.fileSize === args.discovered.fileSize &&
+        args.prefetchedJsonlChunk.fileMtimeMs === args.discovered.fileMtimeMs
+          ? args.prefetchedJsonlChunk
+          : null,
       onEvent: (event, eventIndex, rescueNotice) => {
         emittedEvents += 1;
         if (rescueNotice) {
@@ -2174,6 +2495,20 @@ function upsertSessionSummary(
     fileMtimeMs: number;
     gitBranch: string | null;
     cwd: string | null;
+    sessionIdentity: string;
+    providerSessionId: string;
+    sessionKind: string | null;
+    canonicalProjectPath: string;
+    repositoryUrl: string | null;
+    gitCommitHash: string | null;
+    lineageParentId: string | null;
+    providerClient: string | null;
+    providerSource: string | null;
+    providerClientVersion: string | null;
+    resolutionSource: string | null;
+    metadataJson: string | null;
+    worktreeLabel: string | null;
+    worktreeSource: WorktreeSource | null;
   },
 ): void {
   statements.upsertSession.run(
@@ -2188,10 +2523,43 @@ function upsertSessionSummary(
     args.aggregate.durationMs,
     args.gitBranch,
     args.cwd,
+    args.sessionIdentity,
+    args.providerSessionId,
+    args.sessionKind,
+    args.canonicalProjectPath,
+    args.repositoryUrl,
+    args.gitCommitHash,
+    args.lineageParentId,
+    args.providerClient,
+    args.providerSource,
+    args.providerClientVersion,
+    args.resolutionSource,
+    args.metadataJson,
+    args.worktreeLabel,
+    args.worktreeSource,
     args.messageCount,
     args.tokenInputTotal,
     args.tokenOutputTotal,
   );
+}
+
+function deriveResolutionState(
+  discovered: ReturnType<typeof discoverSessionFiles>[number],
+): "resolved" | "heuristic" | "unresolved" {
+  if (discovered.metadata.unresolvedProject || !discovered.canonicalProjectPath) {
+    return "unresolved";
+  }
+
+  if (
+    discovered.metadata.resolutionSource === "project_id" ||
+    discovered.metadata.resolutionSource === "folder_decode" ||
+    discovered.metadata.resolutionSource === "repo_url_match" ||
+    discovered.metadata.resolutionSource === "basename_match"
+  ) {
+    return "heuristic";
+  }
+
+  return "resolved";
 }
 
 function applyIndexingContentLimits(message: IndexedMessage): IndexedMessage {
@@ -2305,6 +2673,7 @@ function streamJsonlEvents(
     startOffsetBytes?: number;
     startLineNumber?: number;
     startEventIndex?: number;
+    prefetchedJsonlChunk?: PrefetchedJsonlChunk | null;
     onEvent: (event: unknown, eventIndex: number, rescueNotice: JsonlRescueNotice | null) => void;
     onOmittedLine: (omitted: OmittedJsonlLine) => void;
     onInvalidLine: (lineNumber: number, error: unknown) => void;
@@ -2323,37 +2692,31 @@ function streamJsonlEvents(
   let readOffset = callbacks.startOffsetBytes ?? 0;
 
   try {
-    fd = openSync(filePath, "r");
-    while (true) {
-      const bytesRead = readSync(fd, buffer, 0, buffer.length, readOffset);
-      if (bytesRead <= 0) {
-        break;
-      }
+    if (callbacks.prefetchedJsonlChunk) {
+      readOffset = callbacks.startOffsetBytes ?? 0;
+      const prefetchedBuffer = Buffer.from(callbacks.prefetchedJsonlChunk.bytes);
+      const bytesRead = prefetchedBuffer.length;
       readOffset += bytesRead;
-      let cursor = 0;
-      while (cursor < bytesRead) {
-        const newlineIndex = buffer.indexOf(0x0a, cursor);
-        const segmentEnd = newlineIndex >= 0 ? newlineIndex : bytesRead;
-        const segment = buffer.subarray(cursor, segmentEnd);
-        if (!streamState.discardingHardOmittedLine) {
-          const nextLineBytes = streamState.pendingLineBytes + segment.length;
-          if (nextLineBytes > MAX_JSONL_RESCUE_LINE_BYTES) {
-            streamState.discardingHardOmittedLine = true;
-            streamState.lineChunks = [];
-          } else if (segment.length > 0) {
-            streamState.lineChunks.push(Buffer.from(segment));
-          }
-        }
-        streamState.pendingLineBytes += segment.length;
-
-        if (newlineIndex >= 0) {
+      processJsonlReadChunk(prefetchedBuffer, bytesRead, streamState, {
+        onFlushLine: () => {
           consumedOffset += streamState.pendingLineBytes + 1;
           flushStreamJsonlLine(streamState, callbacks);
-          cursor = newlineIndex + 1;
-          continue;
+        },
+      });
+    } else {
+      fd = openSync(filePath, "r");
+      while (true) {
+        const bytesRead = readSync(fd, buffer, 0, buffer.length, readOffset);
+        if (bytesRead <= 0) {
+          break;
         }
-
-        cursor = bytesRead;
+        readOffset += bytesRead;
+        processJsonlReadChunk(buffer, bytesRead, streamState, {
+          onFlushLine: () => {
+            consumedOffset += streamState.pendingLineBytes + 1;
+            flushStreamJsonlLine(streamState, callbacks);
+          },
+        });
       }
     }
     if (
@@ -2387,6 +2750,46 @@ function streamJsonlEvents(
     nextLineNumber: streamState.lineNumber,
     nextEventIndex: streamState.eventIndex,
   };
+}
+
+function processJsonlReadChunk(
+  buffer: Buffer,
+  bytesRead: number,
+  state: {
+    lineChunks: Buffer[];
+    pendingLineBytes: number;
+    discardingHardOmittedLine: boolean;
+    lineNumber: number;
+    eventIndex: number;
+  },
+  handlers: {
+    onFlushLine: () => void;
+  },
+): void {
+  let cursor = 0;
+  while (cursor < bytesRead) {
+    const newlineIndex = buffer.indexOf(0x0a, cursor);
+    const segmentEnd = newlineIndex >= 0 ? newlineIndex : bytesRead;
+    const segment = buffer.subarray(cursor, segmentEnd);
+    if (!state.discardingHardOmittedLine) {
+      const nextLineBytes = state.pendingLineBytes + segment.length;
+      if (nextLineBytes > MAX_JSONL_RESCUE_LINE_BYTES) {
+        state.discardingHardOmittedLine = true;
+        state.lineChunks = [];
+      } else if (segment.length > 0) {
+        state.lineChunks.push(Buffer.from(segment));
+      }
+    }
+    state.pendingLineBytes += segment.length;
+
+    if (newlineIndex >= 0) {
+      handlers.onFlushLine();
+      cursor = newlineIndex + 1;
+      continue;
+    }
+
+    cursor = bytesRead;
+  }
 }
 
 function flushStreamJsonlLine(

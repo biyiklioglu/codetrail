@@ -82,12 +82,16 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
   const [sessionPaneCollapsed, setSessionPaneCollapsed] = useState(false);
   const [singleClickFoldersExpand, setSingleClickFoldersExpand] = useState(true);
   const [singleClickProjectsExpand, setSingleClickProjectsExpand] = useState(false);
+  const [hideSessionsPaneInTreeView, setHideSessionsPaneInTreeView] = useState(false);
   const [projectProviders, setProjectProviders] = useState<Provider[]>(["claude"]);
   const [historyCategories, setHistoryCategories] = useState<MessageCategory[]>(["assistant"]);
   const [expandedByDefaultCategories, setExpandedByDefaultCategories] = useState<MessageCategory[]>(
     ["assistant"],
   );
   const [searchProviders, setSearchProviders] = useState<Provider[]>(["claude"]);
+  const [liveWatchEnabled, setLiveWatchEnabled] = useState(true);
+  const [liveWatchRowHasBackground, setLiveWatchRowHasBackground] = useState(true);
+  const [claudeHooksPrompted, setClaudeHooksPrompted] = useState(false);
   const [preferredAutoRefreshStrategy, setPreferredAutoRefreshStrategy] =
     useState<NonOffRefreshStrategy>("watch-1s");
   const [theme, setTheme] = useState<ThemeMode>("light");
@@ -154,10 +158,14 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
       sessionPaneCollapsed,
       singleClickFoldersExpand,
       singleClickProjectsExpand,
+      hideSessionsPaneInTreeView,
       projectProviders,
       historyCategories,
       expandedByDefaultCategories,
       searchProviders,
+      liveWatchEnabled,
+      liveWatchRowHasBackground,
+      claudeHooksPrompted,
       preferredAutoRefreshStrategy,
       theme,
       darkShikiTheme,
@@ -198,10 +206,14 @@ function Harness({ logError }: { logError: (context: string, error: unknown) => 
     setSessionPaneCollapsed,
     setSingleClickFoldersExpand,
     setSingleClickProjectsExpand,
+    setHideSessionsPaneInTreeView,
     setProjectProviders,
     setHistoryCategories,
     setExpandedByDefaultCategories,
     setSearchProviders,
+    setLiveWatchEnabled,
+    setLiveWatchRowHasBackground,
+    setClaudeHooksPrompted,
     setPreferredAutoRefreshStrategy,
     setTheme,
     setDarkShikiTheme,
@@ -275,10 +287,15 @@ describe("usePaneStateSync", () => {
             sessionPaneCollapsed: false,
             singleClickFoldersExpand: false,
             singleClickProjectsExpand: true,
+            hideSessionsPaneInTreeView: true,
             projectProviders: ["claude", "codex"],
             historyCategories: ["assistant", "user"],
             expandedByDefaultCategories: ["assistant"],
             searchProviders: ["claude"],
+            liveWatchEnabled: false,
+            liveWatchRowHasBackground: false,
+            claudeHooksPrompted: true,
+            currentAutoRefreshStrategy: null,
             preferredAutoRefreshStrategy: "scan-10s",
             theme: "dark",
             darkShikiTheme: "vesper",
@@ -348,6 +365,8 @@ describe("usePaneStateSync", () => {
         projectSortField: "name",
         singleClickFoldersExpand: false,
         singleClickProjectsExpand: true,
+        hideSessionsPaneInTreeView: true,
+        liveWatchRowHasBackground: false,
         preferredAutoRefreshStrategy: "scan-10s",
         darkShikiTheme: "vesper",
         lightShikiTheme: "github-light-default",
@@ -418,10 +437,15 @@ describe("usePaneStateSync", () => {
             sessionPaneCollapsed: null,
             singleClickFoldersExpand: null,
             singleClickProjectsExpand: null,
+            hideSessionsPaneInTreeView: null,
             projectProviders: null,
             historyCategories: null,
             expandedByDefaultCategories: null,
             searchProviders: null,
+            liveWatchEnabled: null,
+            liveWatchRowHasBackground: null,
+            claudeHooksPrompted: null,
+            currentAutoRefreshStrategy: null,
             preferredAutoRefreshStrategy: null,
             theme: null,
             darkShikiTheme: null,

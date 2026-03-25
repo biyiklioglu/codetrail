@@ -14,6 +14,7 @@ beforeEach(() => {
         throw new Error("window.codetrail.invoke mock not configured for this test.");
       }),
       onHistoryExportProgress: vi.fn(() => () => undefined),
+      onAppCommand: vi.fn(() => () => undefined),
     },
   });
 });
