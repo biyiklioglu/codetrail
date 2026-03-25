@@ -260,7 +260,7 @@ export function SessionPane({
               >
                 <div className="session-preview">All Sessions</div>
                 <div className="session-meta">
-                  <span className="msg-count" title={`${formatInteger(allSessionsCount)} msgs`}>
+                  <span className="msg-count" title={`${formatInteger(allSessionsCount)} messages`}>
                     {formatCompactInteger(allSessionsCount)} msgs
                   </span>
                   <span className="session-time">Project-wide</span>
@@ -284,7 +284,7 @@ export function SessionPane({
               >
                 <div className="session-preview">Bookmarked Messages</div>
                 <div className="session-meta">
-                  <span className="msg-count" title={`${formatInteger(bookmarksCount)} msgs`}>
+                  <span className="msg-count" title={`${formatInteger(bookmarksCount)} messages`}>
                     {formatCompactInteger(bookmarksCount)} msgs
                   </span>
                   <span className="session-time">Project-wide</span>
@@ -322,7 +322,10 @@ export function SessionPane({
             >
               <div className="session-preview">{deriveSessionTitle(session)}</div>
               <div className="session-meta">
-                <span className="msg-count" title={`${formatInteger(session.messageCount)} msgs`}>
+                <span
+                  className="msg-count"
+                  title={`${formatInteger(session.messageCount)} messages`}
+                >
                   {formatCompactInteger(session.messageCount)} msgs
                 </span>
                 <span className="session-time">{formatDate(sessionActivityOf(session))}</span>
