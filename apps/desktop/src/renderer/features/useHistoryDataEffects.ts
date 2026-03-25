@@ -22,7 +22,7 @@ import type {
 } from "../app/types";
 import { shouldIgnoreAsyncEffectError } from "../lib/asyncEffectUtils";
 import type { CodetrailClient } from "../lib/codetrailClient";
-import { collectProjectMessageDeltas } from "../lib/projectUpdates";
+import { type StableListUpdateSource, collectProjectMessageDeltas } from "../lib/projectUpdates";
 import { decideSessionSelectionAfterLoad } from "../lib/sessionSelection";
 import { getHistoryRefreshScopeKey, getLiveEdgePage } from "./historyRefreshPolicy";
 import type { RefreshContext } from "./useHistoryController";
@@ -49,6 +49,7 @@ export function useHistoryDataEffects({
   setProjectsLoaded,
   projectsLoaded,
   setSessions,
+  setSessionListUpdateSource,
   setSessionsLoadedProjectId,
   setBookmarksResponse,
   setBookmarksLoadedProjectId,
@@ -96,11 +97,12 @@ export function useHistoryDataEffects({
   setHistorySelection: Dispatch<SetStateAction<HistorySelection>>;
   setProjects: Dispatch<SetStateAction<ProjectSummary[]>>;
   projectsRef: MutableRefObject<ProjectSummary[]>;
-  setProjectListUpdateSource: Dispatch<SetStateAction<"auto" | "resort">>;
+  setProjectListUpdateSource: Dispatch<SetStateAction<StableListUpdateSource>>;
   registerAutoProjectUpdates: (deltas: Record<string, number>) => void;
   setProjectsLoaded: Dispatch<SetStateAction<boolean>>;
   projectsLoaded: boolean;
   setSessions: Dispatch<SetStateAction<SessionSummary[]>>;
+  setSessionListUpdateSource: Dispatch<SetStateAction<StableListUpdateSource>>;
   setSessionsLoadedProjectId: Dispatch<SetStateAction<string | null>>;
   setBookmarksResponse: Dispatch<SetStateAction<BookmarkListResponse>>;
   setBookmarksLoadedProjectId: Dispatch<SetStateAction<string | null>>;
@@ -135,7 +137,7 @@ export function useHistoryDataEffects({
   refreshContextRef: MutableRefObject<RefreshContext | null>;
 }) {
   const loadProjects = useCallback(
-    async (source: "auto" | "resort" = "resort") => {
+    async (source: StableListUpdateSource = "resort") => {
       // Monotonic request tokens prevent stale async responses from overwriting newer selections.
       const requestToken = projectsLoadTokenRef.current + 1;
       projectsLoadTokenRef.current = requestToken;
@@ -170,36 +172,42 @@ export function useHistoryDataEffects({
     ],
   );
 
-  const loadSessions = useCallback(async () => {
-    const requestToken = sessionsLoadTokenRef.current + 1;
-    sessionsLoadTokenRef.current = requestToken;
-    if (!selectedProjectId) {
-      setSessions([]);
-      setSessionsLoadedProjectId("");
-      setHistorySelection((value) =>
-        value.mode === "session" ? createHistorySelection("project_all", "", "") : value,
-      );
-      return [];
-    }
+  const loadSessions = useCallback(
+    async (source: StableListUpdateSource = "resort") => {
+      const requestToken = sessionsLoadTokenRef.current + 1;
+      sessionsLoadTokenRef.current = requestToken;
+      if (!selectedProjectId) {
+        setSessions([]);
+        setSessionListUpdateSource("resort");
+        setSessionsLoadedProjectId("");
+        setHistorySelection((value) =>
+          value.mode === "session" ? createHistorySelection("project_all", "", "") : value,
+        );
+        return [];
+      }
 
-    setSessionsLoadedProjectId(null);
-    const response = await codetrail.invoke("sessions:list", {
-      projectId: selectedProjectId,
-    });
-    if (requestToken !== sessionsLoadTokenRef.current) {
-      return;
-    }
-    setSessions(response.sessions);
-    setSessionsLoadedProjectId(selectedProjectId);
-    return response.sessions;
-  }, [
-    codetrail,
-    selectedProjectId,
-    sessionsLoadTokenRef,
-    setHistorySelection,
-    setSessions,
-    setSessionsLoadedProjectId,
-  ]);
+      setSessionsLoadedProjectId(null);
+      const response = await codetrail.invoke("sessions:list", {
+        projectId: selectedProjectId,
+      });
+      if (requestToken !== sessionsLoadTokenRef.current) {
+        return;
+      }
+      setSessions(response.sessions);
+      setSessionListUpdateSource(source);
+      setSessionsLoadedProjectId(selectedProjectId);
+      return response.sessions;
+    },
+    [
+      codetrail,
+      selectedProjectId,
+      sessionsLoadTokenRef,
+      setHistorySelection,
+      setSessionListUpdateSource,
+      setSessions,
+      setSessionsLoadedProjectId,
+    ],
+  );
 
   const loadBookmarks = useCallback(async () => {
     const requestToken = bookmarksLoadTokenRef.current + 1;

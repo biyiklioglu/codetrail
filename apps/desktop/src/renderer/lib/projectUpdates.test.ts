@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { ProjectSummary } from "../app/types";
 import {
   collectProjectMessageDeltas,
-  mergeStableProjectOrder,
-  resolveProjectRefreshSource,
+  mergeStableOrder,
+  reorderItemsByStableOrder,
+  resolveStableRefreshSource,
 } from "./projectUpdates";
 
 describe("projectUpdates", () => {
@@ -26,37 +27,83 @@ describe("projectUpdates", () => {
 
   it("preserves the existing order and appends new ids", () => {
     expect(
-      mergeStableProjectOrder(
+      mergeStableOrder(
         ["project_3", "project_1", "project_2"],
         ["project_2", "project_1", "project_4"],
       ),
     ).toEqual(["project_1", "project_2", "project_4"]);
   });
 
+  it("reorders items according to the retained stable ids", () => {
+    const naturallySortedProjects: ProjectSummary[] = [
+      createProject({ id: "project_2" }),
+      createProject({ id: "project_1" }),
+      createProject({ id: "project_4" }),
+    ];
+
+    expect(
+      reorderItemsByStableOrder(naturallySortedProjects, ["project_1", "project_2", "project_4"]),
+    ).toEqual([naturallySortedProjects[1], naturallySortedProjects[0], naturallySortedProjects[2]]);
+  });
+
+  it("returns the natural order when there is no stable order yet", () => {
+    const naturallySortedProjects: ProjectSummary[] = [
+      createProject({ id: "project_2" }),
+      createProject({ id: "project_1" }),
+    ];
+
+    expect(reorderItemsByStableOrder(naturallySortedProjects, [])).toEqual(naturallySortedProjects);
+  });
+
+  it("drops stale ids that no longer exist in the natural order", () => {
+    const naturallySortedProjects: ProjectSummary[] = [
+      createProject({ id: "project_2" }),
+      createProject({ id: "project_1" }),
+    ];
+
+    expect(
+      reorderItemsByStableOrder(naturallySortedProjects, ["project_9", "project_1", "project_2"]),
+    ).toEqual([naturallySortedProjects[1], naturallySortedProjects[0]]);
+  });
+
+  it("appends new items that are not yet present in the stable order", () => {
+    const naturallySortedProjects: ProjectSummary[] = [
+      createProject({ id: "project_2" }),
+      createProject({ id: "project_1" }),
+      createProject({ id: "project_4" }),
+    ];
+
+    expect(reorderItemsByStableOrder(naturallySortedProjects, ["project_1", "project_2"])).toEqual([
+      naturallySortedProjects[1],
+      naturallySortedProjects[0],
+      naturallySortedProjects[2],
+    ]);
+  });
+
   it("forces a one-time resort for the first auto refresh after startup watch restore", () => {
-    expect(resolveProjectRefreshSource("auto", true)).toEqual({
-      projectSource: "resort",
+    expect(resolveStableRefreshSource("auto", true)).toEqual({
+      updateSource: "resort",
       clearStartupWatchResort: true,
     });
   });
 
   it("keeps later auto refreshes stable after the startup watch resort is consumed", () => {
-    expect(resolveProjectRefreshSource("auto", false)).toEqual({
-      projectSource: "auto",
+    expect(resolveStableRefreshSource("auto", false)).toEqual({
+      updateSource: "auto",
       clearStartupWatchResort: false,
     });
   });
 
   it("clears the pending startup watch resort when a manual refresh already resorted", () => {
-    expect(resolveProjectRefreshSource("manual", true)).toEqual({
-      projectSource: "resort",
+    expect(resolveStableRefreshSource("manual", true)).toEqual({
+      updateSource: "resort",
       clearStartupWatchResort: true,
     });
   });
 
   it("keeps manual refreshes on resort without clearing anything when no startup watch resort is pending", () => {
-    expect(resolveProjectRefreshSource("manual", false)).toEqual({
-      projectSource: "resort",
+    expect(resolveStableRefreshSource("manual", false)).toEqual({
+      updateSource: "resort",
       clearStartupWatchResort: false,
     });
   });

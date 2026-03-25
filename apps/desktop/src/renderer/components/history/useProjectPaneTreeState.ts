@@ -7,7 +7,7 @@ import type {
   TreeAutoRevealSessionRequest,
 } from "../../app/types";
 import { buildProjectFolderGroups } from "../../lib/projectTree";
-import { mergeStableProjectOrder } from "../../lib/projectUpdates";
+import { mergeStableOrder } from "../../lib/projectUpdates";
 import type { ProjectPaneHistoryMode, ProjectPaneTreeFocusedRow } from "./ProjectPane.types";
 
 type UseProjectPaneTreeStateArgs = {
@@ -179,7 +179,7 @@ export function useProjectPaneTreeState({
       if (didControlsChange || updateSource !== "auto" || current.length === 0) {
         return nextIds;
       }
-      return mergeStableProjectOrder(current, nextIds);
+      return mergeStableOrder(current, nextIds);
     });
   }, [folderOrderControlKey, naturalFolderGroups, updateSource, viewMode]);
 

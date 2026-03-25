@@ -48,7 +48,12 @@ import { usePaneStateSync } from "../hooks/usePaneStateSync";
 import { useReconcileProviderSelection } from "../hooks/useReconcileProviderSelection";
 import { useResizablePanes } from "../hooks/useResizablePanes";
 import { useCodetrailClient } from "../lib/codetrailClient";
-import { mergeStableProjectOrder, resolveProjectRefreshSource } from "../lib/projectUpdates";
+import {
+  type StableListUpdateSource,
+  mergeStableOrder,
+  reorderItemsByStableOrder,
+  resolveStableRefreshSource,
+} from "../lib/projectUpdates";
 import { clamp, compareRecent, sessionActivityOf } from "../lib/viewUtils";
 import {
   type AppearanceState,
@@ -152,6 +157,27 @@ function sortSessionSummaries(
     return sortDirection === "asc" ? byRecent : -byRecent;
   });
   return next;
+}
+
+function areStableOrderMapsEqual(
+  current: Record<string, string[]>,
+  next: Record<string, string[]>,
+): boolean {
+  const currentProjectIds = Object.keys(current);
+  const nextProjectIds = Object.keys(next);
+  if (currentProjectIds.length !== nextProjectIds.length) {
+    return false;
+  }
+
+  return nextProjectIds.every((projectId) => {
+    const currentIds = current[projectId];
+    const nextIds = next[projectId] ?? [];
+    return (
+      currentIds !== undefined &&
+      currentIds.length === nextIds.length &&
+      currentIds.every((id, index) => id === nextIds[index])
+    );
+  });
 }
 
 function getVisibleMessageAnchor(container: HTMLElement): {
@@ -260,16 +286,24 @@ export function useHistoryController({
     ),
   );
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [projectListUpdateSource, setProjectListUpdateSource] = useState<"auto" | "resort">(
-    "resort",
-  );
+  const [projectListUpdateSource, setProjectListUpdateSource] =
+    useState<StableListUpdateSource>("resort");
   const [projectOrderIds, setProjectOrderIds] = useState<string[]>([]);
   const [projectUpdates, setProjectUpdates] = useState<Record<string, ProjectUpdateState>>({});
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sessionListUpdateSource, setSessionListUpdateSource] =
+    useState<StableListUpdateSource>("resort");
+  const [sessionOrderIds, setSessionOrderIds] = useState<string[]>([]);
   const [treeProjectSessionsByProjectId, setTreeProjectSessionsByProjectId] = useState<
     Record<string, SessionSummary[]>
   >({});
+  const [
+    treeProjectSessionsUpdateSourceByProjectId,
+    setTreeProjectSessionsUpdateSourceByProjectId,
+  ] = useState<Record<string, StableListUpdateSource>>({});
+  const [treeProjectSessionOrderIdsByProjectId, setTreeProjectSessionOrderIdsByProjectId] =
+    useState<Record<string, string[]>>({});
   const [treeProjectSessionsLoadingByProjectId, setTreeProjectSessionsLoadingByProjectId] =
     useState<Record<string, boolean>>({});
   const [sessionsLoadedProjectId, setSessionsLoadedProjectId] = useState<string | null>(null);
@@ -421,6 +455,8 @@ export function useHistoryController({
   const projectsRef = useRef<ProjectSummary[]>([]);
   const projectUpdateTimeoutsRef = useRef<Map<string, number>>(new Map());
   const projectOrderControlKeyRef = useRef("");
+  const sessionOrderControlKeyRef = useRef("");
+  const treeSessionOrderControlKeyRef = useRef("");
   const startupWatchResortPendingRef = useRef(
     isWatchRefreshStrategy(initialPaneState?.currentAutoRefreshStrategy ?? "off"),
   );
@@ -496,27 +532,50 @@ export function useHistoryController({
       if (didProjectControlsChange || projectListUpdateSource !== "auto" || current.length === 0) {
         return nextIds;
       }
-      return mergeStableProjectOrder(current, nextIds);
+      return mergeStableOrder(current, nextIds);
     });
   }, [naturallySortedProjects, projectListUpdateSource, projectOrderControlKey]);
 
-  const sortedProjects = useMemo(() => {
-    if (projectOrderIds.length === 0) {
-      return naturallySortedProjects;
-    }
-    const projectsById = new Map(
-      naturallySortedProjects.map((project) => [project.id, project] as const),
-    );
-    return projectOrderIds
-      .map((projectId) => projectsById.get(projectId) ?? null)
-      .filter((project): project is ProjectSummary => project !== null);
-  }, [naturallySortedProjects, projectOrderIds]);
+  const sortedProjects = useMemo(
+    () => reorderItemsByStableOrder(naturallySortedProjects, projectOrderIds),
+    [naturallySortedProjects, projectOrderIds],
+  );
+  const rawSelectedProjectId = committedSelection.projectId;
+  const rawSelectedSessionId =
+    committedSelection.mode === "session" ? committedSelection.sessionId : "";
+  const historyMode = committedSelection.mode;
+  const selectedProjectId = rawSelectedProjectId || sortedProjects[0]?.id || "";
+  const selectedSessionId = rawSelectedSessionId;
+  const uiSelectedProjectId = rawUiSelectedProjectId || sortedProjects[0]?.id || "";
+  const uiSelectedSessionId = rawUiSelectedSessionId;
 
-  const sortedSessions = useMemo(
+  const naturallySortedSessions = useMemo(
     () => sortSessionSummaries(sessions, sessionSortDirection),
     [sessionSortDirection, sessions],
   );
-  const sortedTreeProjectSessionsByProjectId = useMemo(
+  const sessionOrderControlKey = useMemo(
+    () => [selectedProjectId, sessionSortDirection].join("\u0000"),
+    [selectedProjectId, sessionSortDirection],
+  );
+
+  useEffect(() => {
+    const nextIds = naturallySortedSessions.map((session) => session.id);
+    const didSessionControlsChange = sessionOrderControlKeyRef.current !== sessionOrderControlKey;
+    sessionOrderControlKeyRef.current = sessionOrderControlKey;
+
+    setSessionOrderIds((current) => {
+      if (didSessionControlsChange || sessionListUpdateSource !== "auto" || current.length === 0) {
+        return nextIds;
+      }
+      return mergeStableOrder(current, nextIds);
+    });
+  }, [naturallySortedSessions, sessionListUpdateSource, sessionOrderControlKey]);
+
+  const sortedSessions = useMemo(
+    () => reorderItemsByStableOrder(naturallySortedSessions, sessionOrderIds),
+    [naturallySortedSessions, sessionOrderIds],
+  );
+  const naturallySortedTreeProjectSessionsByProjectId = useMemo(
     () =>
       Object.fromEntries(
         Object.entries(treeProjectSessionsByProjectId).map(([projectId, projectSessions]) => [
@@ -526,15 +585,54 @@ export function useHistoryController({
       ) as Record<string, SessionSummary[]>,
     [sessionSortDirection, treeProjectSessionsByProjectId],
   );
+  const treeSessionOrderControlKey = sessionSortDirection;
 
-  const rawSelectedProjectId = committedSelection.projectId;
-  const rawSelectedSessionId =
-    committedSelection.mode === "session" ? committedSelection.sessionId : "";
-  const historyMode = committedSelection.mode;
-  const selectedProjectId = rawSelectedProjectId || sortedProjects[0]?.id || "";
-  const selectedSessionId = rawSelectedSessionId;
-  const uiSelectedProjectId = rawUiSelectedProjectId || sortedProjects[0]?.id || "";
-  const uiSelectedSessionId = rawUiSelectedSessionId;
+  useEffect(() => {
+    const didTreeSessionControlsChange =
+      treeSessionOrderControlKeyRef.current !== treeSessionOrderControlKey;
+    treeSessionOrderControlKeyRef.current = treeSessionOrderControlKey;
+
+    setTreeProjectSessionOrderIdsByProjectId((current) => {
+      const next = Object.fromEntries(
+        Object.entries(naturallySortedTreeProjectSessionsByProjectId).map(
+          ([projectId, projectSessions]) => {
+            const nextIds = projectSessions.map((session) => session.id);
+            const currentIds = current[projectId] ?? [];
+            const updateSource = treeProjectSessionsUpdateSourceByProjectId[projectId] ?? "resort";
+            if (
+              didTreeSessionControlsChange ||
+              updateSource !== "auto" ||
+              currentIds.length === 0
+            ) {
+              return [projectId, nextIds];
+            }
+            return [projectId, mergeStableOrder(currentIds, nextIds)];
+          },
+        ),
+      ) as Record<string, string[]>;
+      return areStableOrderMapsEqual(current, next) ? current : next;
+    });
+  }, [
+    naturallySortedTreeProjectSessionsByProjectId,
+    treeProjectSessionsUpdateSourceByProjectId,
+    treeSessionOrderControlKey,
+  ]);
+
+  const sortedTreeProjectSessionsByProjectId = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(naturallySortedTreeProjectSessionsByProjectId).map(
+          ([projectId, projectSessions]) => [
+            projectId,
+            reorderItemsByStableOrder(
+              projectSessions,
+              treeProjectSessionOrderIdsByProjectId[projectId] ?? [],
+            ),
+          ],
+        ),
+      ) as Record<string, SessionSummary[]>,
+    [naturallySortedTreeProjectSessionsByProjectId, treeProjectSessionOrderIdsByProjectId],
+  );
 
   useEffect(() => {
     treeProjectSessionsByProjectIdRef.current = treeProjectSessionsByProjectId;
@@ -574,10 +672,20 @@ export function useHistoryController({
         Object.entries(current).filter(([projectId]) => visibleProjectIds.has(projectId)),
       ),
     );
+    setTreeProjectSessionsUpdateSourceByProjectId((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([projectId]) => visibleProjectIds.has(projectId)),
+      ),
+    );
+    setTreeProjectSessionOrderIdsByProjectId((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([projectId]) => visibleProjectIds.has(projectId)),
+      ),
+    );
   }, [sortedProjects]);
 
   const ensureTreeProjectSessionsLoaded = useCallback(
-    async (projectId: string) => {
+    async (projectId: string, source: StableListUpdateSource = "resort") => {
       if (
         !projectId ||
         treeProjectSessionsLoadingByProjectIdRef.current[projectId] ||
@@ -601,6 +709,10 @@ export function useHistoryController({
           ...current,
           [projectId]: response.sessions,
         }));
+        setTreeProjectSessionsUpdateSourceByProjectId((current) => ({
+          ...current,
+          [projectId]: source,
+        }));
       } catch (error) {
         logError("Failed loading tree sessions", error);
       } finally {
@@ -616,21 +728,28 @@ export function useHistoryController({
     [codetrail, logError],
   );
 
-  const refreshTreeProjectSessions = useCallback(async () => {
-    const projectIds = Object.keys(treeProjectSessionsByProjectIdRef.current);
-    if (projectIds.length === 0) {
-      return;
-    }
-    try {
-      const response = await codetrail.invoke("sessions:listMany", { projectIds });
-      setTreeProjectSessionsByProjectId((current) => ({
-        ...current,
-        ...response.sessionsByProjectId,
-      }));
-    } catch (error) {
-      logError("Failed refreshing tree sessions", error);
-    }
-  }, [codetrail, logError]);
+  const refreshTreeProjectSessions = useCallback(
+    async (source: StableListUpdateSource = "resort") => {
+      const projectIds = Object.keys(treeProjectSessionsByProjectIdRef.current);
+      if (projectIds.length === 0) {
+        return;
+      }
+      try {
+        const response = await codetrail.invoke("sessions:listMany", { projectIds });
+        setTreeProjectSessionsByProjectId((current) => ({
+          ...current,
+          ...response.sessionsByProjectId,
+        }));
+        setTreeProjectSessionsUpdateSourceByProjectId((current) => ({
+          ...current,
+          ...Object.fromEntries(projectIds.map((projectId) => [projectId, source] as const)),
+        }));
+      } catch (error) {
+        logError("Failed refreshing tree sessions", error);
+      }
+    },
+    [codetrail, logError],
+  );
 
   const projectProviderKey = useMemo(() => projectProviders.join(","), [projectProviders]);
   const {
@@ -954,6 +1073,7 @@ export function useHistoryController({
     setProjectsLoaded,
     projectsLoaded,
     setSessions,
+    setSessionListUpdateSource,
     setSessionsLoadedProjectId,
     setBookmarksResponse,
     setBookmarksLoadedProjectId,
@@ -1637,7 +1757,7 @@ export function useHistoryController({
           scrollPreservation,
           prevMessageIds,
         };
-        const { projectSource, clearStartupWatchResort } = resolveProjectRefreshSource(
+        const { updateSource, clearStartupWatchResort } = resolveStableRefreshSource(
           source,
           startupWatchResortPendingRef.current,
         );
@@ -1662,9 +1782,9 @@ export function useHistoryController({
 
         if (source === "manual") {
           const sharedLoads: Promise<unknown>[] = [
-            loadProjects(projectSource),
-            loadSessions(),
-            refreshTreeProjectSessions(),
+            loadProjects(updateSource),
+            loadSessions(updateSource),
+            refreshTreeProjectSessions(updateSource),
           ];
           if (historyMode !== "bookmarks") {
             sharedLoads.push(loadBookmarks());
@@ -1687,7 +1807,7 @@ export function useHistoryController({
 
         const previousProjectFingerprint = selectedProjectRefreshFingerprintRef.current;
         const previousSessionFingerprint = selectedSessionRefreshFingerprintRef.current;
-        const nextProjects = await loadProjects(projectSource);
+        const nextProjects = await loadProjects(updateSource);
         if (clearStartupWatchResort) {
           startupWatchResortPendingRef.current = false;
         }
@@ -1700,7 +1820,7 @@ export function useHistoryController({
 
         let sessionFingerprintChanged = false;
         if (historyViewActive && selectedProjectId) {
-          const nextSessions = await loadSessions();
+          const nextSessions = await loadSessions(updateSource);
           const nextSelectedSession =
             nextSessions?.find((session) => session.id === selectedSessionId) ?? null;
           sessionFingerprintChanged =
@@ -1730,7 +1850,7 @@ export function useHistoryController({
           projectViewMode === "tree" &&
           Object.keys(treeProjectSessionsByProjectIdRef.current).length > 0
         ) {
-          await refreshTreeProjectSessions();
+          await refreshTreeProjectSessions(updateSource);
         }
       },
       [

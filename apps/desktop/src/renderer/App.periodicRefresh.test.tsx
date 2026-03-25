@@ -18,6 +18,32 @@ const FAST_OVERRIDES = {
   "scan-5min": 500,
 } as const;
 
+function installDialogMock(): void {
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value() {
+      this.setAttribute("open", "");
+      Object.defineProperty(this, "open", {
+        configurable: true,
+        writable: true,
+        value: true,
+      });
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value() {
+      this.removeAttribute("open");
+      Object.defineProperty(this, "open", {
+        configurable: true,
+        writable: true,
+        value: false,
+      });
+      this.dispatchEvent(new Event("close"));
+    },
+  });
+}
+
 function countChannelCalls(client: ReturnType<typeof createAppClient>, channel: string): number {
   return client.invoke.mock.calls.filter(([name]) => name === channel).length;
 }
@@ -66,10 +92,45 @@ function makeSessionSummary(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function makeOrderedSessions(
+  first: { id: string; title: string; endedAt: string; projectId?: string },
+  second: { id: string; title: string; endedAt: string; projectId?: string },
+) {
+  return [
+    makeSessionSummary({
+      id: first.id,
+      projectId: first.projectId ?? "project_1",
+      title: first.title,
+      startedAt: "2026-03-01T10:00:00.000Z",
+      endedAt: first.endedAt,
+    }),
+    makeSessionSummary({
+      id: second.id,
+      projectId: second.projectId ?? "project_1",
+      title: second.title,
+      startedAt: "2026-03-01T10:00:00.000Z",
+      endedAt: second.endedAt,
+    }),
+  ];
+}
+
+function getSessionPaneTitles(): string[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(".session-item .session-preview"))
+    .map((element) => element.textContent?.trim() ?? "")
+    .filter((text) => text.length > 0 && text !== "All Sessions" && text !== "Bookmarked Messages");
+}
+
+function getTreeSessionTitles(): string[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(".project-tree-session-title"))
+    .map((element) => element.textContent?.trim() ?? "")
+    .filter((text) => text.length > 0);
+}
+
 describe("App periodic refresh", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     setTestStrategyIntervalOverrides(FAST_OVERRIDES);
+    installDialogMock();
   });
 
   afterEach(() => {
@@ -544,6 +605,169 @@ describe("App periodic refresh", () => {
         treeRefreshCallsBeforeTick,
       );
     });
+  });
+
+  it("resorts sessions once after startup watch restore, then keeps later auto-refreshes stable in the sessions pane", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let phase = 0;
+    const sessionPhases = [
+      makeOrderedSessions(
+        { id: "session_1", title: "Session One", endedAt: "2026-03-01T10:00:10.000Z" },
+        { id: "session_2", title: "Session Two", endedAt: "2026-03-01T10:00:05.000Z" },
+      ),
+      makeOrderedSessions(
+        { id: "session_1", title: "Session One", endedAt: "2026-03-01T10:00:05.000Z" },
+        { id: "session_2", title: "Session Two", endedAt: "2026-03-01T10:00:20.000Z" },
+      ),
+      makeOrderedSessions(
+        { id: "session_1", title: "Session One", endedAt: "2026-03-01T10:00:30.000Z" },
+        { id: "session_2", title: "Session Two", endedAt: "2026-03-01T10:00:10.000Z" },
+      ),
+    ] as const;
+    const client = createAppClient({
+      "sessions:list": () => ({
+        sessions: sessionPhases[phase] ?? sessionPhases[sessionPhases.length - 1],
+      }),
+    });
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            sessionPaneCollapsed: false,
+            currentAutoRefreshStrategy: "watch-1s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Session One/i })).toBeInTheDocument();
+      expect(getSessionPaneTitles()).toEqual(["Session One", "Session Two"]);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("button", { name: "5s scan" }));
+
+    phase = 1;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(110);
+    });
+
+    await waitFor(() => {
+      expect(getSessionPaneTitles()).toEqual(["Session Two", "Session One"]);
+    });
+
+    const sessionCallsBeforeSecondTick = countChannelCalls(client, "sessions:list");
+    phase = 2;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(110);
+    });
+
+    await waitFor(() => {
+      expect(countChannelCalls(client, "sessions:list")).toBeGreaterThan(
+        sessionCallsBeforeSecondTick,
+      );
+    });
+    expect(getSessionPaneTitles()).toEqual(["Session Two", "Session One"]);
+  });
+
+  it("resorts tree sessions once after startup watch restore, then keeps later auto-refreshes stable", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let phase = 0;
+    const treeRefreshPhases = [
+      makeOrderedSessions(
+        { id: "session_1", title: "Session One", endedAt: "2026-03-01T10:00:05.000Z" },
+        { id: "session_2", title: "Session Two", endedAt: "2026-03-01T10:00:20.000Z" },
+      ),
+      makeOrderedSessions(
+        { id: "session_1", title: "Session One", endedAt: "2026-03-01T10:00:30.000Z" },
+        { id: "session_2", title: "Session Two", endedAt: "2026-03-01T10:00:10.000Z" },
+      ),
+    ] as const;
+    const client = createAppClient({
+      "projects:list": () => ({
+        projects: [
+          makeProjectSummary({
+            id: "project_1",
+            name: "Project One",
+            sessionCount: 2,
+          }),
+        ],
+      }),
+      "sessions:list": () => ({
+        sessions: makeOrderedSessions(
+          { id: "session_1", title: "Session One", endedAt: "2026-03-01T10:00:10.000Z" },
+          { id: "session_2", title: "Session Two", endedAt: "2026-03-01T10:00:05.000Z" },
+        ),
+      }),
+      "sessions:listMany": () => ({
+        sessionsByProjectId: {
+          project_1:
+            treeRefreshPhases[Math.max(0, phase - 1)] ??
+            treeRefreshPhases[treeRefreshPhases.length - 1]!,
+        },
+      }),
+    });
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            projectViewMode: "tree",
+            selectedProjectId: "project_1",
+            historyMode: "project_all",
+            currentAutoRefreshStrategy: "watch-1s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
+    });
+
+    const expandProjectButton = document.querySelector<HTMLButtonElement>(
+      '[data-project-expand-toggle-for="project_1"]',
+    );
+    expect(expandProjectButton).not.toBeNull();
+    if (!expandProjectButton) {
+      throw new Error("Expected project-one expand toggle");
+    }
+
+    await user.click(expandProjectButton);
+
+    await waitFor(() => {
+      expect(getTreeSessionTitles()).toEqual(["Session One", "Session Two"]);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("button", { name: "5s scan" }));
+
+    phase = 1;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(110);
+    });
+
+    await waitFor(() => {
+      expect(getTreeSessionTitles()).toEqual(["Session Two", "Session One"]);
+    });
+
+    const treeRefreshCallsBeforeSecondTick = countChannelCalls(client, "sessions:listMany");
+    phase = 2;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(110);
+    });
+
+    await waitFor(() => {
+      expect(countChannelCalls(client, "sessions:listMany")).toBeGreaterThan(
+        treeRefreshCallsBeforeSecondTick,
+      );
+    });
+    expect(getTreeSessionTitles()).toEqual(["Session Two", "Session One"]);
   });
 
   it("manual refresh keeps the broad reload path", async () => {

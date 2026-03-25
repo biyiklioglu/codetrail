@@ -39,6 +39,7 @@ import {
   getProjectNavigationTargetFromElement,
   getProjectParentFolderTarget,
 } from "../lib/historyNavigation";
+import type { StableListUpdateSource } from "../lib/projectUpdates";
 import { toggleValue } from "../lib/viewUtils";
 import { SIDEBAR_LIST_ROW_HEIGHT, scrollVirtualListIndexIntoView } from "../lib/virtualList";
 import { focusHistoryList } from "./historyControllerShared";
@@ -191,13 +192,13 @@ export function useHistoryInteractions({
   hideSessionsPaneForTreeView: boolean;
   setProjectViewMode: Dispatch<SetStateAction<ProjectViewMode>>;
   setAutoRevealSessionRequest: Dispatch<SetStateAction<TreeAutoRevealSessionRequest | null>>;
-  loadProjects: (source?: "auto" | "resort") => Promise<unknown>;
-  loadSessions: () => Promise<unknown>;
+  loadProjects: (source?: StableListUpdateSource) => Promise<unknown>;
+  loadSessions: (source?: StableListUpdateSource) => Promise<unknown>;
   refreshVisibleBookmarkStates: () => void;
   setProjectProviders: Dispatch<SetStateAction<Provider[]>>;
   setProjectQueryInput: Dispatch<SetStateAction<string>>;
   refreshContextRef: MutableRefObject<RefreshContext | null>;
-  refreshTreeProjectSessions: () => Promise<void>;
+  refreshTreeProjectSessions: (source?: StableListUpdateSource) => Promise<void>;
   pendingProjectPaneFocusCommitModeRef: MutableRefObject<HistorySelectionCommitMode>;
   pendingProjectPaneFocusWaitForKeyboardIdleRef: MutableRefObject<boolean>;
   queueProjectTreeNoopCommit: (options?: {
@@ -1083,17 +1084,15 @@ export function useHistoryInteractions({
     }, 0);
   }, [sessionSearchInputRef]);
 
-  const handleRefresh = useCallback(
-    async (source: "auto" | "manual" = "manual") => {
-      await Promise.all([
-        loadProjects(source === "auto" ? "auto" : "resort"),
-        loadSessions(),
-        loadBookmarks(),
-        refreshTreeProjectSessions(),
-      ]);
-    },
-    [loadBookmarks, loadProjects, loadSessions, refreshTreeProjectSessions],
-  );
+  const handleRefresh = useCallback(async () => {
+    const updateSource: StableListUpdateSource = "resort";
+    await Promise.all([
+      loadProjects(updateSource),
+      loadSessions(updateSource),
+      loadBookmarks(),
+      refreshTreeProjectSessions(updateSource),
+    ]);
+  }, [loadBookmarks, loadProjects, loadSessions, refreshTreeProjectSessions]);
 
   const navigateFromSearchResult = useCallback(
     (navigation: HistorySearchNavigation) => {

@@ -1,5 +1,7 @@
 import type { ProjectSummary } from "../app/types";
 
+export type StableListUpdateSource = "auto" | "resort";
+
 export function collectProjectMessageDeltas(
   previousProjects: ProjectSummary[],
   nextProjects: ProjectSummary[],
@@ -23,7 +25,7 @@ export function collectProjectMessageDeltas(
   return deltas;
 }
 
-export function mergeStableProjectOrder(previousIds: string[], nextIds: string[]): string[] {
+export function mergeStableOrder(previousIds: string[], nextIds: string[]): string[] {
   const nextIdSet = new Set(nextIds);
   const retainedIds = previousIds.filter((id) => nextIdSet.has(id));
   const retainedIdSet = new Set(retainedIds);
@@ -31,29 +33,46 @@ export function mergeStableProjectOrder(previousIds: string[], nextIds: string[]
   return [...retainedIds, ...appendedIds];
 }
 
-export function resolveProjectRefreshSource(
+export function reorderItemsByStableOrder<T extends { id: string }>(
+  naturallySortedItems: T[],
+  orderIds: string[],
+): T[] {
+  if (orderIds.length === 0) {
+    return naturallySortedItems;
+  }
+
+  const itemsById = new Map(naturallySortedItems.map((item) => [item.id, item] as const));
+  const orderedItems = orderIds
+    .map((itemId) => itemsById.get(itemId) ?? null)
+    .filter((item): item is T => item !== null);
+  const orderedIdSet = new Set(orderedItems.map((item) => item.id));
+  const appendedItems = naturallySortedItems.filter((item) => !orderedIdSet.has(item.id));
+  return [...orderedItems, ...appendedItems];
+}
+
+export function resolveStableRefreshSource(
   refreshSource: "manual" | "auto",
   startupWatchResortPending: boolean,
 ): {
-  projectSource: "auto" | "resort";
+  updateSource: StableListUpdateSource;
   clearStartupWatchResort: boolean;
 } {
   if (refreshSource === "manual") {
     return {
-      projectSource: "resort",
+      updateSource: "resort",
       clearStartupWatchResort: startupWatchResortPending,
     };
   }
 
   if (startupWatchResortPending) {
     return {
-      projectSource: "resort",
+      updateSource: "resort",
       clearStartupWatchResort: true,
     };
   }
 
   return {
-    projectSource: "auto",
+    updateSource: "auto",
     clearStartupWatchResort: false,
   };
 }
