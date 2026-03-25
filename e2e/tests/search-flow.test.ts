@@ -1,4 +1,4 @@
-import { test, expect } from "../fixtures/app.fixture";
+import { expect, test } from "../fixtures/app.fixture";
 import { UI_PROVIDER_IDS } from "../helpers/providers";
 
 test.describe("Search Flow", () => {
@@ -27,47 +27,30 @@ test.describe("Search Flow", () => {
 
       const isActive = await advToggle.evaluate((el) => el.classList.contains("active"));
       expect(isActive).toBe(!wasActive);
-      await expect(advToggle).toHaveAttribute(
-        "aria-pressed",
-        String(!wasActive),
-      );
+      await expect(advToggle).toHaveAttribute("aria-pressed", String(!wasActive));
     });
 
     await test.step("Toggle category filter chips and verify active state toggles", async () => {
-      const userChip = appPage.locator(
-        "button.search-filter-chip-category-user",
-      );
+      const userChip = appPage.locator("button.search-filter-chip-category-user");
       if ((await userChip.count()) > 0) {
-        const wasActive = await userChip.evaluate((el) =>
-          el.classList.contains("is-active"),
-        );
+        const wasActive = await userChip.evaluate((el) => el.classList.contains("is-active"));
         await userChip.click({ force: true });
-        const isActive = await userChip.evaluate((el) =>
-          el.classList.contains("is-active"),
-        );
+        const isActive = await userChip.evaluate((el) => el.classList.contains("is-active"));
         expect(isActive).toBe(!wasActive);
       }
     });
 
     await test.step("Toggle each search provider filter chip", async () => {
       for (const provider of UI_PROVIDER_IDS) {
-        const chip = appPage.locator(
-          `button.search-filter-chip-provider-${provider}`,
-        );
+        const chip = appPage.locator(`button.search-filter-chip-provider-${provider}`);
         if ((await chip.count()) === 0) {
           continue;
         }
-        const wasActive = await chip.evaluate((el) =>
-          el.classList.contains("is-active"),
-        );
+        const wasActive = await chip.evaluate((el) => el.classList.contains("is-active"));
         await chip.click({ force: true });
-        expect(
-          await chip.evaluate((el) => el.classList.contains("is-active")),
-        ).toBe(!wasActive);
+        expect(await chip.evaluate((el) => el.classList.contains("is-active"))).toBe(!wasActive);
         await chip.click({ force: true });
-        expect(
-          await chip.evaluate((el) => el.classList.contains("is-active")),
-        ).toBe(wasActive);
+        expect(await chip.evaluate((el) => el.classList.contains("is-active"))).toBe(wasActive);
       }
     });
 

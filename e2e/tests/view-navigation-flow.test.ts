@@ -1,4 +1,4 @@
-import { test, expect } from "../fixtures/app.fixture";
+import { expect, test } from "../fixtures/app.fixture";
 
 test.describe("View Navigation Flow", () => {
   test("full view cycle: history → search → help → settings → history", async ({ appPage }) => {

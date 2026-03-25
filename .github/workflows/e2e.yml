@@ -55,6 +55,7 @@ jobs:
 
       # System libraries for Electron/Chromium (implementation differs per OS)
       - name: Install Playwright system dependencies
+        if: matrix.os == 'ubuntu-latest'
         run: npx playwright install-deps
 
       - name: Install Xvfb (Linux only)

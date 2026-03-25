@@ -1,4 +1,4 @@
-import { test, expect } from "../fixtures/app.fixture";
+import { expect, test } from "../fixtures/app.fixture";
 
 test.describe("History Pane Interactions", () => {
   test("project pane collapse and expand changes workspace layout", async ({ appPage }) => {
@@ -12,9 +12,7 @@ test.describe("History Pane Interactions", () => {
     });
 
     await test.step("Expand project pane restores it", async () => {
-      const expandBtn = appPage.locator(
-        'button[aria-label*="Expand"][aria-label*="Projects"]',
-      );
+      const expandBtn = appPage.locator('button[aria-label*="Expand"][aria-label*="Projects"]');
       await expandBtn.click();
       await expect(appPage.locator(".workspace")).not.toHaveClass(/projects-collapsed/);
       await expect(appPage.locator(".project-pane")).not.toHaveClass(/collapsed/);
@@ -82,9 +80,7 @@ test.describe("History Pane Interactions", () => {
   test("project pane view mode toggles between list and tree", async ({ appPage }) => {
     await test.step("Toggle from list to tree view", async () => {
       const viewToggle = appPage.locator(".project-pane-view-toggle-btn");
-      const initialActive = await viewToggle.evaluate((el) =>
-        el.classList.contains("active"),
-      );
+      const initialActive = await viewToggle.evaluate((el) => el.classList.contains("active"));
 
       await viewToggle.click();
 

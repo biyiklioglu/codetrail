@@ -1,4 +1,4 @@
-import { test, expect } from "../fixtures/app.fixture";
+import { expect, test } from "../fixtures/app.fixture";
 
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
@@ -22,12 +22,8 @@ test.describe("Focus Mode Flow", () => {
     });
 
     await test.step("Focus button label changes to exit", async () => {
-      await expect(
-        appPage.locator('button[aria-label="Exit focus mode"]'),
-      ).toBeVisible();
-      await expect(
-        appPage.locator('button[aria-label="Enter focus mode"]'),
-      ).not.toBeVisible();
+      await expect(appPage.locator('button[aria-label="Exit focus mode"]')).toBeVisible();
+      await expect(appPage.locator('button[aria-label="Enter focus mode"]')).not.toBeVisible();
     });
 
     await test.step("Exit focus mode restores three-pane layout", async () => {
@@ -61,9 +57,7 @@ test.describe("Focus Mode Flow", () => {
     });
   });
 
-  test("focus mode state resets when navigating to other views and back", async ({
-    appPage,
-  }) => {
+  test("focus mode state resets when navigating to other views and back", async ({ appPage }) => {
     await test.step("Enter focus mode", async () => {
       await appPage.locator('button[aria-label="Enter focus mode"]').click();
       await expect(appPage.locator(".history-focus-pane")).toBeVisible();

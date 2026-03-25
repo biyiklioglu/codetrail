@@ -1,9 +1,7 @@
-import { test, expect } from "../fixtures/app.fixture";
+import { expect, test } from "../fixtures/app.fixture";
 
 test.describe("Theme & Appearance Flow", () => {
-  test("TopBar theme dropdown changes DOM theme and persists across views", async ({
-    appPage,
-  }) => {
+  test("TopBar theme dropdown changes DOM theme and persists across views", async ({ appPage }) => {
     await test.step("Open theme dropdown from TopBar", async () => {
       await appPage.locator('button[aria-label="Choose theme"]').click();
       const menu = appPage.locator('.tb-dropdown-menu[aria-label="Theme"]');
@@ -11,15 +9,12 @@ test.describe("Theme & Appearance Flow", () => {
     });
 
     await test.step("Select dark theme and verify DOM attribute changes", async () => {
-      const darkItem = appPage.locator(
-        '.tb-dropdown-menu[aria-label="Theme"] button',
-        { hasText: "Dark" },
-      );
+      const darkItem = appPage.locator('.tb-dropdown-menu[aria-label="Theme"] button', {
+        hasText: "Dark",
+      });
       await darkItem.first().click();
 
-      const htmlTheme = await appPage.evaluate(() =>
-        document.documentElement.dataset.theme,
-      );
+      const htmlTheme = await appPage.evaluate(() => document.documentElement.dataset.theme);
       expect(htmlTheme).toBe("dark");
     });
 
@@ -27,9 +22,7 @@ test.describe("Theme & Appearance Flow", () => {
       await appPage.locator('button[aria-label="Search"]').click();
       await expect(appPage.locator(".search-view")).toBeVisible();
 
-      const themeInSearch = await appPage.evaluate(() =>
-        document.documentElement.dataset.theme,
-      );
+      const themeInSearch = await appPage.evaluate(() => document.documentElement.dataset.theme);
       expect(themeInSearch).toBe("dark");
 
       await appPage.keyboard.press("Escape");
@@ -37,15 +30,12 @@ test.describe("Theme & Appearance Flow", () => {
 
     await test.step("Switch to light theme and verify", async () => {
       await appPage.locator('button[aria-label="Choose theme"]').click();
-      const lightItem = appPage.locator(
-        '.tb-dropdown-menu[aria-label="Theme"] button',
-        { hasText: "Light" },
-      );
+      const lightItem = appPage.locator('.tb-dropdown-menu[aria-label="Theme"] button', {
+        hasText: "Light",
+      });
       await lightItem.first().click();
 
-      const htmlTheme = await appPage.evaluate(() =>
-        document.documentElement.dataset.theme,
-      );
+      const htmlTheme = await appPage.evaluate(() => document.documentElement.dataset.theme);
       expect(htmlTheme).toBe("light");
     });
   });
@@ -64,22 +54,22 @@ test.describe("Theme & Appearance Flow", () => {
       const count = await items.count();
       expect(count).toBeGreaterThan(1);
 
-      const unpressedItem = items.filter({ has: appPage.locator('[aria-pressed="false"]') }).first();
+      const unpressedItem = items
+        .filter({ has: appPage.locator('[aria-pressed="false"]') })
+        .first();
       if ((await unpressedItem.count()) > 0) {
         const targetText = await unpressedItem.textContent();
         await unpressedItem.click();
 
-        const shikiTheme = await appPage.evaluate(() =>
-          document.documentElement.dataset.shikiTheme,
+        const shikiTheme = await appPage.evaluate(
+          () => document.documentElement.dataset.shikiTheme,
         );
         expect(shikiTheme).toBeTruthy();
       }
     });
   });
 
-  test("auto-refresh strategy dropdown changes strategy and shows status", async ({
-    appPage,
-  }) => {
+  test("auto-refresh strategy dropdown changes strategy and shows status", async ({ appPage }) => {
     await test.step("Open auto-refresh strategy dropdown", async () => {
       await appPage.locator('button[aria-label="Auto-refresh strategy"]').click();
       const menu = appPage.locator(".tb-dropdown-menu-auto-refresh");
@@ -94,14 +84,11 @@ test.describe("Theme & Appearance Flow", () => {
     });
 
     await test.step("Select Manual strategy and verify menu closes", async () => {
-      const manualItem = appPage.locator(
-        ".tb-dropdown-menu-auto-refresh button",
-        { hasText: "Manual" },
-      );
+      const manualItem = appPage.locator(".tb-dropdown-menu-auto-refresh button", {
+        hasText: "Manual",
+      });
       await manualItem.click();
-      await expect(
-        appPage.locator(".tb-dropdown-menu-auto-refresh"),
-      ).not.toBeVisible();
+      await expect(appPage.locator(".tb-dropdown-menu-auto-refresh")).not.toBeVisible();
     });
   });
 });

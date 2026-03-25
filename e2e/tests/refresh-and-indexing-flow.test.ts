@@ -1,11 +1,9 @@
-import { test, expect } from "../fixtures/app.fixture";
+import { expect, test } from "../fixtures/app.fixture";
 
 test.describe("Refresh & Indexing Flow", () => {
   test("incremental refresh triggers indexing and reloads data", async ({ appPage }) => {
     await test.step("Click Refresh button to trigger incremental refresh", async () => {
-      const refreshBtn = appPage.locator(
-        'button[aria-label="Incremental refresh"]',
-      );
+      const refreshBtn = appPage.locator('button[aria-label="Incremental refresh"]');
       await refreshBtn.click();
     });
 

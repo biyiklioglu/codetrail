@@ -1,4 +1,4 @@
-import { test, expect } from "../fixtures/app.fixture";
+import { expect, test } from "../fixtures/app.fixture";
 
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
@@ -97,39 +97,27 @@ test.describe("Keyboard Navigation Flow", () => {
   });
 
   test("zoom keyboard shortcuts change zoom level", async ({ appPage }) => {
+    const zoomInput = appPage.locator('.history-view input[aria-label="Zoom percentage"]');
+
     await test.step("Cmd++ increases zoom", async () => {
-      await appPage.locator('button[aria-label="Open settings"]').click();
-      const zoomInput = appPage.locator('input[aria-label="Zoom"]');
       const beforeZoom = await zoomInput.inputValue();
-
-      await appPage.keyboard.press("Escape");
       await appPage.keyboard.press(`${MOD}+=`);
-
-      await appPage.locator('button[aria-label="Open settings"]').click();
-      const afterZoom = await zoomInput.inputValue();
-      expect(Number(afterZoom)).toBeGreaterThan(Number(beforeZoom));
+      await expect
+        .poll(async () => Number(await zoomInput.inputValue()))
+        .toBeGreaterThan(Number(beforeZoom));
     });
 
     await test.step("Cmd+- decreases zoom", async () => {
-      const zoomInput = appPage.locator('input[aria-label="Zoom"]');
       const beforeZoom = await zoomInput.inputValue();
-
-      await appPage.keyboard.press("Escape");
       await appPage.keyboard.press(`${MOD}+-`);
-
-      await appPage.locator('button[aria-label="Open settings"]').click();
-      const afterZoom = await zoomInput.inputValue();
-      expect(Number(afterZoom)).toBeLessThan(Number(beforeZoom));
+      await expect
+        .poll(async () => Number(await zoomInput.inputValue()))
+        .toBeLessThan(Number(beforeZoom));
     });
 
     await test.step("Cmd+0 resets zoom to 100%", async () => {
-      await appPage.keyboard.press("Escape");
       await appPage.keyboard.press(`${MOD}+0`);
-
-      await appPage.locator('button[aria-label="Open settings"]').click();
-      const zoomInput = appPage.locator('input[aria-label="Zoom"]');
       await expect(zoomInput).toHaveValue("100");
-      await appPage.keyboard.press("Escape");
     });
   });
 });

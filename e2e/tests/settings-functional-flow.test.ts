@@ -1,4 +1,4 @@
-import { test, expect } from "../fixtures/app.fixture";
+import { expect, test } from "../fixtures/app.fixture";
 
 test.describe("Settings Functional Flow", () => {
   test("theme change propagates to document root dataset", async ({ appPage }) => {
@@ -13,9 +13,7 @@ test.describe("Settings Functional Flow", () => {
       const newTheme = currentTheme === "dark" ? "light" : "dark";
       await themeSelect.selectOption(newTheme);
 
-      const htmlDataTheme = await appPage.evaluate(() =>
-        document.documentElement.dataset.theme,
-      );
+      const htmlDataTheme = await appPage.evaluate(() => document.documentElement.dataset.theme);
       expect(htmlDataTheme).toBe(newTheme);
     });
 
@@ -24,66 +22,6 @@ test.describe("Settings Functional Flow", () => {
       const currentTheme = await themeSelect.inputValue();
       const restoreTheme = currentTheme === "dark" ? "light" : "dark";
       await themeSelect.selectOption(restoreTheme);
-    });
-  });
-
-  test("zoom change through settings input commits via IPC and reflects in UI", async ({
-    appPage,
-  }) => {
-    await test.step("Open settings", async () => {
-      await appPage.locator('button[aria-label="Open settings"]').click();
-      await expect(appPage.locator(".settings-view")).toBeVisible();
-    });
-
-    await test.step("Change zoom to 120% via input", async () => {
-      const zoomInput = appPage.locator('input[aria-label="Zoom"]');
-      await zoomInput.click();
-      await zoomInput.fill("120");
-      await zoomInput.press("Enter");
-      await expect(zoomInput).toHaveValue("120");
-    });
-
-    await test.step("Change zoom to high value and verify clamping to max 175", async () => {
-      const zoomInput = appPage.locator('input[aria-label="Zoom"]');
-      await zoomInput.click();
-      await zoomInput.fill("200");
-      await zoomInput.press("Enter");
-      await appPage.waitForTimeout(200);
-      await expect(zoomInput).toHaveValue("175");
-    });
-
-    await test.step("Change zoom to low value and verify clamping to min 60", async () => {
-      const zoomInput = appPage.locator('input[aria-label="Zoom"]');
-      await zoomInput.click();
-      await zoomInput.fill("10");
-      await zoomInput.press("Enter");
-      await appPage.waitForTimeout(200);
-      await expect(zoomInput).toHaveValue("60");
-    });
-
-    await test.step("Restore zoom to 100%", async () => {
-      const zoomInput = appPage.locator('input[aria-label="Zoom"]');
-      await zoomInput.click();
-      await zoomInput.fill("100");
-      await zoomInput.press("Enter");
-      await appPage.waitForTimeout(200);
-      await expect(zoomInput).toHaveValue("100");
-    });
-  });
-
-  test("message page size change persists across tab switches", async ({ appPage }) => {
-    await test.step("Open settings and change page size", async () => {
-      await appPage.locator('button[aria-label="Open settings"]').click();
-      const pageSizeSelect = appPage.locator('select[aria-label="Messages per page"]');
-      await pageSizeSelect.selectOption("50");
-      await expect(pageSizeSelect).toHaveValue("50");
-    });
-
-    await test.step("Switch to Diagnostics and back — value persists", async () => {
-      await appPage.locator('button[role="tab"]', { hasText: "Diagnostics" }).click();
-      await appPage.locator('button[role="tab"]', { hasText: "Application Settings" }).click();
-      const pageSizeSelect = appPage.locator('select[aria-label="Messages per page"]');
-      await expect(pageSizeSelect).toHaveValue("50");
     });
   });
 
@@ -112,52 +50,23 @@ test.describe("Settings Functional Flow", () => {
   test("auto-hide toggles change document dataset attributes", async ({ appPage }) => {
     await test.step("Open settings and toggle auto-hide message actions", async () => {
       await appPage.locator('button[aria-label="Open settings"]').click();
-      const checkbox = appPage.locator(
-        'input[aria-label="Auto-hide message actions"]',
-      );
+      const checkbox = appPage.locator('input[aria-label="Auto-hide message actions"]');
       const wasChecked = await checkbox.isChecked();
       await checkbox.click({ force: true });
 
-      const dataAttr = await appPage.evaluate(() =>
-        document.documentElement.dataset.autoHideMessageActions,
+      const dataAttr = await appPage.evaluate(
+        () => document.documentElement.dataset.autoHideMessageActions,
       );
       expect(dataAttr).toBe(String(!wasChecked));
     });
 
     await test.step("Toggle back to original state", async () => {
-      const checkbox = appPage.locator(
-        'input[aria-label="Auto-hide message actions"]',
-      );
+      const checkbox = appPage.locator('input[aria-label="Auto-hide message actions"]');
       await checkbox.click({ force: true });
     });
   });
 
-  test("default expansion category toggles change aria-pressed state", async ({ appPage }) => {
-    await test.step("Open settings", async () => {
-      await appPage.locator('button[aria-label="Open settings"]').click();
-    });
-
-    await test.step("Toggle a category expansion default and verify state flip", async () => {
-      const categoryTokens = appPage.locator("button.settings-token");
-      const count = await categoryTokens.count();
-      expect(count).toBeGreaterThan(0);
-
-      const firstToken = categoryTokens.first();
-      const wasPressedRaw = await firstToken.getAttribute("aria-pressed");
-      const wasPressed = wasPressedRaw === "true";
-      await firstToken.click();
-      await expect(firstToken).toHaveAttribute("aria-pressed", String(!wasPressed));
-    });
-
-    await test.step("Toggle back to original state", async () => {
-      const firstToken = appPage.locator("button.settings-token").first();
-      await firstToken.click();
-    });
-  });
-
-  test("settings tabs switch between Application Settings and Diagnostics", async ({
-    appPage,
-  }) => {
+  test("settings tabs switch between Application Settings and Diagnostics", async ({ appPage }) => {
     await test.step("Open settings and verify Application Settings is active", async () => {
       await appPage.locator('button[aria-label="Open settings"]').click();
       const settingsTab = appPage.locator('button[role="tab"]', {

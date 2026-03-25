@@ -1,4 +1,4 @@
-import { test, expect } from "../fixtures/app.fixture";
+import { expect, test } from "../fixtures/app.fixture";
 import { UI_PROVIDER_IDS } from "../helpers/providers";
 
 test.describe("Provider Toggle Flow", () => {
@@ -37,9 +37,7 @@ test.describe("Provider Toggle Flow", () => {
     });
   });
 
-  test("each project pane provider tag toggles active class when clicked", async ({
-    appPage,
-  }) => {
+  test("each project pane provider tag toggles active class when clicked", async ({ appPage }) => {
     const tags = appPage.locator(".project-pane button.tag");
     const tagCount = await tags.count();
     expect(tagCount).toBeGreaterThan(0);
@@ -48,18 +46,12 @@ test.describe("Provider Toggle Flow", () => {
     for (let i = 0; i < tagCount; i++) {
       const tag = tags.nth(i);
       await test.step(`Provider tag ${i + 1}/${tagCount}: toggle off and on`, async () => {
-        const wasActive = await tag.evaluate((el) =>
-          el.classList.contains("active"),
-        );
+        const wasActive = await tag.evaluate((el) => el.classList.contains("active"));
         await tag.click();
-        expect(
-          await tag.evaluate((el) => el.classList.contains("active")),
-        ).toBe(!wasActive);
+        expect(await tag.evaluate((el) => el.classList.contains("active"))).toBe(!wasActive);
 
         await tag.click();
-        expect(
-          await tag.evaluate((el) => el.classList.contains("active")),
-        ).toBe(wasActive);
+        expect(await tag.evaluate((el) => el.classList.contains("active"))).toBe(wasActive);
       });
     }
   });

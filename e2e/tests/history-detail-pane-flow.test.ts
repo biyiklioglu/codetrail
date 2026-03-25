@@ -1,31 +1,25 @@
-import { test, expect } from "../fixtures/app.fixture";
+import { expect, test } from "../fixtures/app.fixture";
 
 test.describe("History Detail Pane Flow", () => {
   test("category filter toggles change active state and affect message list", async ({
     appPage,
   }) => {
     await test.step("Find category filter buttons", async () => {
-      const filters = appPage.locator("button.msg-filter");
+      const filters = appPage.locator(".msg-filter");
       const count = await filters.count();
       expect(count).toBeGreaterThan(0);
     });
 
     await test.step("Toggle a category filter off and on", async () => {
-      const userFilter = appPage.locator("button.user-filter");
+      const userFilter = appPage.locator(".msg-filter.user-filter");
       if ((await userFilter.count()) > 0) {
-        const wasActive = await userFilter.evaluate((el) =>
-          el.classList.contains("active"),
-        );
-        await userFilter.click();
-        const isActive = await userFilter.evaluate((el) =>
-          el.classList.contains("active"),
-        );
+        const wasActive = await userFilter.evaluate((el) => el.classList.contains("active"));
+        await userFilter.locator("button.msg-filter-main").click();
+        const isActive = await userFilter.evaluate((el) => el.classList.contains("active"));
         expect(isActive).toBe(!wasActive);
 
-        await userFilter.click();
-        const restored = await userFilter.evaluate((el) =>
-          el.classList.contains("active"),
-        );
+        await userFilter.locator("button.msg-filter-main").click();
+        const restored = await userFilter.evaluate((el) => el.classList.contains("active"));
         expect(restored).toBe(wasActive);
       }
     });
@@ -68,17 +62,11 @@ test.describe("History Detail Pane Flow", () => {
 
   test("advanced search toggle in history pane changes search mode", async ({ appPage }) => {
     await test.step("Toggle advanced search in history detail pane", async () => {
-      const advToggle = appPage.locator(
-        "button.advanced-search-toggle-btn-history",
-      );
+      const advToggle = appPage.locator("button.advanced-search-toggle-btn-history");
       if ((await advToggle.count()) > 0) {
-        const wasActive = await advToggle.evaluate((el) =>
-          el.classList.contains("active"),
-        );
+        const wasActive = await advToggle.evaluate((el) => el.classList.contains("active"));
         await advToggle.click();
-        const isActive = await advToggle.evaluate((el) =>
-          el.classList.contains("active"),
-        );
+        const isActive = await advToggle.evaluate((el) => el.classList.contains("active"));
         expect(isActive).toBe(!wasActive);
 
         await advToggle.click();
@@ -88,9 +76,7 @@ test.describe("History Detail Pane Flow", () => {
 
   test("zoom controls in detail pane change zoom level", async ({ appPage }) => {
     await test.step("Click zoom in button", async () => {
-      const zoomInBtn = appPage.locator(
-        '.history-view button.zoom-btn[aria-label="Zoom in"]',
-      );
+      const zoomInBtn = appPage.locator('.history-view button.zoom-btn[aria-label="Zoom in"]');
       if ((await zoomInBtn.count()) > 0 && (await zoomInBtn.isEnabled())) {
         const zoomInput = appPage.locator('.history-view input[aria-label="Zoom percentage"]');
         const beforeZoom = await zoomInput.inputValue();
@@ -103,9 +89,7 @@ test.describe("History Detail Pane Flow", () => {
     });
 
     await test.step("Click zoom out button", async () => {
-      const zoomOutBtn = appPage.locator(
-        '.history-view button.zoom-btn[aria-label="Zoom out"]',
-      );
+      const zoomOutBtn = appPage.locator('.history-view button.zoom-btn[aria-label="Zoom out"]');
       if ((await zoomOutBtn.count()) > 0 && (await zoomOutBtn.isEnabled())) {
         const zoomInput = appPage.locator('.history-view input[aria-label="Zoom percentage"]');
         const beforeZoom = await zoomInput.inputValue();
@@ -125,9 +109,7 @@ test.describe("History Detail Pane Flow", () => {
 
   test("expand/collapse scope select changes bulk expand behavior", async ({ appPage }) => {
     await test.step("Check expand scope select exists and has options", async () => {
-      const scopeSelect = appPage.locator(
-        'select[aria-label="Select expand and collapse scope"]',
-      );
+      const scopeSelect = appPage.locator('select[aria-label="Select expand and collapse scope"]');
       if ((await scopeSelect.count()) > 0) {
         const options = await scopeSelect.locator("option").allTextContents();
         expect(options.length).toBeGreaterThan(0);
