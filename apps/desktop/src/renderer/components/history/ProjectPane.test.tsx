@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { ComponentProps } from "react";
-import { useMemo } from "react";
+import { createRef, useMemo } from "react";
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -336,6 +336,28 @@ describe("ProjectPane", () => {
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Switch to By Folder" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Project options" })).toBeNull();
+  });
+
+  it("focuses the project list when clicking empty space in the provider row", async () => {
+    const listRef = createRef<HTMLDivElement>();
+    const { container } = renderProjectPane({
+      data: {
+        listRef,
+      },
+    });
+
+    const projectList = listRef.current;
+    const tagRow = container.querySelector<HTMLElement>(".tag-row");
+    expect(projectList).not.toBeNull();
+    expect(tagRow).not.toBeNull();
+    if (!projectList || !tagRow) {
+      throw new Error("Expected project list and provider row");
+    }
+
+    fireEvent.mouseDown(tagRow);
+
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(document.activeElement).toBe(projectList);
   });
 
   it("routes Enter, Escape, and Tab from the project search box into the project list", () => {

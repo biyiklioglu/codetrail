@@ -240,6 +240,48 @@ describe("useKeyboardShortcuts", () => {
     expect(props.pageHistoryMessagesDown).not.toHaveBeenCalled();
   });
 
+  it("pages project and session panes when a toolbar button inside that pane is focused", () => {
+    const props = createProps();
+
+    const { getByText } = render(<Harness {...props} />);
+
+    const projectList = props.projectListRef.current;
+    const sessionList = props.sessionListRef.current;
+    const projectToggle = getByText("project-toggle");
+    const sessionToggle = getByText("session-toggle");
+    if (!projectList || !sessionList) {
+      throw new Error("Expected pane refs to be attached");
+    }
+
+    for (const pane of [projectList, sessionList]) {
+      Object.defineProperty(pane, "clientHeight", {
+        value: 320,
+        configurable: true,
+      });
+      Object.defineProperty(pane, "scrollTop", {
+        value: 40,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(pane, "scrollTo", {
+        value: ({ top }: { top: number }) => {
+          pane.scrollTop = top;
+        },
+        configurable: true,
+      });
+    }
+
+    projectToggle.focus();
+    projectToggle.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", bubbles: true }));
+    expect(projectList.scrollTop).toBe(340);
+    expect(sessionList.scrollTop).toBe(40);
+
+    sessionToggle.focus();
+    sessionToggle.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }));
+    expect(sessionList.scrollTop).toBe(0);
+    expect(projectList.scrollTop).toBe(340);
+  });
+
   it("falls back to paging the message pane when no history pane is focused", () => {
     const props = createProps();
 

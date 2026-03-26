@@ -56,6 +56,7 @@ type ProjectPaneHeaderProps = {
   canCopyProjectDetails: boolean;
   canOpenProjectLocation: boolean;
   canDeleteProject: boolean;
+  onFocusPane: () => void;
   onToggleCollapsed: () => void;
   onSetSortField: (value: ProjectSortField) => void;
   onToggleSortDirection: () => void;
@@ -83,6 +84,7 @@ export function ProjectPaneHeader({
   canCopyProjectDetails,
   canOpenProjectLocation,
   canDeleteProject,
+  onFocusPane,
   onToggleCollapsed,
   onSetSortField,
   onToggleSortDirection,
@@ -110,7 +112,15 @@ export function ProjectPaneHeader({
   const sortCopy = PROJECT_SORT_COPY[sortField][sortDirection];
 
   return (
-    <div className="panel-header">
+    <div
+      className="panel-header"
+      onMouseDown={(event) => {
+        if (isInteractiveHeaderTarget(event.target)) {
+          return;
+        }
+        onFocusPane();
+      }}
+    >
       <div className="panel-header-left">
         <span className="panel-title">Projects</span>
       </div>
@@ -340,5 +350,16 @@ export function ProjectPaneHeader({
         </button>
       </div>
     </div>
+  );
+}
+
+function isInteractiveHeaderTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(
+    target.closest(
+      'button, input, select, textarea, a, label, [role="button"], [role="menuitem"], [contenteditable="true"]',
+    ),
   );
 }

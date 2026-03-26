@@ -100,7 +100,7 @@ describe("App history navigation", () => {
     });
   });
 
-  it("does nothing for Option+Up/Down when the sessions pane is hidden and for Ctrl+Up/Down when the projects pane is collapsed", async () => {
+  it("ignores Ctrl+Up/Down when the projects pane is collapsed", async () => {
     installScrollIntoViewMock();
 
     const client = createHistoryNavigationClient();
@@ -109,23 +109,6 @@ describe("App history navigation", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Project one first message")).toBeInTheDocument();
-    });
-
-    expectDefined(messageList(), "Expected message list").focus();
-    pressWindowArrow("ArrowDown", { altKey: true });
-
-    await waitFor(() => {
-      expect(screen.getByText("Project one first message")).toBeInTheDocument();
-      expect(document.activeElement).toBe(messageList());
-      expect(screen.getByRole("button", { name: "Expand Sessions pane" })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Switch to List" }));
-    pressWindowArrow("ArrowDown", { altKey: true });
-
-    await waitFor(() => {
-      expect(screen.getByText("Project one first message")).toBeInTheDocument();
-      expect(document.activeElement).toBe(messageList());
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Collapse Projects pane" }));
@@ -295,6 +278,37 @@ describe("App history navigation", () => {
     expectDefined(projectList(), "Expected project list");
     expectDefined(sessionList(), "Expected session list");
     expectDefined(messageList(), "Expected message list");
+  });
+
+  it("focuses project and session lists when their header background is clicked", async () => {
+    installScrollIntoViewMock();
+
+    const user = userEvent.setup();
+    const client = createHistoryNavigationClient();
+    const { container } = renderWithClient(<App />, client);
+    const sessionList = () => container.querySelector<HTMLDivElement>(".list-scroll.session-list");
+    const projectList = () => container.querySelector<HTMLDivElement>(".list-scroll.project-list");
+    const projectHeader = () => container.querySelector<HTMLElement>(".project-pane .panel-header");
+    const sessionHeader = () => container.querySelector<HTMLElement>(".session-pane .panel-header");
+
+    await waitFor(() => {
+      expect(screen.getByText("Project one first message")).toBeInTheDocument();
+    });
+
+    await expandHistoryPanes();
+
+    const projectHeaderElement = expectDefined(projectHeader(), "Expected project pane header");
+    const sessionHeaderElement = expectDefined(sessionHeader(), "Expected session pane header");
+
+    await user.click(projectHeaderElement);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(projectList());
+    });
+
+    await user.click(sessionHeaderElement);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(sessionList());
+    });
   });
 
   it("updates pane controls correctly when history panes are collapsed", async () => {

@@ -908,7 +908,9 @@ export function App({
           autoRefreshStatusTone={autoRefreshStatusTone}
           autoRefreshStatusTooltip={autoRefreshStatusTooltip}
           onToggleFocus={toggleFocusMode}
-          onToggleHelp={() => setMainView((value) => (value === "help" ? "history" : "help"))}
+          onToggleHelp={() =>
+            mainView === "help" ? returnToHistoryWithMessageFocus() : setMainView("help")
+          }
           onToggleSettings={() =>
             mainView === "settings" ? returnToHistoryWithMessageFocus() : setMainView("settings")
           }

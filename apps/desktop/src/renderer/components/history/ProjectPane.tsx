@@ -11,6 +11,7 @@ import {
   SIDEBAR_LIST_ROW_HEIGHT,
   SIDEBAR_LIST_VIRTUALIZATION_THRESHOLD,
 } from "../../lib/virtualList";
+import { focusHistoryList } from "../../features/historyControllerShared";
 import { ToolbarIcon } from "../ToolbarIcon";
 import { HistoryListContextMenu } from "./HistoryListContextMenu";
 import type { ProjectPaneContextMenuState, ProjectPaneProps } from "./ProjectPane.types";
@@ -25,6 +26,17 @@ function isTreeRowActionTarget(target: EventTarget | null): boolean {
   return (
     target instanceof HTMLElement &&
     Boolean(target.closest(".project-tree-toggle-btn, .project-tree-bookmark-btn"))
+  );
+}
+
+function isInteractivePaneControlTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(
+    target.closest(
+      'button, input, select, textarea, a, label, [role="button"], [role="menuitem"], [contenteditable="true"]',
+    ),
   );
 }
 
@@ -211,6 +223,10 @@ export function ProjectPane({
     event.preventDefault();
     projectListContainerRef.current?.focus({ preventScroll: true });
   };
+
+  const focusProjectPane = useCallback(() => {
+    focusHistoryList(projectListContainerRef.current);
+  }, []);
 
   const renderFlatProjectRow = (project: ProjectSummary) => {
     const update = projectUpdates[project.id];
@@ -515,6 +531,7 @@ export function ProjectPane({
         canCopyProjectDetails={canCopyProjectDetails}
         canOpenProjectLocation={canOpenProjectLocation}
         canDeleteProject={canDeleteProject}
+        onFocusPane={focusProjectPane}
         onToggleCollapsed={onToggleCollapsed}
         onSetSortField={onSetSortField}
         onToggleSortDirection={onToggleSortDirection}
@@ -542,7 +559,15 @@ export function ProjectPane({
           </div>
         </div>
       </div>
-      <div className="tag-row">
+      <div
+        className="tag-row"
+        onMouseDown={(event) => {
+          if (isInteractivePaneControlTarget(event.target)) {
+            return;
+          }
+          focusProjectPane();
+        }}
+      >
         {providers.map((provider) => (
           <button
             key={provider}

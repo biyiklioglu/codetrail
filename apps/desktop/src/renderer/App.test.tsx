@@ -1370,6 +1370,52 @@ describe("App shell", () => {
     });
   });
 
+  it("returns focus to the message pane when exiting help with Escape", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Open help" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Keyboard Shortcuts" })).toBeNull();
+      expect(document.activeElement).toBe(container.querySelector(".msg-scroll.message-list"));
+    });
+  });
+
+  it("returns focus to the message pane when exiting help from the toolbar", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Open help" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Return to history view" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Keyboard Shortcuts" })).toBeNull();
+      expect(document.activeElement).toBe(container.querySelector(".msg-scroll.message-list"));
+    });
+  });
+
   it("requires confirmation before enabling missing session cleanup", async () => {
     installScrollIntoViewMock();
     installDialogMock();

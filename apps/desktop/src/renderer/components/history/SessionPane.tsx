@@ -12,6 +12,7 @@ import {
   SIDEBAR_LIST_ROW_HEIGHT,
   SIDEBAR_LIST_VIRTUALIZATION_THRESHOLD,
 } from "../../lib/virtualList";
+import { focusHistoryList } from "../../features/historyControllerShared";
 import { ToolbarIcon } from "../ToolbarIcon";
 import { HistoryListContextMenu } from "./HistoryListContextMenu";
 import { scheduleSelectedSessionScroll } from "./sessionAutoScroll";
@@ -82,6 +83,7 @@ export function SessionPane({
     y: number;
   } | null>(null);
   const [overflowMenuOpen, setOverflowMenuOpen] = useState(false);
+  const sessionListContainerRef = useRef<HTMLDivElement | null>(null);
   const selectedItemId = allSessionsSelected
     ? "__project_all__"
     : bookmarksSelected
@@ -121,8 +123,18 @@ export function SessionPane({
     enabled: sessionRows.length > SIDEBAR_LIST_VIRTUALIZATION_THRESHOLD,
     externalRef: listRef,
   });
+  const setSessionListRefs = useCallback(
+    (element: HTMLDivElement | null) => {
+      sessionListContainerRef.current = element;
+      setContainerRef(element);
+    },
+    [setContainerRef],
+  );
   const selectedSessionRef = useCallback((node: HTMLButtonElement | null) => {
     setSelectedSessionElement(node);
+  }, []);
+  const focusSessionPane = useCallback(() => {
+    focusHistoryList(sessionListContainerRef.current);
   }, []);
 
   useClickOutside(overflowMenuRef, overflowMenuOpen, () => setOverflowMenuOpen(false));
@@ -137,7 +149,15 @@ export function SessionPane({
 
   return (
     <aside className={`panel history-focus-pane session-pane${collapsed ? " collapsed" : ""}`}>
-      <div className="panel-header">
+      <div
+        className="panel-header"
+        onMouseDown={(event) => {
+          if (isInteractiveHeaderTarget(event.target)) {
+            return;
+          }
+          focusSessionPane();
+        }}
+      >
         <div className="panel-header-left">
           <span className="panel-title">Sessions</span>
           {!collapsed ? <span className="panel-count">{sortedSessions.length}</span> : null}
@@ -236,7 +256,7 @@ export function SessionPane({
       </div>
       <div
         className="list-scroll session-list"
-        ref={setContainerRef}
+        ref={setSessionListRefs}
         tabIndex={-1}
         onScroll={handleScroll}
       >
@@ -380,5 +400,16 @@ export function SessionPane({
         }
       />
     </aside>
+  );
+}
+
+function isInteractiveHeaderTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(
+    target.closest(
+      'button, input, select, textarea, a, label, [role="button"], [role="menuitem"], [contenteditable="true"]',
+    ),
   );
 }

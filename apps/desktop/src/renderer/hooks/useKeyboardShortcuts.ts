@@ -200,7 +200,7 @@ function handleEscapeShortcut(context: ShortcutContext): boolean {
   }
   if (context.mainView === "help") {
     context.event.preventDefault();
-    context.setMainView("history");
+    context.returnToHistoryWithMessageFocus();
     return true;
   }
   if (context.mainView === "history" && context.hasFocusedHistoryMessage) {
@@ -677,10 +677,17 @@ function getFocusedHistoryPane(
   if (!target) {
     return null;
   }
+  const paneContainer = target.closest(".history-focus-pane");
   for (const [paneName, paneElement] of Object.entries(panes) as Array<
     [HistoryPane, HTMLDivElement | null]
   >) {
-    if (paneElement && (paneElement === target || paneElement.contains(target))) {
+    if (!paneElement) {
+      continue;
+    }
+    if (paneContainer && paneElement.closest(".history-focus-pane") === paneContainer) {
+      return paneName;
+    }
+    if (paneElement === target || paneElement.contains(target)) {
       return paneName;
     }
   }
