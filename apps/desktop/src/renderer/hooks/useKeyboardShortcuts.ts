@@ -43,6 +43,7 @@ export function useKeyboardShortcuts(args: {
   searchProjectSelectRef: RefObject<HTMLButtonElement | null>;
   searchResultsViewRef: RefObject<HTMLDivElement | null>;
   setMainView: (view: MainView | ((value: MainView) => MainView)) => void;
+  returnToHistoryWithMessageFocus: () => void;
   clearFocusedHistoryMessage: () => void;
   focusGlobalSearch: () => void;
   focusSessionSearch: () => void;
@@ -192,11 +193,12 @@ function handleEscapeShortcut(context: ShortcutContext): boolean {
   if (context.event.key !== "Escape") {
     return false;
   }
-  if (
-    context.mainView === "search" ||
-    context.mainView === "settings" ||
-    context.mainView === "help"
-  ) {
+  if (context.mainView === "search" || context.mainView === "settings") {
+    context.event.preventDefault();
+    context.returnToHistoryWithMessageFocus();
+    return true;
+  }
+  if (context.mainView === "help") {
     context.event.preventDefault();
     context.setMainView("history");
     return true;

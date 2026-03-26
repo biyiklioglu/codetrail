@@ -161,6 +161,9 @@ describe("App shell", () => {
       );
     });
     expect(container.querySelector(".session-item:not(.all-sessions-item).active")).toBeNull();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(container.querySelector(".msg-scroll.message-list"));
+    });
 
     await user.click(screen.getByRole("button", { name: "Open settings" }));
     await waitFor(() => {
@@ -1300,6 +1303,63 @@ describe("App shell", () => {
       expect(screen.queryByText("Disable Codex?")).not.toBeInTheDocument();
     });
     expect(screen.getByRole("heading", { name: "Database Maintenance" })).toBeInTheDocument();
+  });
+
+  it("returns focus to the message pane when global search closes with Escape", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(SEARCH_PLACEHOLDERS.globalMessages)).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(container.querySelector(".search-view")).toBeNull();
+      expect(document.activeElement).toBe(container.querySelector(".msg-scroll.message-list"));
+    });
+  });
+
+  it("returns focus to the message pane when exiting settings", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+    const { container } = renderWithClient(<App />, client);
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Open settings" }));
+    await waitFor(() => {
+      expect(screen.getByText("Discovery Roots")).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Discovery Roots")).toBeNull();
+      expect(document.activeElement).toBe(container.querySelector(".msg-scroll.message-list"));
+    });
   });
 
   it("requires confirmation before enabling missing session cleanup", async () => {

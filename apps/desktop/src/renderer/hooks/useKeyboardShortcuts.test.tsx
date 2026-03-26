@@ -63,6 +63,7 @@ function createProps(
     searchProjectSelectRef: createRef<HTMLButtonElement>(),
     searchResultsViewRef: createRef<HTMLDivElement>(),
     setMainView: vi.fn(),
+    returnToHistoryWithMessageFocus: vi.fn(),
     clearFocusedHistoryMessage: vi.fn(),
     focusGlobalSearch: vi.fn(),
     focusSessionSearch: vi.fn(),
@@ -321,13 +322,31 @@ describe("useKeyboardShortcuts", () => {
 
   it("handles escape and question-mark help shortcuts", () => {
     const setMainView = vi.fn();
+    const returnToHistoryWithMessageFocus = vi.fn();
 
-    const { rerender } = render(<Harness {...createProps({ mainView: "search", setMainView })} />);
+    const { rerender } = render(
+      <Harness
+        {...createProps({
+          mainView: "search",
+          setMainView,
+          returnToHistoryWithMessageFocus,
+        })}
+      />,
+    );
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    expect(setMainView).toHaveBeenCalledWith("history");
+    expect(returnToHistoryWithMessageFocus).toHaveBeenCalledTimes(1);
+    expect(setMainView).not.toHaveBeenCalledWith("history");
 
-    rerender(<Harness {...createProps({ mainView: "history", setMainView })} />);
+    rerender(
+      <Harness
+        {...createProps({
+          mainView: "history",
+          setMainView,
+          returnToHistoryWithMessageFocus,
+        })}
+      />,
+    );
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }));
     expect(setMainView).toHaveBeenCalledWith("help");

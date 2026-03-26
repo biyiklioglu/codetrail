@@ -506,6 +506,13 @@ export function App({
     search.focusGlobalSearch();
   }, [search.focusGlobalSearch]);
 
+  const returnToHistoryWithMessageFocus = useCallback(() => {
+    setMainView("history");
+    window.requestAnimationFrame(() => {
+      history.focusMessagePane();
+    });
+  }, [history.focusMessagePane]);
+
   const toggleFocusMode = useCallback(() => {
     if (mainView !== "history") {
       return;
@@ -765,6 +772,7 @@ export function App({
     searchProjectSelectRef: search.searchProjectSelectRef,
     searchResultsViewRef: search.searchResultsScrollRef,
     setMainView,
+    returnToHistoryWithMessageFocus,
     clearFocusedHistoryMessage: () => history.setFocusMessageId(""),
     focusGlobalSearch,
     focusSessionSearch,
@@ -858,7 +866,7 @@ export function App({
           focusMode={focusMode}
           focusDisabled={mainView !== "history"}
           onToggleSearchView={() =>
-            setMainView((value) => (value === "search" ? "history" : "search"))
+            mainView === "search" ? returnToHistoryWithMessageFocus() : setMainView("search")
           }
           onThemeChange={appearance.setTheme}
           onThemePreview={appearance.previewTheme}
@@ -875,7 +883,7 @@ export function App({
           onToggleFocus={toggleFocusMode}
           onToggleHelp={() => setMainView((value) => (value === "help" ? "history" : "help"))}
           onToggleSettings={() =>
-            setMainView((value) => (value === "settings" ? "history" : "settings"))
+            mainView === "settings" ? returnToHistoryWithMessageFocus() : setMainView("settings")
           }
         />
 
@@ -939,7 +947,7 @@ export function App({
                   sourceId: result.messageSourceId,
                   historyCategories: [...history.historyCategories],
                 });
-                setMainView("history");
+                returnToHistoryWithMessageFocus();
               }}
             />
           ) : mainView === "help" ? (
