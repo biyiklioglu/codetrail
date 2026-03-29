@@ -287,6 +287,7 @@ if (hasSingleInstanceLock) {
     try {
       writeDebugLog("bootstrapMainProcess start");
       await bootstrapMainProcess({
+        instrumentationEnabled: verboseLoggingEnabled,
         appStateStore,
         onIndexingFileIssue: (issue) => {
           logAppError("indexing file failure", issue.error, {

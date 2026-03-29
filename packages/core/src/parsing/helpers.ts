@@ -33,6 +33,15 @@ export function readString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+export function firstNonEmptyString(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
 export function extractEvents(payload: unknown): unknown[] {
   if (Array.isArray(payload)) {
     return payload;

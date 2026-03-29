@@ -1,12 +1,14 @@
 import type { Dispatch, SetStateAction } from "react";
 
+import type { IpcRequestInput } from "@codetrail/core/browser";
+
 import type { WatchLiveStatusResponse } from "../app/types";
 import { ProjectPane } from "../components/history/ProjectPane";
 import { SessionPane } from "../components/history/SessionPane";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { findSessionSummaryById } from "../lib/historySessionLookup";
-import { openInFileManager, openPath } from "../lib/pathActions";
 import { usePaneFocus } from "../lib/paneFocusController";
+import { openInFileManager, openPath } from "../lib/pathActions";
 import { HistoryDetailPane } from "./HistoryDetailPane";
 import { formatProjectDetails, formatSessionDetails } from "./historyCopyFormat";
 import type { useHistoryController } from "./useHistoryController";
@@ -115,6 +117,7 @@ export function HistoryLayout({
   onDeleteSession,
   liveSessions = [],
   liveRowHasBackground = true,
+  recordLiveUiTrace,
 }: {
   history: HistoryController;
   advancedSearchEnabled: boolean;
@@ -129,8 +132,10 @@ export function HistoryLayout({
   onDeleteSession: (sessionId?: string) => void;
   liveSessions?: WatchLiveStatusResponse["sessions"];
   liveRowHasBackground?: boolean;
+  recordLiveUiTrace?: (payload: IpcRequestInput<"debug:recordLiveUiTrace">) => void;
 }) {
   const paneFocus = usePaneFocus();
+  const liveTraceProps = recordLiveUiTrace ? { recordLiveUiTrace } : {};
 
   return (
     <>
@@ -289,6 +294,7 @@ export function HistoryLayout({
           setZoomPercent={setZoomPercent}
           liveSessions={liveSessions}
           liveRowHasBackground={liveRowHasBackground}
+          {...liveTraceProps}
         />
       </section>
     </>

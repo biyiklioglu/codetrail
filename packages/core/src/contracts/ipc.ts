@@ -243,6 +243,19 @@ const liveSessionEntrySchema = z.object({
   lastActivityAt: z.string(),
   bestEffort: z.boolean(),
 });
+const liveUiTraceMatchTypeSchema = z.enum(["session", "project", "none"]);
+const liveUiTracePayloadSchema = z.object({
+  selectionMode: z.enum(["session", "bookmarks", "project_all"]),
+  selectedProjectId: z.string().nullable(),
+  selectedProjectPath: z.string().nullable(),
+  selectedSessionId: z.string().nullable(),
+  selectedSessionIdentity: z.string().nullable(),
+  displayedMatchType: liveUiTraceMatchTypeSchema,
+  displayedSession: liveSessionEntrySchema.nullable(),
+  displayedRankingReason: z.string().nullable(),
+  candidateSessions: z.array(liveSessionEntrySchema).max(20),
+  renderedSummary: z.string().nullable(),
+});
 
 // Single source of truth for pane state fields. The non-nullable base schema is used
 // directly as the ui:setPaneState request. The nullable variant (for ui:getPaneState responses
@@ -792,6 +805,7 @@ export const ipcContractSchemas = {
       enabled: z.boolean(),
       revision: z.number().int().nonnegative(),
       updatedAt: z.string(),
+      instrumentationEnabled: z.boolean(),
       providerCounts: liveProviderCountsSchema,
       sessions: z.array(liveSessionEntrySchema),
       claudeHookState: claudeHookStateSchema,
@@ -815,6 +829,12 @@ export const ipcContractSchemas = {
     response: z.object({
       ok: z.literal(true),
       state: claudeHookStateSchema,
+    }),
+  },
+  "debug:recordLiveUiTrace": {
+    request: liveUiTracePayloadSchema,
+    response: z.object({
+      ok: z.literal(true),
     }),
   },
 } as const;

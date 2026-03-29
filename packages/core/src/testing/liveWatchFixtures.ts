@@ -27,6 +27,7 @@ export function createLiveStatusFixture(
 ): IpcResponse<"watcher:getLiveStatus"> {
   return {
     enabled: input.enabled ?? false,
+    instrumentationEnabled: input.instrumentationEnabled ?? false,
     revision: input.revision ?? 0,
     updatedAt: input.updatedAt ?? "2026-03-24T10:00:00.000Z",
     providerCounts: input.providerCounts ?? {

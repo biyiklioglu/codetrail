@@ -56,10 +56,7 @@ import {
   resolveStableRefreshSource,
 } from "../lib/projectUpdates";
 import { clamp, compareRecent, sessionActivityOf } from "../lib/viewUtils";
-import {
-  type AppearanceState,
-  getMessageListFingerprint,
-} from "./historyControllerShared";
+import { type AppearanceState, getMessageListFingerprint } from "./historyControllerShared";
 import {
   getHistoryRefreshScopeKey,
   getProjectRefreshFingerprint,
@@ -76,6 +73,8 @@ import {
   useHistorySelectionState,
 } from "./useHistorySelectionState";
 import { useHistoryViewportEffects } from "./useHistoryViewportEffects";
+
+export type { HistorySelectionDebounceOverrides } from "./useHistorySelectionState";
 
 export type RefreshContext = {
   refreshId: number;

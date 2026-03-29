@@ -1,6 +1,6 @@
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 
-import type { MessageCategory } from "@codetrail/core/browser";
+import type { IpcRequestInput, MessageCategory } from "@codetrail/core/browser";
 
 import { type MessagePageSize, UI_MESSAGE_PAGE_SIZE_VALUES } from "../../shared/uiPreferences";
 import { CATEGORIES } from "../app/constants";
@@ -11,9 +11,11 @@ import { ToolbarIcon } from "../components/ToolbarIcon";
 import { ZoomPercentInput } from "../components/ZoomPercentInput";
 import { MessageCard } from "../components/messages/MessagePresentation";
 import {
+  buildLiveSummary,
+  createLiveUiTracePayload,
   formatCompactLiveAge,
   getNextCompactLiveAgeUpdateDelayMs,
-  selectRelevantLiveSession,
+  selectRelevantLiveSessionCandidate,
 } from "../lib/liveSessions";
 import { formatCompactInteger, formatInteger } from "../lib/numberFormatting";
 import { usePaneFocus } from "../lib/paneFocusController";
@@ -112,6 +114,7 @@ export function HistoryDetailPane({
   setZoomPercent,
   liveSessions = [],
   liveRowHasBackground = true,
+  recordLiveUiTrace,
 }: {
   history: HistoryController;
   advancedSearchEnabled: boolean;
@@ -123,6 +126,7 @@ export function HistoryDetailPane({
   setZoomPercent: (percent: number) => Promise<void>;
   liveSessions?: WatchLiveStatusResponse["sessions"];
   liveRowHasBackground?: boolean;
+  recordLiveUiTrace?: (payload: IpcRequestInput<"debug:recordLiveUiTrace">) => void;
 }) {
   const paneFocus = usePaneFocus();
   const shortcuts = useShortcutRegistry();
@@ -161,9 +165,10 @@ export function HistoryDetailPane({
   const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
   const [pageInputValue, setPageInputValue] = useState(() => `${history.sessionPage + 1}`);
   const skipNextPageInputBlurResetRef = useRef(false);
-  const liveSession = useMemo(
+  const lastLiveUiTraceRef = useRef<string | null>(null);
+  const liveSessionSelection = useMemo(
     () =>
-      selectRelevantLiveSession({
+      selectRelevantLiveSessionCandidate({
         sessions: liveSessions,
         selectionMode: history.historyMode,
         selectedProject: history.selectedProject,
@@ -171,6 +176,26 @@ export function HistoryDetailPane({
       }),
     [history.historyMode, history.selectedProject, history.selectedSession, liveSessions],
   );
+  const liveSession = liveSessionSelection.session;
+  const liveUiTracePayload = useMemo(() => {
+    if (!recordLiveUiTrace) {
+      return null;
+    }
+    return createLiveUiTracePayload({
+      sessions: liveSessions,
+      selectionMode: history.historyMode,
+      selectedProject: history.selectedProject,
+      selectedSession: history.selectedSession,
+      selection: liveSessionSelection,
+    });
+  }, [
+    history.historyMode,
+    history.selectedProject,
+    history.selectedSession,
+    liveSessions,
+    liveSessionSelection,
+    recordLiveUiTrace,
+  ]);
 
   useEffect(() => {
     if (!liveSession) {
@@ -201,6 +226,21 @@ export function HistoryDetailPane({
   }, [liveSession]);
 
   useEffect(() => {
+    if (!recordLiveUiTrace) {
+      return;
+    }
+    if (!liveUiTracePayload) {
+      return;
+    }
+    const serialized = JSON.stringify(liveUiTracePayload);
+    if (lastLiveUiTraceRef.current === serialized) {
+      return;
+    }
+    lastLiveUiTraceRef.current = serialized;
+    recordLiveUiTrace(liveUiTracePayload);
+  }, [liveUiTracePayload, recordLiveUiTrace]);
+
+  useEffect(() => {
     setPageInputValue(`${history.sessionPage + 1}`);
   }, [history.sessionPage]);
 
@@ -208,9 +248,10 @@ export function HistoryDetailPane({
     ? formatCompactLiveAge(liveSession.lastActivityAt, liveNowMs)
     : null;
   const liveDetailText = liveSession?.detailText?.trim() ?? "";
-  const liveSummary = liveSession
-    ? ["Live", liveTimer, liveSession.statusText, liveDetailText].filter(Boolean).join(" · ")
-    : null;
+  // The live row is intentionally single-line. Timer and status stay stable; detail is the only
+  // field that gives way, and it should carry the best current or last meaningful activity rather
+  // than collapsing to a blank "Working" row.
+  const liveSummary = liveSession ? buildLiveSummary(liveSession, liveTimer) : null;
 
   const resetPageInputValue = () => {
     setPageInputValue(`${history.sessionPage + 1}`);
@@ -369,6 +410,16 @@ export function HistoryDetailPane({
             title={liveSummary ?? undefined}
           >
             <span className="msg-live-label">Live</span>
+            <span className="msg-live-separator" aria-hidden="true">
+              ·
+            </span>
+            <span className={`msg-live-provider msg-live-provider-${liveSession.provider}`}>
+              {liveSession.provider === "codex"
+                ? "Codex"
+                : liveSession.provider === "claude"
+                  ? "Claude"
+                  : liveSession.provider}
+            </span>
             <span className="msg-live-separator" aria-hidden="true">
               ·
             </span>
@@ -534,15 +585,15 @@ export function HistoryDetailPane({
               onToggleExpanded={history.handleToggleMessageExpanded}
               onToggleCategoryExpanded={history.handleToggleVisibleCategoryMessagesExpanded}
               onToggleBookmark={history.handleToggleBookmark}
-              onRevealInSession={
-                history.historyMode === "session" ? undefined : history.handleRevealInSession
-              }
-              onRevealInProject={
-                history.historyMode === "project_all" ? undefined : history.handleRevealInProject
-              }
               cardRef={
                 history.focusMessageId === message.id ? history.refs.focusedMessageRef : null
               }
+              {...(history.historyMode === "session"
+                ? {}
+                : { onRevealInSession: history.handleRevealInSession })}
+              {...(history.historyMode === "project_all"
+                ? {}
+                : { onRevealInProject: history.handleRevealInProject })}
             />
           ))
         ) : (

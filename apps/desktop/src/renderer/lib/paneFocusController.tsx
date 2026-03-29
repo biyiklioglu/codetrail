@@ -1,6 +1,6 @@
 import {
-  createContext,
   type MouseEvent as ReactMouseEvent,
+  createContext,
   useCallback,
   useContext,
   useEffect,
@@ -53,15 +53,13 @@ export type PaneFocusController = {
     "data-pane-active"?: "true";
     onFocusCapture: () => void;
   };
-  getPaneChromeProps: (
-    pane: HistoryPaneId,
-  ) => {
+  getPaneChromeProps: (pane: HistoryPaneId) => {
     onMouseDownCapture: (event: ReactMouseEvent<HTMLElement>) => void;
     onClickCapture: (event: ReactMouseEvent<HTMLElement>) => void;
   };
-  getPreservePaneFocusProps: (
-    pane: HistoryPaneId,
-  ) => { onMouseDownCapture: (event: ReactMouseEvent<HTMLElement>) => void };
+  getPreservePaneFocusProps: (pane: HistoryPaneId) => {
+    onMouseDownCapture: (event: ReactMouseEvent<HTMLElement>) => void;
+  };
   getPreserveHistoryFocusProps: () => {
     onMouseDownCapture: (event: ReactMouseEvent<HTMLElement>) => void;
   };
@@ -162,9 +160,12 @@ export function useCreatePaneFocusController(): PaneFocusController {
     return "message";
   }, []);
 
-  const registerHistoryPaneRoot = useCallback((pane: HistoryPaneId, element: HTMLElement | null) => {
-    historyPaneRegistrationsRef.current[pane].root = element;
-  }, []);
+  const registerHistoryPaneRoot = useCallback(
+    (pane: HistoryPaneId, element: HTMLElement | null) => {
+      historyPaneRegistrationsRef.current[pane].root = element;
+    },
+    [],
+  );
 
   const registerHistoryPaneTarget = useCallback(
     (pane: HistoryPaneId, element: HTMLElement | null) => {
@@ -177,20 +178,26 @@ export function useCreatePaneFocusController(): PaneFocusController {
     viewTargetsRef.current[view] = element;
   }, []);
 
-  const activateHistoryPane = useCallback((pane: HistoryPaneId) => {
-    const nextPane = resolveAvailableHistoryPane(pane);
-    setActiveDomain((current) =>
-      current.kind === "history" && current.pane === nextPane
-        ? current
-        : { kind: "history", pane: nextPane },
-    );
-    setLastHistoryPane((current) => (current === nextPane ? current : nextPane));
-    return nextPane;
-  }, [resolveAvailableHistoryPane]);
+  const activateHistoryPane = useCallback(
+    (pane: HistoryPaneId) => {
+      const nextPane = resolveAvailableHistoryPane(pane);
+      setActiveDomain((current) =>
+        current.kind === "history" && current.pane === nextPane
+          ? current
+          : { kind: "history", pane: nextPane },
+      );
+      setLastHistoryPane((current) => (current === nextPane ? current : nextPane));
+      return nextPane;
+    },
+    [resolveAvailableHistoryPane],
+  );
 
-  const setActiveHistoryPane = useCallback((pane: HistoryPaneId) => {
-    activateHistoryPane(pane);
-  }, [activateHistoryPane]);
+  const setActiveHistoryPane = useCallback(
+    (pane: HistoryPaneId) => {
+      activateHistoryPane(pane);
+    },
+    [activateHistoryPane],
+  );
 
   const focusHistoryPane = useCallback(
     (pane: HistoryPaneId, options?: { preventScroll?: boolean }) => {
@@ -238,15 +245,18 @@ export function useCreatePaneFocusController(): PaneFocusController {
     setActiveDomain((current) => (current.kind === view ? current : { kind: view }));
   }, []);
 
-  const exitViewAndRestoreHistoryPane = useCallback((returnDomainOverride?: FocusRestorationDomain | null) => {
-    const returnDomain = returnDomainOverride ?? viewReturnDomainRef.current;
-    viewReturnDomainRef.current = null;
-    if (returnDomain) {
-      restoreDomain(returnDomain);
-      return;
-    }
-    restoreLastHistoryPane();
-  }, [restoreDomain, restoreLastHistoryPane]);
+  const exitViewAndRestoreHistoryPane = useCallback(
+    (returnDomainOverride?: FocusRestorationDomain | null) => {
+      const returnDomain = returnDomainOverride ?? viewReturnDomainRef.current;
+      viewReturnDomainRef.current = null;
+      if (returnDomain) {
+        restoreDomain(returnDomain);
+        return;
+      }
+      restoreLastHistoryPane();
+    },
+    [restoreDomain, restoreLastHistoryPane],
+  );
 
   const pushOverlay = useCallback((returnDomain?: FocusRestorationDomain | null) => {
     const token = ++overlayTokenRef.current;
@@ -342,8 +352,7 @@ export function useCreatePaneFocusController(): PaneFocusController {
       exitViewAndRestoreHistoryPane,
       pushOverlay,
       popOverlayAndRestore,
-      isHistoryPaneActive: (pane) =>
-        activeDomain.kind === "history" && activeDomain.pane === pane,
+      isHistoryPaneActive: (pane) => activeDomain.kind === "history" && activeDomain.pane === pane,
       isFocusWithinHistoryPane: (pane, element = document.activeElement) =>
         isElementWithinHistoryPane(historyPaneRegistrationsRef.current[pane], element),
       isOverlayOpen: activeDomain.kind === "overlay",

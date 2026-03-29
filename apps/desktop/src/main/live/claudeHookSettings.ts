@@ -45,8 +45,15 @@ export function inspectClaudeHookState(input: {
   const settingsPath = getClaudeSettingsPath(input.homeDir);
   const logPath = getClaudeHookLogPath(input.userDataDir);
   try {
-    const settingsText = readFileSyncIfPresent(settingsPath);
-    const settings = settingsText ? JSON.parse(settingsText) : {};
+    let settings: Record<string, unknown> = {};
+    try {
+      const settingsText = readFileSync(settingsPath, "utf8");
+      settings = asObject(JSON.parse(settingsText));
+    } catch (error) {
+      if (!isMissingFileError(error)) {
+        throw error;
+      }
+    }
     const hooks = asObject(settings.hooks);
     const managedEventNames = CLAUDE_HOOK_EVENT_NAME_VALUES.filter((eventName) =>
       Array.isArray(hooks[eventName])
@@ -158,14 +165,6 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function isMissingFileError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
-}
-
-function readFileSyncIfPresent(filePath: string): string | null {
-  try {
-    return readFileSync(filePath, "utf8");
-  } catch {
-    return null;
-  }
 }
 
 async function readJsonFileWithSnapshot(filePath: string): Promise<{

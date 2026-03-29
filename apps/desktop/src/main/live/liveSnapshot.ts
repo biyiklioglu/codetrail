@@ -1,6 +1,9 @@
 import {
+  IDLE_LAST_ACTION_RETENTION_MS,
   type IpcResponse,
   type LiveSessionState,
+  RECENT_TOOL_GRACE_MS,
+  canLiveSessionAutoIdle,
   createProviderRecord,
   finalizeLiveSessionState,
 } from "@codetrail/core";
@@ -27,6 +30,7 @@ export function pruneStaleSessionCursors(
 
 export function buildLiveStatusSnapshot(input: {
   enabled: boolean;
+  instrumentationEnabled: boolean;
   nowMs: number;
   sessionCursors: Map<string, LiveSessionCursor>;
   claudeHookState: IpcResponse<"watcher:getLiveStatus">["claudeHookState"];
@@ -80,6 +84,7 @@ export function buildLiveStatusSnapshot(input: {
 
   const baseSnapshot = {
     enabled: input.enabled,
+    instrumentationEnabled: input.instrumentationEnabled,
     revision: input.previousRevision,
     updatedAt: new Date(input.nowMs).toISOString(),
     providerCounts,
@@ -110,63 +115,16 @@ function areSnapshotsEquivalent(
   if (!previousSnapshot) {
     return false;
   }
-  return (
-    previousSnapshot.enabled === nextSnapshot.enabled &&
-    providerCountsEqual(previousSnapshot.providerCounts, nextSnapshot.providerCounts) &&
-    previousSnapshot.sessions.length === nextSnapshot.sessions.length &&
-    previousSnapshot.sessions.every((session, index) => {
-      const nextSession = nextSnapshot.sessions[index];
-      return (
-        nextSession !== undefined &&
-        session.provider === nextSession.provider &&
-        session.sessionIdentity === nextSession.sessionIdentity &&
-        session.sourceSessionId === nextSession.sourceSessionId &&
-        session.filePath === nextSession.filePath &&
-        session.projectName === nextSession.projectName &&
-        session.projectPath === nextSession.projectPath &&
-        session.cwd === nextSession.cwd &&
-        session.statusKind === nextSession.statusKind &&
-        session.statusText === nextSession.statusText &&
-        session.detailText === nextSession.detailText &&
-        session.sourcePrecision === nextSession.sourcePrecision &&
-        session.lastActivityAt === nextSession.lastActivityAt &&
-        session.bestEffort === nextSession.bestEffort
-      );
-    }) &&
-    claudeHookStateEqual(previousSnapshot.claudeHookState, nextSnapshot.claudeHookState)
-  );
-}
-
-function providerCountsEqual(
-  left: IpcResponse<"watcher:getLiveStatus">["providerCounts"],
-  right: IpcResponse<"watcher:getLiveStatus">["providerCounts"],
-): boolean {
-  return (
-    left.claude === right.claude &&
-    left.codex === right.codex &&
-    left.gemini === right.gemini &&
-    left.cursor === right.cursor &&
-    left.copilot === right.copilot
-  );
-}
-
-function claudeHookStateEqual(
-  left: IpcResponse<"watcher:getLiveStatus">["claudeHookState"],
-  right: IpcResponse<"watcher:getLiveStatus">["claudeHookState"],
-): boolean {
-  return (
-    left.settingsPath === right.settingsPath &&
-    left.logPath === right.logPath &&
-    left.installed === right.installed &&
-    left.managed === right.managed &&
-    left.lastError === right.lastError &&
-    arraysEqual(left.managedEventNames, right.managedEventNames) &&
-    arraysEqual(left.missingEventNames, right.missingEventNames)
-  );
-}
-
-function arraysEqual(left: string[], right: string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
+  if (previousSnapshot.enabled !== nextSnapshot.enabled) {
+    return false;
+  }
+  if (!providerCountsEqual(previousSnapshot.providerCounts, nextSnapshot.providerCounts)) {
+    return false;
+  }
+  if (!sessionsEqual(previousSnapshot.sessions, nextSnapshot.sessions)) {
+    return false;
+  }
+  return claudeHookStatesEqual(previousSnapshot.claudeHookState, nextSnapshot.claudeHookState);
 }
 
 function getNextSnapshotInvalidationAtMs(
@@ -176,14 +134,100 @@ function getNextSnapshotInvalidationAtMs(
   pruneAfterMs: number,
 ): number {
   let nextInvalidationAtMs = session.lastActivityAtMs + pruneAfterMs;
-  const canAutoIdle =
-    session.sourcePrecision !== "hook" &&
-    session.statusKind !== "waiting_for_approval" &&
-    session.statusKind !== "waiting_for_input" &&
-    session.statusKind !== "running_tool" &&
-    session.statusKind !== "idle";
-  if (canAutoIdle) {
+  if (canLiveSessionAutoIdle(session) && session.statusKind !== "idle") {
     nextInvalidationAtMs = Math.min(nextInvalidationAtMs, session.lastActivityAtMs + idleTimeoutMs);
   }
+  if (session.lastActionAtMs > 0) {
+    if (session.baseStatusKind === "idle") {
+      nextInvalidationAtMs = Math.min(
+        nextInvalidationAtMs,
+        session.lastActionAtMs + IDLE_LAST_ACTION_RETENTION_MS,
+      );
+    } else {
+      nextInvalidationAtMs = Math.min(
+        nextInvalidationAtMs,
+        session.lastActionAtMs + RECENT_TOOL_GRACE_MS,
+      );
+    }
+  }
   return nextInvalidationAtMs > nowMs ? nextInvalidationAtMs : Number.POSITIVE_INFINITY;
+}
+
+function providerCountsEqual(
+  left: IpcResponse<"watcher:getLiveStatus">["providerCounts"],
+  right: IpcResponse<"watcher:getLiveStatus">["providerCounts"],
+): boolean {
+  return (
+    left.claude === right.claude &&
+    left.codex === right.codex &&
+    left.copilot === right.copilot &&
+    left.cursor === right.cursor &&
+    left.gemini === right.gemini
+  );
+}
+
+function sessionsEqual(
+  left: IpcResponse<"watcher:getLiveStatus">["sessions"],
+  right: IpcResponse<"watcher:getLiveStatus">["sessions"],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    const leftSession = left[index];
+    const rightSession = right[index];
+    if (!leftSession || !rightSession) {
+      return false;
+    }
+    if (
+      leftSession.provider !== rightSession.provider ||
+      leftSession.sessionIdentity !== rightSession.sessionIdentity ||
+      leftSession.sourceSessionId !== rightSession.sourceSessionId ||
+      leftSession.filePath !== rightSession.filePath ||
+      leftSession.projectName !== rightSession.projectName ||
+      leftSession.projectPath !== rightSession.projectPath ||
+      leftSession.cwd !== rightSession.cwd ||
+      leftSession.statusKind !== rightSession.statusKind ||
+      leftSession.statusText !== rightSession.statusText ||
+      leftSession.detailText !== rightSession.detailText ||
+      leftSession.sourcePrecision !== rightSession.sourcePrecision ||
+      leftSession.lastActivityAt !== rightSession.lastActivityAt ||
+      leftSession.bestEffort !== rightSession.bestEffort
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function claudeHookStatesEqual(
+  left: IpcResponse<"watcher:getLiveStatus">["claudeHookState"],
+  right: IpcResponse<"watcher:getLiveStatus">["claudeHookState"],
+): boolean {
+  if (
+    left.settingsPath !== right.settingsPath ||
+    left.logPath !== right.logPath ||
+    left.installed !== right.installed ||
+    left.managed !== right.managed ||
+    left.lastError !== right.lastError
+  ) {
+    return false;
+  }
+  if (left.managedEventNames.length !== right.managedEventNames.length) {
+    return false;
+  }
+  for (let index = 0; index < left.managedEventNames.length; index += 1) {
+    if (left.managedEventNames[index] !== right.managedEventNames[index]) {
+      return false;
+    }
+  }
+  if (left.missingEventNames.length !== right.missingEventNames.length) {
+    return false;
+  }
+  for (let index = 0; index < left.missingEventNames.length; index += 1) {
+    if (left.missingEventNames[index] !== right.missingEventNames[index]) {
+      return false;
+    }
+  }
+  return true;
 }

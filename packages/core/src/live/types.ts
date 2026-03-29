@@ -15,6 +15,9 @@ export const LIVE_SOURCE_PRECISION_VALUES = ["passive", "hook"] as const;
 
 export type LiveSourcePrecision = (typeof LIVE_SOURCE_PRECISION_VALUES)[number];
 
+export const RECENT_TOOL_GRACE_MS = 15_000;
+export const IDLE_LAST_ACTION_RETENTION_MS = 60_000;
+
 export const CLAUDE_HOOK_EVENT_NAME_VALUES = [
   "SessionStart",
   "SessionEnd",

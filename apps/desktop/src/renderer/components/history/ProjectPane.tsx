@@ -525,10 +525,7 @@ export function ProjectPane({
           </div>
         </div>
       </div>
-      <div
-        className="tag-row"
-        {...paneFocus.getPaneChromeProps("project")}
-      >
+      <div className="tag-row" {...paneFocus.getPaneChromeProps("project")}>
         {providers.map((provider) => (
           <button
             key={provider}

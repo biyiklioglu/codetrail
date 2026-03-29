@@ -334,12 +334,12 @@ export function ProjectPaneHeader({
             </div>
           </>
         ) : null}
-          <button
-            type="button"
-            className="collapse-btn pane-collapse-btn"
-            {...paneFocus.getPreservePaneFocusProps("project")}
-            onClick={onToggleCollapsed}
-            aria-label={collapsed ? "Expand Projects pane" : "Collapse Projects pane"}
+        <button
+          type="button"
+          className="collapse-btn pane-collapse-btn"
+          {...paneFocus.getPreservePaneFocusProps("project")}
+          onClick={onToggleCollapsed}
+          aria-label={collapsed ? "Expand Projects pane" : "Collapse Projects pane"}
           title={formatTooltipLabel(
             collapsed ? "Expand Projects" : "Collapse Projects",
             shortcuts.actions.toggleProjectPane,

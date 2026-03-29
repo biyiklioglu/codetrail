@@ -221,6 +221,9 @@ describe("registerIpcHandlers", () => {
           ok: true,
           state: createClaudeHookState({ installed: false }),
         }),
+        "debug:recordLiveUiTrace": () => ({
+          ok: true,
+        }),
       },
       {
         onValidationError,
@@ -409,6 +412,9 @@ describe("registerIpcHandlers", () => {
         "claudeHooks:remove": () => ({
           ok: true,
           state: createClaudeHookState({ installed: false }),
+        }),
+        "debug:recordLiveUiTrace": () => ({
+          ok: true,
         }),
       },
     );

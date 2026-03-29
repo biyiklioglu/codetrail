@@ -236,11 +236,7 @@ export function SessionPane({
           </button>
         </div>
       </div>
-      <div
-        className="list-scroll session-list"
-        ref={setSessionListRefs}
-        tabIndex={-1}
-      >
+      <div className="list-scroll session-list" ref={setSessionListRefs} tabIndex={-1}>
         {sessionRows.map((row) => {
           if (row.kind === "all") {
             return (

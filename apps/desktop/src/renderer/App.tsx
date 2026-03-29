@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type IpcRequest,
+  type IpcRequestInput,
   PROVIDER_LIST,
   type Provider,
   type SearchMode,
@@ -44,8 +45,8 @@ import { useCodetrailClient } from "./lib/codetrailClient";
 import { isSessionsPaneVisible } from "./lib/historyPaneVisibility";
 import { findSessionSummaryById } from "./lib/historySessionLookup";
 import {
-  PaneFocusProvider,
   type HistoryPaneId,
+  PaneFocusProvider,
   useCreatePaneFocusController,
 } from "./lib/paneFocusController";
 import { useShortcutRegistry } from "./lib/shortcutRegistry";
@@ -280,17 +281,15 @@ export function App({
     }
   }, [history.sortedProjects, search.searchProjectId, search.setSearchProjectId]);
 
+  const searchViewTarget = mainView === "search" ? search.globalSearchInputRef.current : null;
   useEffect(() => {
-    paneFocus.registerViewTarget(
-      "search",
-      mainView === "search" ? search.globalSearchInputRef.current : null,
-    );
+    paneFocus.registerViewTarget("search", searchViewTarget);
     paneFocus.registerViewTarget("help", mainView === "help" ? helpViewRef.current : null);
     paneFocus.registerViewTarget(
       "settings",
       mainView === "settings" ? settingsViewRef.current : null,
     );
-  }, [mainView, paneFocus.registerViewTarget]);
+  }, [mainView, paneFocus.registerViewTarget, searchViewTarget]);
 
   useEffect(() => {
     if (mainView !== "history") {
@@ -898,11 +897,9 @@ export function App({
       }
       return;
     }
-    const preferredPane =
-      activeHistoryPaneId ?? paneFocus.lastHistoryPane;
+    const preferredPane = activeHistoryPaneId ?? paneFocus.lastHistoryPane;
     const nextPane = paneFocus.resolveAvailableHistoryPane(preferredPane);
-    const activePaneMatches =
-      activeHistoryPaneId === nextPane;
+    const activePaneMatches = activeHistoryPaneId === nextPane;
     const domFocusMatches = paneFocus.isFocusWithinHistoryPane(nextPane);
     if (activePaneMatches && domFocusMatches) {
       if (historyInvariantRafRef.current !== null) {
@@ -921,9 +918,6 @@ export function App({
       }
     };
   }, [
-    history.hideSessionsPaneForTreeView,
-    history.projectPaneCollapsed,
-    history.sessionPaneCollapsed,
     mainView,
     paneFocus.activeDomain.kind,
     activeHistoryPaneId,
@@ -1034,6 +1028,18 @@ export function App({
       appearance.terminalAppCommand,
     ],
   );
+  const recordLiveUiTrace = useCallback(
+    (payload: IpcRequestInput<"debug:recordLiveUiTrace">) => {
+      if (IS_TEST_ENV) {
+        return;
+      }
+      void codetrail.invoke("debug:recordLiveUiTrace", payload).catch((error) => {
+        logError("Failed recording live UI trace", error);
+      });
+    },
+    [codetrail, logError],
+  );
+  const liveTraceProps = liveStatus?.instrumentationEnabled ? { recordLiveUiTrace } : {};
 
   return (
     <ViewerExternalAppsProvider value={viewerExternalAppsSnapshot}>
@@ -1097,6 +1103,7 @@ export function App({
                   onDeleteSession={handleOpenSessionDelete}
                   liveSessions={liveStatus?.sessions ?? []}
                   liveRowHasBackground={history.liveWatchRowHasBackground}
+                  {...liveTraceProps}
                 />
               ) : (
                 <section
@@ -1117,6 +1124,7 @@ export function App({
                     setZoomPercent={appearance.setZoomPercent}
                     liveSessions={liveStatus?.sessions ?? []}
                     liveRowHasBackground={history.liveWatchRowHasBackground}
+                    {...liveTraceProps}
                   />
                 </section>
               )
@@ -1189,121 +1197,121 @@ export function App({
                     onThemeChange: appearance.setTheme,
                     onShikiThemeChange: appearance.setShikiTheme,
                     onZoomPercentChange: appearance.setZoomPercent,
-                  onMessagePageSizeChange: appearance.setMessagePageSize,
-                  onMonoFontFamilyChange: appearance.setMonoFontFamily,
-                  onRegularFontFamilyChange: appearance.setRegularFontFamily,
-                  onMonoFontSizeChange: appearance.setMonoFontSize,
-                  onRegularFontSizeChange: appearance.setRegularFontSize,
-                  onUseMonospaceForAllMessagesChange: appearance.setUseMonospaceForAllMessages,
-                  onAutoHideMessageActionsChange: appearance.setAutoHideMessageActions,
-                  onAutoHideViewerHeaderActionsChange: appearance.setAutoHideViewerHeaderActions,
-                  onDefaultViewerWrapModeChange: appearance.setDefaultViewerWrapMode,
-                  onDefaultDiffViewModeChange: appearance.setDefaultDiffViewMode,
-                  onPreferredExternalEditorChange: appearance.setPreferredExternalEditor,
-                  onPreferredExternalDiffToolChange: appearance.setPreferredExternalDiffTool,
-                  onTerminalAppCommandChange: appearance.setTerminalAppCommand,
-                  onExternalToolsChange: appearance.setExternalTools,
-                  onRescanExternalTools: appearance.loadAvailableExternalTools,
-                }}
-                indexing={{
-                  enabledProviders,
-                  removeMissingSessionsDuringIncrementalIndexing:
-                    history.removeMissingSessionsDuringIncrementalIndexing,
-                  canForceReindex: !indexing && refreshStrategy === "off",
-                  onToggleProviderEnabled: handleProviderToggle,
-                  onForceReindex: () => setShowReindexConfirm(true),
-                  onRemoveMissingSessionsDuringIncrementalIndexingChange:
-                    handleMissingSessionCleanupToggle,
-                }}
-                messageRules={{
-                  systemMessageRegexRules: history.systemMessageRegexRules,
-                  onAddSystemMessageRegexRule: handleAddSystemMessageRegexRule,
-                  onUpdateSystemMessageRegexRule: handleUpdateSystemMessageRegexRule,
-                  onRemoveSystemMessageRegexRule: handleRemoveSystemMessageRegexRule,
-                }}
-                onActionError={logError}
+                    onMessagePageSizeChange: appearance.setMessagePageSize,
+                    onMonoFontFamilyChange: appearance.setMonoFontFamily,
+                    onRegularFontFamilyChange: appearance.setRegularFontFamily,
+                    onMonoFontSizeChange: appearance.setMonoFontSize,
+                    onRegularFontSizeChange: appearance.setRegularFontSize,
+                    onUseMonospaceForAllMessagesChange: appearance.setUseMonospaceForAllMessages,
+                    onAutoHideMessageActionsChange: appearance.setAutoHideMessageActions,
+                    onAutoHideViewerHeaderActionsChange: appearance.setAutoHideViewerHeaderActions,
+                    onDefaultViewerWrapModeChange: appearance.setDefaultViewerWrapMode,
+                    onDefaultDiffViewModeChange: appearance.setDefaultDiffViewMode,
+                    onPreferredExternalEditorChange: appearance.setPreferredExternalEditor,
+                    onPreferredExternalDiffToolChange: appearance.setPreferredExternalDiffTool,
+                    onTerminalAppCommandChange: appearance.setTerminalAppCommand,
+                    onExternalToolsChange: appearance.setExternalTools,
+                    onRescanExternalTools: appearance.loadAvailableExternalTools,
+                  }}
+                  indexing={{
+                    enabledProviders,
+                    removeMissingSessionsDuringIncrementalIndexing:
+                      history.removeMissingSessionsDuringIncrementalIndexing,
+                    canForceReindex: !indexing && refreshStrategy === "off",
+                    onToggleProviderEnabled: handleProviderToggle,
+                    onForceReindex: () => setShowReindexConfirm(true),
+                    onRemoveMissingSessionsDuringIncrementalIndexingChange:
+                      handleMissingSessionCleanupToggle,
+                  }}
+                  messageRules={{
+                    systemMessageRegexRules: history.systemMessageRegexRules,
+                    onAddSystemMessageRegexRule: handleAddSystemMessageRegexRule,
+                    onUpdateSystemMessageRegexRule: handleUpdateSystemMessageRegexRule,
+                    onRemoveSystemMessageRegexRule: handleRemoveSystemMessageRegexRule,
+                  }}
+                  onActionError={logError}
                 />
               </section>
             )}
           </div>
-        <ConfirmDialog
-          open={showClaudeHooksPrompt}
-          title="Install Claude Hooks?"
-          message="Claude can report precise waiting-for-input, approval, and tool states only when Codetrail-managed Claude hooks are installed. Install them now?"
-          confirmLabel="Install Hooks"
-          cancelLabel="Not Now"
-          onConfirm={() => {
-            history.setClaudeHooksPrompted(true);
-            setShowClaudeHooksPrompt(false);
-            void installClaudeHooks();
-          }}
-          onCancel={() => {
-            history.setClaudeHooksPrompted(true);
-            setShowClaudeHooksPrompt(false);
-          }}
-        />
-        <ConfirmDialog
-          open={showReindexConfirm}
-          title="Force Reindex"
-          message="This will re-read all enabled provider session files from scratch and rebuild indexed history from disk. If some old sessions only exist in the database because their raw transcript files were already cleaned up, they can disappear after this reindex. Continue?"
-          confirmLabel="Reindex"
-          cancelLabel="Cancel"
-          onConfirm={() => {
-            setShowReindexConfirm(false);
-            void handleForceRefresh();
-          }}
-          onCancel={() => setShowReindexConfirm(false)}
-        />
-        <ConfirmDialog
-          open={pendingProviderDisable !== null}
-          title={`Disable ${pendingProviderDisableLabel}?`}
-          message={`Disabling ${pendingProviderDisableLabel} will delete all indexed sessions and all bookmarks for that provider from Codetrail. Raw transcript files on disk will not be touched. Continue?`}
-          confirmLabel="Disable Provider"
-          cancelLabel="Cancel"
-          onConfirm={() => {
-            if (!pendingProviderDisable) {
-              return;
+          <ConfirmDialog
+            open={showClaudeHooksPrompt}
+            title="Install Claude Hooks?"
+            message="Claude can report precise waiting-for-input, approval, and tool states only when Codetrail-managed Claude hooks are installed. Install them now?"
+            confirmLabel="Install Hooks"
+            cancelLabel="Not Now"
+            onConfirm={() => {
+              history.setClaudeHooksPrompted(true);
+              setShowClaudeHooksPrompt(false);
+              void installClaudeHooks();
+            }}
+            onCancel={() => {
+              history.setClaudeHooksPrompted(true);
+              setShowClaudeHooksPrompt(false);
+            }}
+          />
+          <ConfirmDialog
+            open={showReindexConfirm}
+            title="Force Reindex"
+            message="This will re-read all enabled provider session files from scratch and rebuild indexed history from disk. If some old sessions only exist in the database because their raw transcript files were already cleaned up, they can disappear after this reindex. Continue?"
+            confirmLabel="Reindex"
+            cancelLabel="Cancel"
+            onConfirm={() => {
+              setShowReindexConfirm(false);
+              void handleForceRefresh();
+            }}
+            onCancel={() => setShowReindexConfirm(false)}
+          />
+          <ConfirmDialog
+            open={pendingProviderDisable !== null}
+            title={`Disable ${pendingProviderDisableLabel}?`}
+            message={`Disabling ${pendingProviderDisableLabel} will delete all indexed sessions and all bookmarks for that provider from Codetrail. Raw transcript files on disk will not be touched. Continue?`}
+            confirmLabel="Disable Provider"
+            cancelLabel="Cancel"
+            onConfirm={() => {
+              if (!pendingProviderDisable) {
+                return;
+              }
+              setEnabledProviders((current) =>
+                current.filter((provider) => provider !== pendingProviderDisable),
+              );
+              setPendingProviderDisable(null);
+            }}
+            onCancel={() => setPendingProviderDisable(null)}
+          />
+          <ConfirmDialog
+            open={pendingMissingSessionCleanupEnable}
+            title="Enable Missing Session Cleanup?"
+            message="When this is enabled, incremental refreshes will delete indexed sessions whose raw transcript files can no longer be found on disk. This can also remove related bookmarks if their sessions disappear. Continue?"
+            confirmLabel="Enable Cleanup"
+            cancelLabel="Cancel"
+            onConfirm={() => {
+              history.setRemoveMissingSessionsDuringIncrementalIndexing(true);
+              setPendingMissingSessionCleanupEnable(false);
+            }}
+            onCancel={() => setPendingMissingSessionCleanupEnable(false)}
+          />
+          <DeleteIndexedHistoryDialog
+            open={pendingHistoryDelete !== null}
+            target={pendingHistoryDelete}
+            errorMessage={historyDeleteError}
+            busy={historyDeletePending}
+            onConfirm={() => {
+              void handleConfirmHistoryDelete();
+            }}
+            onCancel={() => {
+              setHistoryDeleteError(null);
+              setPendingHistoryDelete(null);
+            }}
+          />
+          <HistoryExportProgressDialog
+            open={history.historyExportState.open}
+            percent={history.historyExportState.percent}
+            message={history.historyExportState.message}
+            scopeLabel={
+              history.historyExportState.scope === "all_pages" ? "All pages" : "Current page"
             }
-            setEnabledProviders((current) =>
-              current.filter((provider) => provider !== pendingProviderDisable),
-            );
-            setPendingProviderDisable(null);
-          }}
-          onCancel={() => setPendingProviderDisable(null)}
-        />
-        <ConfirmDialog
-          open={pendingMissingSessionCleanupEnable}
-          title="Enable Missing Session Cleanup?"
-          message="When this is enabled, incremental refreshes will delete indexed sessions whose raw transcript files can no longer be found on disk. This can also remove related bookmarks if their sessions disappear. Continue?"
-          confirmLabel="Enable Cleanup"
-          cancelLabel="Cancel"
-          onConfirm={() => {
-            history.setRemoveMissingSessionsDuringIncrementalIndexing(true);
-            setPendingMissingSessionCleanupEnable(false);
-          }}
-          onCancel={() => setPendingMissingSessionCleanupEnable(false)}
-        />
-        <DeleteIndexedHistoryDialog
-          open={pendingHistoryDelete !== null}
-          target={pendingHistoryDelete}
-          errorMessage={historyDeleteError}
-          busy={historyDeletePending}
-          onConfirm={() => {
-            void handleConfirmHistoryDelete();
-          }}
-          onCancel={() => {
-            setHistoryDeleteError(null);
-            setPendingHistoryDelete(null);
-          }}
-        />
-        <HistoryExportProgressDialog
-          open={history.historyExportState.open}
-          percent={history.historyExportState.percent}
-          message={history.historyExportState.message}
-          scopeLabel={
-            history.historyExportState.scope === "all_pages" ? "All pages" : "Current page"
-          }
-        />
+          />
         </main>
       </PaneFocusProvider>
     </ViewerExternalAppsProvider>

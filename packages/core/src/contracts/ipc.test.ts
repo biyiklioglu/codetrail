@@ -517,6 +517,53 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
       state: createClaudeHookStateExample({ installed: false }),
     },
   },
+  "debug:recordLiveUiTrace": {
+    request: {
+      selectionMode: "session",
+      selectedProjectId: "project_1",
+      selectedProjectPath: "/workspace/project-one",
+      selectedSessionId: "session_1",
+      selectedSessionIdentity: "selected",
+      displayedMatchType: "session",
+      displayedRankingReason: "running_tool priority",
+      displayedSession: {
+        provider: "codex",
+        sessionIdentity: "selected",
+        sourceSessionId: "selected",
+        filePath: "/workspace/project-one/.codex/sessions/selected.jsonl",
+        projectName: "Project One",
+        projectPath: "/workspace/project-one",
+        cwd: "/workspace/project-one",
+        statusKind: "running_tool",
+        statusText: "Running command",
+        detailText: "bun run test",
+        sourcePrecision: "passive",
+        lastActivityAt: "2026-03-24T12:00:20.000Z",
+        bestEffort: false,
+      },
+      candidateSessions: [
+        {
+          provider: "codex",
+          sessionIdentity: "selected",
+          sourceSessionId: "selected",
+          filePath: "/workspace/project-one/.codex/sessions/selected.jsonl",
+          projectName: "Project One",
+          projectPath: "/workspace/project-one",
+          cwd: "/workspace/project-one",
+          statusKind: "running_tool",
+          statusText: "Running command",
+          detailText: "bun run test",
+          sourcePrecision: "passive",
+          lastActivityAt: "2026-03-24T12:00:20.000Z",
+          bestEffort: false,
+        },
+      ],
+      renderedSummary: "Live · Codex · Running command · bun run test",
+    },
+    response: {
+      ok: true,
+    },
+  },
 };
 
 describe("ipc contracts", () => {

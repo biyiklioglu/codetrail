@@ -301,6 +301,71 @@ describe("App shell", () => {
     });
   });
 
+  it("does not invoke live UI trace IPC when live instrumentation is disabled", async () => {
+    installScrollIntoViewMock();
+
+    const debugTraceHandler = vi.fn(() => ({ ok: true }));
+    const client = createAppClient({
+      "watcher:getLiveStatus": () =>
+        createLiveStatusFixture({
+          enabled: true,
+          instrumentationEnabled: false,
+          providerCounts: {
+            claude: 1,
+            codex: 0,
+            gemini: 0,
+            cursor: 0,
+            copilot: 0,
+          },
+          sessions: [
+            {
+              provider: "claude",
+              sessionIdentity: "live-session-1",
+              sourceSessionId: "provider-session-1",
+              filePath: "/workspace/project-one/session-1.jsonl",
+              projectName: "Project One",
+              projectPath: "/workspace/project-one",
+              cwd: "/workspace/project-one",
+              statusKind: "waiting_for_input",
+              statusText: "Waiting for input",
+              detailText: "updating topbar layout",
+              sourcePrecision: "hook",
+              lastActivityAt: new Date(Date.now() - 12_000).toISOString(),
+              bestEffort: false,
+            },
+          ],
+          claudeHookState: createClaudeHookStateFixture({
+            logPath: "/tmp/claude-hooks.jsonl",
+            installed: true,
+            managedEventNames: [],
+            missingEventNames: [],
+          }),
+        }),
+      "debug:recordLiveUiTrace": debugTraceHandler,
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            liveWatchEnabled: true,
+            preferredAutoRefreshStrategy: "watch-1s",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    expect(debugTraceHandler).not.toHaveBeenCalled();
+  });
+
   it("renders the flat live row style when the background preference is disabled", async () => {
     installScrollIntoViewMock();
 

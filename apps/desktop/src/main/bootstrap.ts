@@ -42,6 +42,7 @@ import {
 import { exportHistoryMessages } from "./historyExport";
 import { WorkerIndexingRunner } from "./indexingRunner";
 import { registerIpcHandlers } from "./ipc";
+import { appendLiveInstrumentationRecord, getLiveUiTraceLogPath } from "./live/liveInstrumentation";
 import { LiveSessionStore } from "./liveSessionStore";
 import { getCurrentMainPlatformConfig } from "./platformConfig";
 import { WatchStatsStore } from "./watchStatsStore";
@@ -54,6 +55,7 @@ const ZOOM_STEP_PERCENT = 10;
 export type BootstrapOptions = {
   dbPath?: string;
   runStartupIndexing?: boolean;
+  instrumentationEnabled?: boolean;
   appStateStore?: AppStateStore;
   onIndexingFileIssue?: (issue: IndexingFileIssue) => void;
   onIndexingNotice?: (notice: IndexingNotice) => void;
@@ -187,6 +189,7 @@ export async function bootstrapMainProcess(
   const watchStatsStore = new WatchStatsStore();
   const getEnabledProviders = () =>
     resolveEnabledProviders(options.appStateStore?.getIndexingState()?.enabledProviders);
+  const liveInstrumentationEnabled = options.instrumentationEnabled ?? false;
   const getRemoveMissingSessionsDuringIncrementalIndexing = () =>
     options.appStateStore?.getIndexingState()?.removeMissingSessionsDuringIncrementalIndexing ??
     false;
@@ -210,6 +213,7 @@ export async function bootstrapMainProcess(
     queryService,
     userDataDir: app.getPath("userData"),
     homeDir: app.getPath("home"),
+    instrumentationEnabled: liveInstrumentationEnabled,
     ...(options.onBackgroundError ? { onBackgroundError: options.onBackgroundError } : {}),
   });
   await runtime.liveSessionStore.prepareClaudeHookLogForAppStart().catch((error: unknown) => {
@@ -843,6 +847,7 @@ export async function bootstrapMainProcess(
           enabled: false,
           revision: 0,
           updatedAt: new Date().toISOString(),
+          instrumentationEnabled: liveInstrumentationEnabled,
           providerCounts: createProviderRecord(() => 0),
           sessions: [],
           claudeHookState: createDefaultClaudeHookState({
@@ -875,6 +880,17 @@ export async function bootstrapMainProcess(
                 lastError: "Live watch is not available.",
               }),
         };
+      },
+      "debug:recordLiveUiTrace": async (payload) => {
+        if (!liveInstrumentationEnabled) {
+          return { ok: true as const };
+        }
+        appendLiveInstrumentationRecord(getLiveUiTraceLogPath(app.getPath("userData")), {
+          recordedAt: new Date().toISOString(),
+          kind: "ui_live_row",
+          ...payload,
+        });
+        return { ok: true as const };
       },
     },
     {

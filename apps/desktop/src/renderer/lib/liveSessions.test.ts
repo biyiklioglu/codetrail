@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ProjectSummary, SessionSummary, WatchLiveStatusResponse } from "../app/types";
 
 import {
+  createLiveUiTracePayload,
   formatCompactLiveAge,
   getNextCompactLiveAgeUpdateDelayMs,
   selectRelevantLiveSession,
@@ -161,6 +162,251 @@ describe("liveSessions", () => {
     });
   });
 
+  it("prefers the richer fresher workspace match even when it comes from another provider", () => {
+    const selectedProject = {
+      id: "project_1",
+      provider: "codex",
+      name: "Project One",
+      path: "/workspace/project-one",
+      providerProjectKey: null,
+      repositoryUrl: null,
+      resolutionState: null,
+      resolutionSource: null,
+      sessionCount: 2,
+      messageCount: 20,
+      bookmarkCount: 0,
+      lastActivity: "2026-03-24T12:00:00.000Z",
+    } satisfies ProjectSummary;
+    const sessions = [
+      {
+        provider: "codex",
+        sessionIdentity: "codex-generic",
+        sourceSessionId: "codex-generic",
+        filePath: "/workspace/project-one/.codex/sessions/generic.jsonl",
+        projectName: "Project One",
+        projectPath: "/workspace/project-one",
+        cwd: "/workspace/project-one",
+        statusKind: "working",
+        statusText: "Working",
+        detailText: null,
+        sourcePrecision: "passive",
+        lastActivityAt: "2026-03-24T12:00:21.000Z",
+        bestEffort: false,
+      },
+      {
+        provider: "claude",
+        sessionIdentity: "claude-rich",
+        sourceSessionId: "claude-rich",
+        filePath: "/workspace/project-one/.claude/projects/project-one/session.jsonl",
+        projectName: "Project One",
+        projectPath: "/workspace/project-one",
+        cwd: "/workspace/project-one",
+        statusKind: "working",
+        statusText: "Tool finished",
+        detailText: "Grep",
+        sourcePrecision: "hook",
+        lastActivityAt: "2026-03-24T12:00:20.000Z",
+        bestEffort: false,
+      },
+    ] satisfies WatchLiveStatusResponse["sessions"];
+
+    expect(
+      selectRelevantLiveSession({
+        sessions,
+        selectionMode: "project_all",
+        selectedProject,
+        selectedSession: null,
+      }),
+    ).toMatchObject({
+      provider: "claude",
+      sessionIdentity: "claude-rich",
+      detailText: "Grep",
+    });
+  });
+
+  it("prefers active_recently with detail over generic working with no detail", () => {
+    const selectedProject = {
+      id: "project_1",
+      provider: "codex",
+      name: "Project One",
+      path: "/workspace/project-one",
+      providerProjectKey: null,
+      repositoryUrl: null,
+      resolutionState: null,
+      resolutionSource: null,
+      sessionCount: 2,
+      messageCount: 20,
+      bookmarkCount: 0,
+      lastActivity: "2026-03-24T12:00:00.000Z",
+    } satisfies ProjectSummary;
+    const sessions = [
+      {
+        provider: "codex",
+        sessionIdentity: "generic-working",
+        sourceSessionId: "generic-working",
+        filePath: "/workspace/project-one/.codex/sessions/generic.jsonl",
+        projectName: "Project One",
+        projectPath: "/workspace/project-one",
+        cwd: "/workspace/project-one",
+        statusKind: "working",
+        statusText: "Working",
+        detailText: null,
+        sourcePrecision: "passive",
+        lastActivityAt: "2026-03-24T12:00:21.000Z",
+        bestEffort: false,
+      },
+      {
+        provider: "claude",
+        sessionIdentity: "recent-with-detail",
+        sourceSessionId: "recent-with-detail",
+        filePath: "/workspace/project-one/.claude/projects/project-one/session.jsonl",
+        projectName: "Project One",
+        projectPath: "/workspace/project-one",
+        cwd: "/workspace/project-one",
+        statusKind: "active_recently",
+        statusText: "Session updated",
+        detailText: "Review findings ready",
+        sourcePrecision: "hook",
+        lastActivityAt: "2026-03-24T12:00:20.000Z",
+        bestEffort: false,
+      },
+    ] satisfies WatchLiveStatusResponse["sessions"];
+
+    expect(
+      selectRelevantLiveSession({
+        sessions,
+        selectionMode: "project_all",
+        selectedProject,
+        selectedSession: null,
+      }),
+    ).toMatchObject({
+      provider: "claude",
+      sessionIdentity: "recent-with-detail",
+    });
+  });
+
+  it("breaks score ties in favor of hook precision", () => {
+    const selectedProject = {
+      id: "project_1",
+      provider: "codex",
+      name: "Project One",
+      path: "/workspace/project-one",
+      providerProjectKey: null,
+      repositoryUrl: null,
+      resolutionState: null,
+      resolutionSource: null,
+      sessionCount: 2,
+      messageCount: 20,
+      bookmarkCount: 0,
+      lastActivity: "2026-03-24T12:00:00.000Z",
+    } satisfies ProjectSummary;
+    const sessions = [
+      {
+        provider: "codex",
+        sessionIdentity: "passive-working",
+        sourceSessionId: "passive-working",
+        filePath: "/workspace/project-one/.codex/sessions/passive.jsonl",
+        projectName: "Project One",
+        projectPath: "/workspace/project-one",
+        cwd: "/workspace/project-one",
+        statusKind: "working",
+        statusText: "Responding",
+        detailText: "Reviewing changes",
+        sourcePrecision: "passive",
+        lastActivityAt: "2026-03-24T12:00:21.000Z",
+        bestEffort: false,
+      },
+      {
+        provider: "claude",
+        sessionIdentity: "hook-working",
+        sourceSessionId: "hook-working",
+        filePath: "/workspace/project-one/.claude/projects/project-one/session.jsonl",
+        projectName: "Project One",
+        projectPath: "/workspace/project-one",
+        cwd: "/workspace/project-one",
+        statusKind: "working",
+        statusText: "Responding",
+        detailText: "Reviewing changes",
+        sourcePrecision: "hook",
+        lastActivityAt: "2026-03-24T12:00:21.000Z",
+        bestEffort: false,
+      },
+    ] satisfies WatchLiveStatusResponse["sessions"];
+
+    expect(
+      selectRelevantLiveSession({
+        sessions,
+        selectionMode: "project_all",
+        selectedProject,
+        selectedSession: null,
+      }),
+    ).toMatchObject({
+      provider: "claude",
+      sessionIdentity: "hook-working",
+    });
+  });
+
+  it("breaks remaining ties in favor of non-best-effort sessions", () => {
+    const selectedProject = {
+      id: "project_1",
+      provider: "codex",
+      name: "Project One",
+      path: "/workspace/project-one",
+      providerProjectKey: null,
+      repositoryUrl: null,
+      resolutionState: null,
+      resolutionSource: null,
+      sessionCount: 2,
+      messageCount: 20,
+      bookmarkCount: 0,
+      lastActivity: "2026-03-24T12:00:00.000Z",
+    } satisfies ProjectSummary;
+    const sessions = [
+      {
+        provider: "codex",
+        sessionIdentity: "best-effort",
+        sourceSessionId: "best-effort",
+        filePath: "/workspace/project-one/.codex/sessions/best-effort.jsonl",
+        projectName: "Project One",
+        projectPath: "/workspace/project-one",
+        cwd: "/workspace/project-one",
+        statusKind: "working",
+        statusText: "Responding",
+        detailText: "Reviewing changes",
+        sourcePrecision: "hook",
+        lastActivityAt: "2026-03-24T12:00:21.000Z",
+        bestEffort: true,
+      },
+      {
+        provider: "claude",
+        sessionIdentity: "clean",
+        sourceSessionId: "clean",
+        filePath: "/workspace/project-one/.claude/projects/project-one/session.jsonl",
+        projectName: "Project One",
+        projectPath: "/workspace/project-one",
+        cwd: "/workspace/project-one",
+        statusKind: "working",
+        statusText: "Responding",
+        detailText: "Reviewing changes",
+        sourcePrecision: "hook",
+        lastActivityAt: "2026-03-24T12:00:21.000Z",
+        bestEffort: false,
+      },
+    ] satisfies WatchLiveStatusResponse["sessions"];
+
+    expect(
+      selectRelevantLiveSession({
+        sessions,
+        selectionMode: "project_all",
+        selectedProject,
+        selectedSession: null,
+      }),
+    ).toMatchObject({
+      provider: "claude",
+      sessionIdentity: "clean",
+    });
+  });
+
   it("formats compact timer labels without zero-padded seconds", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-24T12:01:05.000Z"));
@@ -260,6 +506,98 @@ describe("liveSessions", () => {
         selectedSession,
       }),
     ).toBeNull();
+  });
+
+  it("serializes the displayed live row and candidate sessions for UI tracing", () => {
+    const selectedProject = {
+      id: "project_1",
+      provider: "codex",
+      name: "Project One",
+      path: "/workspace/project-one",
+      providerProjectKey: null,
+      repositoryUrl: null,
+      resolutionState: null,
+      resolutionSource: null,
+      sessionCount: 2,
+      messageCount: 20,
+      bookmarkCount: 0,
+      lastActivity: "2026-03-24T12:00:00.000Z",
+    } satisfies ProjectSummary;
+    const selectedSession = {
+      id: "session_1",
+      projectId: "project_1",
+      provider: "codex",
+      filePath: "/workspace/project-one/.codex/sessions/selected.jsonl",
+      title: "Selected session",
+      modelNames: "gpt-5",
+      startedAt: null,
+      endedAt: null,
+      durationMs: null,
+      gitBranch: null,
+      cwd: "/workspace/project-one",
+      sessionIdentity: "selected",
+      providerSessionId: "selected",
+      sessionKind: null,
+      canonicalProjectPath: null,
+      repositoryUrl: null,
+      gitCommitHash: null,
+      lineageParentId: null,
+      providerClient: null,
+      providerSource: null,
+      providerClientVersion: null,
+      resolutionSource: null,
+      worktreeLabel: null,
+      worktreeSource: null,
+      metadataJson: null,
+      messageCount: 10,
+      bookmarkCount: 0,
+      tokenInputTotal: 0,
+      tokenOutputTotal: 0,
+    } satisfies SessionSummary;
+    const sessions = [
+      {
+        provider: "codex",
+        sessionIdentity: "selected",
+        sourceSessionId: "selected",
+        filePath: "/workspace/project-one/.codex/sessions/selected.jsonl",
+        projectName: "Project One",
+        projectPath: "/workspace/project-one",
+        cwd: "/workspace/project-one",
+        statusKind: "running_tool",
+        statusText: "Running command",
+        detailText: "bun run test",
+        sourcePrecision: "passive",
+        lastActivityAt: "2026-03-24T12:00:20.000Z",
+        bestEffort: false,
+      },
+    ] satisfies WatchLiveStatusResponse["sessions"];
+
+    expect(
+      createLiveUiTracePayload({
+        sessions,
+        selectionMode: "session",
+        selectedProject,
+        selectedSession,
+      }),
+    ).toMatchObject({
+      selectionMode: "session",
+      selectedProjectId: "project_1",
+      selectedSessionId: "session_1",
+      selectedSessionIdentity: "selected",
+      displayedMatchType: "session",
+      displayedRankingReason: "running_tool priority",
+      renderedSummary: "Live · Codex · Running command · bun run test",
+      displayedSession: {
+        sessionIdentity: "selected",
+        statusKind: "running_tool",
+      },
+      candidateSessions: [
+        {
+          sessionIdentity: "selected",
+          statusText: "Running command",
+        },
+      ],
+    });
   });
 
   it("matches Windows project and file paths case-insensitively", () => {

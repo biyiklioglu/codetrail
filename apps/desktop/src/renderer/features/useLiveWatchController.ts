@@ -179,6 +179,7 @@ function updateClaudeHookState(
     const nextRevision = (current?.revision ?? liveStatusRevisionRef.current ?? 0) + 1;
     const nextStatus = {
       enabled: current?.enabled ?? false,
+      instrumentationEnabled: current?.instrumentationEnabled ?? false,
       updatedAt: new Date().toISOString(),
       providerCounts: current?.providerCounts ?? EMPTY_PROVIDER_COUNTS,
       sessions: current?.sessions ?? [],

@@ -33,6 +33,13 @@ import {
   removeManagedHooksFromEntry,
   updateClaudeSettingsJson,
 } from "./live/claudeHookSettings";
+import {
+  appendLiveInstrumentationRecord,
+  areInstrumentationValuesEqual,
+  getLiveTraceLogPath,
+  summarizeLiveLine,
+  summarizeLiveSessionState,
+} from "./live/liveInstrumentation";
 import { buildLiveStatusSnapshot, pruneStaleSessionCursors } from "./live/liveSnapshot";
 
 const STARTUP_SEED_WINDOW_MS = 90_000;
@@ -56,6 +63,7 @@ export type LiveSessionStoreOptions = {
   queryService: Pick<QueryService, "listRecentLiveSessionFiles">;
   userDataDir: string;
   homeDir: string;
+  instrumentationEnabled?: boolean;
   now?: () => number;
   onBackgroundError?: (message: string, error: unknown, details?: Record<string, unknown>) => void;
   createFileWatcher?: (
@@ -69,6 +77,7 @@ export class LiveSessionStore {
   private readonly queryService: Pick<QueryService, "listRecentLiveSessionFiles">;
   private readonly userDataDir: string;
   private readonly homeDir: string;
+  private readonly instrumentationEnabled: boolean;
   private readonly now: () => number;
   private readonly onBackgroundError:
     | ((message: string, error: unknown, details?: Record<string, unknown>) => void)
@@ -92,11 +101,13 @@ export class LiveSessionStore {
   private revision = 0;
   private hookLogPreparedForAppStart = false;
   private readonly indexingPrefetchByFilePath = new Map<string, PrefetchedJsonlChunk>();
+  private readonly liveTraceLogPath: string;
 
   constructor(options: LiveSessionStoreOptions) {
     this.queryService = options.queryService;
     this.userDataDir = options.userDataDir;
     this.homeDir = options.homeDir;
+    this.instrumentationEnabled = options.instrumentationEnabled ?? false;
     this.now = options.now ?? (() => Date.now());
     this.onBackgroundError = options.onBackgroundError;
     this.createFileWatcher =
@@ -104,6 +115,7 @@ export class LiveSessionStore {
       ((roots, onFilesChanged, watcherOptions) =>
         new FileWatcherService(roots, onFilesChanged, watcherOptions));
     this.claudeHookState = this.inspectClaudeHookState();
+    this.liveTraceLogPath = getLiveTraceLogPath(this.userDataDir);
   }
 
   async start(input: { discoveryConfig: DiscoveryConfig }): Promise<void> {
@@ -275,6 +287,7 @@ export class LiveSessionStore {
     const previousSnapshot = this.snapshotCache;
     const nextSnapshotState = buildLiveStatusSnapshot({
       enabled: this.enabled,
+      instrumentationEnabled: this.instrumentationEnabled,
       nowMs,
       sessionCursors: this.sessionCursors,
       claudeHookState: this.claudeHookState,
@@ -283,12 +296,36 @@ export class LiveSessionStore {
       previousSnapshot,
       previousRevision: this.revision,
     });
-    if (prunedAnySessions || nextSnapshotState.revision !== this.revision) {
+    const revisionChanged = nextSnapshotState.revision !== this.revision;
+    if (prunedAnySessions || revisionChanged) {
       this.revision = nextSnapshotState.revision;
     }
     this.snapshotCache = nextSnapshotState.snapshot;
     this.snapshotDirty = false;
     this.snapshotCacheExpiresAtMs = nextSnapshotState.expiresAtMs;
+    if (prunedAnySessions || !previousSnapshot || revisionChanged) {
+      if (this.instrumentationEnabled) {
+        this.recordTrace({
+          kind: "live_snapshot",
+          now: new Date(nowMs).toISOString(),
+          revision: nextSnapshotState.revision,
+          prunedAnySessions,
+          enabled: nextSnapshotState.snapshot.enabled,
+          sessions: nextSnapshotState.snapshot.sessions.map((session) => ({
+            provider: session.provider,
+            sessionIdentity: session.sessionIdentity,
+            sourceSessionId: session.sourceSessionId,
+            statusKind: session.statusKind,
+            statusText: session.statusText,
+            detailText: session.detailText,
+            sourcePrecision: session.sourcePrecision,
+            bestEffort: session.bestEffort,
+            lastActivityAt: session.lastActivityAt,
+            filePath: session.filePath,
+          })),
+        });
+      }
+    }
     return nextSnapshotState.snapshot;
   }
 
@@ -352,6 +389,17 @@ export class LiveSessionStore {
       ignoreLeadingPartialLine = true;
       cursor.session.bestEffort = true;
       cursor.partialLineBuffer = "";
+      if (this.instrumentationEnabled) {
+        this.recordTrace({
+          kind: "tail_window_applied",
+          provider: discovered.provider,
+          reason: "initial_tail",
+          filePath,
+          previousOffset,
+          readFrom,
+          fileSize: fileStat.size,
+        });
+      }
     } else if (fileStat.size < cursor.offset) {
       readFrom = Math.max(0, fileStat.size - INITIAL_TAIL_BYTES);
       ignoreLeadingPartialLine = readFrom > 0;
@@ -359,6 +407,17 @@ export class LiveSessionStore {
       cursor.lastSize = fileStat.size;
       cursor.partialLineBuffer = "";
       cursor.session.bestEffort = true;
+      if (this.instrumentationEnabled) {
+        this.recordTrace({
+          kind: "tail_window_applied",
+          provider: discovered.provider,
+          reason: "truncated_file",
+          filePath,
+          previousOffset,
+          readFrom,
+          fileSize: fileStat.size,
+        });
+      }
     }
 
     let bytesToRead = fileStat.size - readFrom;
@@ -375,6 +434,18 @@ export class LiveSessionStore {
       ignoreLeadingPartialLine = true;
       cursor.partialLineBuffer = "";
       cursor.session.bestEffort = true;
+      if (this.instrumentationEnabled) {
+        this.recordTrace({
+          kind: "tail_window_applied",
+          provider: discovered.provider,
+          reason: "max_read_window",
+          filePath,
+          previousOffset,
+          readFrom,
+          fileSize: fileStat.size,
+          bytesToRead,
+        });
+      }
     }
 
     const buffer = await readBufferRange(filePath, readFrom, bytesToRead);
@@ -397,10 +468,23 @@ export class LiveSessionStore {
     });
 
     for (const line of completeLines.lines) {
+      const before = this.instrumentationEnabled ? summarizeLiveSessionState(cursor.session) : null;
       if (discovered.provider === "codex") {
         cursor.session = applyCodexLiveLine(cursor.session, line, this.now());
       } else {
         cursor.session = applyClaudeTranscriptLine(cursor.session, line, this.now());
+      }
+      if (this.instrumentationEnabled) {
+        const after = summarizeLiveSessionState(cursor.session);
+        this.recordTrace({
+          kind: "line_applied",
+          source: discovered.provider === "codex" ? "codex_transcript" : "claude_transcript",
+          filePath,
+          line: summarizeLiveLine(line),
+          before,
+          after,
+          changed: !areInstrumentationValuesEqual(before, after),
+        });
       }
     }
 
@@ -429,37 +513,60 @@ export class LiveSessionStore {
       this.hookCursor.partialLineBuffer = "";
     }
 
-    const bytesToRead = fileStat.size - readFrom;
-    if (bytesToRead <= 0) {
+    if (fileStat.size <= readFrom) {
       this.hookCursor.lastMtimeMs = Math.trunc(fileStat.mtimeMs);
       this.hookCursor.lastSize = fileStat.size;
       return;
     }
+    while (readFrom < fileStat.size) {
+      const nextLength = Math.min(fileStat.size - readFrom, MAX_READ_BYTES);
+      const buffer = await readBufferRange(filePath, readFrom, nextLength);
+      const completeLines = splitTopLevelJsonObjects({
+        text: buffer.toString("utf8"),
+        previousPartialLine: this.hookCursor.partialLineBuffer,
+        ignoreLeadingPartialLine,
+      });
 
-    const text = await readTextRange(filePath, readFrom, Math.min(bytesToRead, MAX_READ_BYTES));
-    const completeLines = splitJsonLines({
-      text,
-      previousPartialLine: this.hookCursor.partialLineBuffer,
-      ignoreLeadingPartialLine,
-    });
+      for (const line of completeLines.lines) {
+        const transcriptPath = readClaudeHookTranscriptPath(line);
+        if (!transcriptPath || !this.discoveryConfig) {
+          continue;
+        }
+        const discovered = discoverSingleFile(transcriptPath, this.discoveryConfig);
+        if (!discovered || discovered.provider !== "claude") {
+          continue;
+        }
+        const cursor = this.ensureCursor(discovered.filePath, discovered);
+        const before = this.instrumentationEnabled
+          ? summarizeLiveSessionState(cursor.session)
+          : null;
+        cursor.session = applyClaudeHookLine(cursor.session, line, this.now());
+        if (this.instrumentationEnabled) {
+          const after = summarizeLiveSessionState(cursor.session);
+          this.recordTrace({
+            kind: "line_applied",
+            source: "claude_hook",
+            filePath,
+            transcriptPath,
+            line: summarizeLiveLine(line),
+            before,
+            after,
+            changed: !areInstrumentationValuesEqual(before, after),
+          });
+        }
+      }
 
-    for (const line of completeLines.lines) {
-      const transcriptPath = readClaudeHookTranscriptPath(line);
-      if (!transcriptPath || !this.discoveryConfig) {
-        continue;
+      readFrom += buffer.length;
+      this.hookCursor.partialLineBuffer = completeLines.partialLineBuffer;
+      ignoreLeadingPartialLine = false;
+      if (buffer.length < nextLength) {
+        break;
       }
-      const discovered = discoverSingleFile(transcriptPath, this.discoveryConfig);
-      if (!discovered || discovered.provider !== "claude") {
-        continue;
-      }
-      const cursor = this.ensureCursor(discovered.filePath, discovered);
-      cursor.session = applyClaudeHookLine(cursor.session, line, this.now());
     }
 
-    this.hookCursor.offset = fileStat.size;
+    this.hookCursor.offset = readFrom;
     this.hookCursor.lastSize = fileStat.size;
     this.hookCursor.lastMtimeMs = Math.trunc(fileStat.mtimeMs);
-    this.hookCursor.partialLineBuffer = completeLines.partialLineBuffer;
     this.invalidateSnapshotCache();
   }
 
@@ -492,6 +599,14 @@ export class LiveSessionStore {
       }),
     };
     this.sessionCursors.set(filePath, next);
+    if (this.instrumentationEnabled) {
+      this.recordTrace({
+        kind: "cursor_created",
+        provider: discovered.provider,
+        filePath,
+        session: summarizeLiveSessionState(next.session),
+      });
+    }
     return next;
   }
 
@@ -549,6 +664,16 @@ export class LiveSessionStore {
     }
     console.error(`[codetrail] ${message}`, error, details);
   }
+
+  private recordTrace(record: Record<string, unknown>): void {
+    if (!this.instrumentationEnabled) {
+      return;
+    }
+    appendLiveInstrumentationRecord(this.liveTraceLogPath, {
+      recordedAt: new Date(this.now()).toISOString(),
+      ...record,
+    });
+  }
 }
 
 async function readBufferRange(filePath: string, start: number, length: number): Promise<Buffer> {
@@ -560,11 +685,6 @@ async function readBufferRange(filePath: string, start: number, length: number):
   } finally {
     await handle.close();
   }
-}
-
-async function readTextRange(filePath: string, start: number, length: number): Promise<string> {
-  const buffer = await readBufferRange(filePath, start, length);
-  return buffer.toString("utf8");
 }
 
 function splitJsonLines(input: {
@@ -582,6 +702,78 @@ function splitJsonLines(input: {
   let lines = parts.map((line) => line.trim()).filter((line) => line.length > 0);
   if (input.ignoreLeadingPartialLine && !input.previousPartialLine) {
     lines = lines.slice(1);
+  }
+  return {
+    lines,
+    partialLineBuffer,
+  };
+}
+
+function splitTopLevelJsonObjects(input: {
+  text: string;
+  previousPartialLine: string;
+  ignoreLeadingPartialLine: boolean;
+}): {
+  lines: string[];
+  partialLineBuffer: string;
+} {
+  const combined = `${input.previousPartialLine}${input.text}`.replaceAll("\r\n", "\n");
+  const lines: string[] = [];
+  let startIndex = -1;
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+  let skippedLeadingObject =
+    !input.ignoreLeadingPartialLine || input.previousPartialLine.length > 0;
+
+  for (let index = 0; index < combined.length; index += 1) {
+    const character = combined[index] ?? "";
+    if (startIndex < 0) {
+      if (character === "{") {
+        startIndex = index;
+        depth = 1;
+        inString = false;
+        escaping = false;
+      }
+      continue;
+    }
+
+    if (escaping) {
+      escaping = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaping = true;
+      continue;
+    }
+    if (character === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if (character === "{") {
+      depth += 1;
+      continue;
+    }
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        const candidate = combined.slice(startIndex, index + 1);
+        if (skippedLeadingObject) {
+          lines.push(candidate);
+        } else {
+          skippedLeadingObject = true;
+        }
+        startIndex = -1;
+      }
+    }
+  }
+
+  let partialLineBuffer = startIndex >= 0 ? combined.slice(startIndex) : "";
+  if (input.ignoreLeadingPartialLine && !input.previousPartialLine && lines.length === 0) {
+    partialLineBuffer = "";
   }
   return {
     lines,

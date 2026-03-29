@@ -181,7 +181,12 @@ export function useHistorySelectionState(
       }
       scheduleCommittedSelection(nextSelection, delayMs);
     },
-    [clearSelectionCommitTimer, commitHistorySelection, getCommitDebounceMs, scheduleCommittedSelection],
+    [
+      clearSelectionCommitTimer,
+      commitHistorySelection,
+      getCommitDebounceMs,
+      scheduleCommittedSelection,
+    ],
   );
 
   const setHistorySelectionImmediate = useCallback(

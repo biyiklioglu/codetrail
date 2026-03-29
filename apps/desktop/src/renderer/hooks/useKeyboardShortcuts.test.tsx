@@ -235,7 +235,9 @@ describe("useKeyboardShortcuts", () => {
     expect(sessionList.scrollTop).toBe(40);
     expect(messageList.scrollTop).toBe(40);
 
-    rerender(<Harness {...{ ...props, activeHistoryPane: "session", lastHistoryPane: "session" }} />);
+    rerender(
+      <Harness {...{ ...props, activeHistoryPane: "session", lastHistoryPane: "session" }} />,
+    );
     sessionList.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }));
     expect(sessionList.scrollTop).toBe(0);
     expect(projectList.scrollTop).toBe(340);
@@ -280,7 +282,9 @@ describe("useKeyboardShortcuts", () => {
     expect(projectList.scrollTop).toBe(340);
     expect(sessionList.scrollTop).toBe(40);
 
-    rerender(<Harness {...{ ...props, activeHistoryPane: "session", lastHistoryPane: "session" }} />);
+    rerender(
+      <Harness {...{ ...props, activeHistoryPane: "session", lastHistoryPane: "session" }} />,
+    );
     sessionToggle.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }));
     expect(sessionList.scrollTop).toBe(0);
     expect(projectList.scrollTop).toBe(340);
@@ -533,7 +537,9 @@ describe("useKeyboardShortcuts", () => {
 
     projectList.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     projectList.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-    rerender(<Harness {...{ ...props, activeHistoryPane: "session", lastHistoryPane: "session" }} />);
+    rerender(
+      <Harness {...{ ...props, activeHistoryPane: "session", lastHistoryPane: "session" }} />,
+    );
     sessionList.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
 
     expect(props.selectNextFocusedProject).toHaveBeenCalledTimes(1);
