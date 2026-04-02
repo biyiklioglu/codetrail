@@ -16,6 +16,7 @@ beforeEach(() => {
       }),
       onHistoryExportProgress: vi.fn(() => () => undefined),
       onAppCommand: vi.fn(() => () => undefined),
+      onLiveStatusChanged: vi.fn(() => () => undefined),
     },
   });
 });

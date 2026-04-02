@@ -18,6 +18,7 @@ export type MockCodetrailClient = CodetrailClient & {
     typeof vi.fn<(listener: (payload: HistoryExportProgressPayload) => void) => () => void>
   >;
   onAppCommand: ReturnType<typeof vi.fn<(listener: (command: AppCommand) => void) => () => void>>;
+  onLiveStatusChanged: ReturnType<typeof vi.fn<(listener: () => void) => () => void>>;
 };
 
 export function createMockCodetrailClient(): MockCodetrailClient {
@@ -30,11 +31,15 @@ export function createMockCodetrailClient(): MockCodetrailClient {
   const onAppCommand = vi.fn<(listener: (command: AppCommand) => void) => () => void>(
     () => () => undefined,
   );
+  const onLiveStatusChanged = vi.fn<(listener: () => void) => () => void>(
+    () => () => undefined,
+  );
 
   return {
     platform: "darwin" satisfies DesktopPlatform,
     invoke,
     onHistoryExportProgress,
     onAppCommand,
+    onLiveStatusChanged,
   };
 }

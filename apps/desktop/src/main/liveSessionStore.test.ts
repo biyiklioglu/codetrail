@@ -1015,4 +1015,119 @@ describe("LiveSessionStore", () => {
     await store.prepareClaudeHookLogForAppStart();
     expect(readFileSync(`${logPath}.1`, "utf8")).toBe('{"event":"old"}\n');
   });
+
+  it("fires onSnapshotInvalidated when a watcher batch updates cursor state", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-push-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "03", "24", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+
+    const onSnapshotInvalidated = vi.fn();
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      onSnapshotInvalidated,
+    });
+
+    await store.start({ discoveryConfig: config });
+    onSnapshotInvalidated.mockClear();
+
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "task_started", title: "Push test" },
+      })}\n`,
+      "utf8",
+    );
+    await store.handleWatcherBatch(makeBatch(filePath));
+
+    expect(onSnapshotInvalidated).toHaveBeenCalled();
+  });
+
+  it("does not fire onSnapshotInvalidated after stop", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-push-stop-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "03", "24", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+
+    const onSnapshotInvalidated = vi.fn();
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      onSnapshotInvalidated,
+    });
+
+    await store.start({ discoveryConfig: config });
+    await store.stop();
+    onSnapshotInvalidated.mockClear();
+
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "task_started", title: "Push test" },
+      })}\n`,
+      "utf8",
+    );
+    await store.handleWatcherBatch(makeBatch(filePath));
+
+    expect(onSnapshotInvalidated).not.toHaveBeenCalled();
+  });
+
+  it("fires onSnapshotInvalidated from Claude hook watcher updates", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-push-hooks-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const transcriptPath = join(config.claudeRoot, "project-a", "claude-session.jsonl");
+    createClaudeTranscript(transcriptPath);
+    const homeDir = join(dir, "home");
+    const userDataDir = join(dir, "user-data");
+    const settingsPath = join(homeDir, ".claude", "settings.json");
+    writeClaudeHookSettings(settingsPath);
+
+    const onSnapshotInvalidated = vi.fn();
+    const { createFileWatcher, records } = createWatcherFactory();
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles: vi.fn(() => []),
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir,
+      homeDir,
+      createFileWatcher,
+      onSnapshotInvalidated,
+    });
+
+    await store.start({ discoveryConfig: config });
+    await store.handleWatcherBatch(makeBatch(transcriptPath));
+    onSnapshotInvalidated.mockClear();
+
+    const hookLogPath = join(userDataDir, "live-status", "claude-hooks.jsonl");
+    mkdirSync(dirname(hookLogPath), { recursive: true });
+    writeFileSync(
+      hookLogPath,
+      `${JSON.stringify({
+        timestamp: "2026-03-24T09:00:00.000Z",
+        hook_event_name: "Notification",
+        notification_type: "permission_prompt",
+        transcript_path: transcriptPath,
+        message: "Allow editing",
+      })}\n`,
+      "utf8",
+    );
+
+    await records[0]!.callback(makeBatch(hookLogPath));
+
+    expect(onSnapshotInvalidated).toHaveBeenCalled();
+  });
 });

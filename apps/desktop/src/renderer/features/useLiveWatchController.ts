@@ -1,4 +1,11 @@
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useState } from "react";
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { isWatchRefreshStrategy } from "../app/autoRefresh";
 import type { RefreshStrategy } from "../app/autoRefresh";
@@ -11,6 +18,7 @@ const IS_TEST_ENV =
 const LIVE_STATUS_ACTIVE_POLL_MS = IS_TEST_ENV ? 0 : 3_000;
 const LIVE_STATUS_IDLE_POLL_MS = IS_TEST_ENV ? 0 : 10_000;
 const LIVE_STATUS_HIDDEN_POLL_MS = IS_TEST_ENV ? 0 : 15_000;
+export const LIVE_STATUS_PUSH_DEBOUNCE_MS = 200;
 const EMPTY_PROVIDER_COUNTS = {
   claude: 0,
   codex: 0,
@@ -38,7 +46,7 @@ export function useLiveWatchController({
   claudeHooksPrompted,
   logError,
 }: {
-  codetrail: Pick<CodetrailClient, "invoke">;
+  codetrail: Pick<CodetrailClient, "invoke" | "onLiveStatusChanged">;
   mainView: MainView;
   refreshStrategy: RefreshStrategy;
   liveWatchEnabled: boolean;
@@ -126,6 +134,39 @@ export function useLiveWatchController({
       }
     };
   }, [liveStatusVisible, liveWatchActive, loadLiveStatus, mainView]);
+
+  const loadLiveStatusRef = useRef(loadLiveStatus);
+  loadLiveStatusRef.current = loadLiveStatus;
+
+  useEffect(() => {
+    if (!liveWatchActive || !liveStatusVisible) {
+      return;
+    }
+
+    const debounceMs = LIVE_STATUS_PUSH_DEBOUNCE_MS;
+    let timerId: number | null = null;
+
+    const unsubscribe = codetrail.onLiveStatusChanged(() => {
+      if (timerId !== null) {
+        return;
+      }
+      if (debounceMs <= 0) {
+        void loadLiveStatusRef.current();
+        return;
+      }
+      timerId = window.setTimeout(() => {
+        timerId = null;
+        void loadLiveStatusRef.current();
+      }, debounceMs);
+    });
+
+    return () => {
+      unsubscribe();
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [codetrail, liveWatchActive, liveStatusVisible]);
 
   useEffect(() => {
     if (!settingsRefreshTarget) {

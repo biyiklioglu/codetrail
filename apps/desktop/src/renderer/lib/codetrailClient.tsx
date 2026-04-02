@@ -12,6 +12,7 @@ export type CodetrailClient = {
   invoke<C extends IpcChannel>(channel: C, payload: IpcRequestInput<C>): Promise<IpcResponse<C>>;
   onHistoryExportProgress(listener: (payload: HistoryExportProgressPayload) => void): () => void;
   onAppCommand(listener: (command: AppCommand) => void): () => void;
+  onLiveStatusChanged(listener: () => void): () => void;
 };
 
 const MISSING_PRELOAD_ERROR =
@@ -22,6 +23,7 @@ type LegacyCodetrailClient = {
   invoke<C extends IpcChannel>(channel: C, payload: IpcRequestInput<C>): Promise<IpcResponse<C>>;
   onHistoryExportProgress(listener: (payload: HistoryExportProgressPayload) => void): () => void;
   onAppCommand(listener: (command: AppCommand) => void): () => void;
+  onLiveStatusChanged?(listener: () => void): () => void;
 };
 
 const MISSING_CLIENT: CodetrailClient = {
@@ -31,6 +33,7 @@ const MISSING_CLIENT: CodetrailClient = {
   },
   onHistoryExportProgress: () => () => undefined,
   onAppCommand: () => () => undefined,
+  onLiveStatusChanged: () => () => undefined,
 };
 
 function isLegacyCodetrailClient(value: unknown): value is LegacyCodetrailClient {
@@ -57,7 +60,9 @@ function isCodetrailBridge(value: unknown): value is CodetrailBridge {
     typeof (value as { onHistoryExportProgress?: unknown }).onHistoryExportProgress !==
       "function" ||
     !("onAppCommand" in value) ||
-    typeof (value as { onAppCommand?: unknown }).onAppCommand !== "function"
+    typeof (value as { onAppCommand?: unknown }).onAppCommand !== "function" ||
+    !("onLiveStatusChanged" in value) ||
+    typeof (value as { onLiveStatusChanged?: unknown }).onLiveStatusChanged !== "function"
   ) {
     return false;
   }
@@ -76,6 +81,7 @@ function createLegacyClient(client: LegacyCodetrailClient): CodetrailClient {
     invoke: client.invoke,
     onHistoryExportProgress: client.onHistoryExportProgress,
     onAppCommand: client.onAppCommand,
+    onLiveStatusChanged: client.onLiveStatusChanged ?? (() => () => undefined),
   };
 }
 
@@ -91,6 +97,7 @@ function createBridgeClient(bridge: CodetrailBridge): CodetrailClient {
     },
     onHistoryExportProgress: bridge.onHistoryExportProgress,
     onAppCommand: bridge.onAppCommand,
+    onLiveStatusChanged: bridge.onLiveStatusChanged,
   };
 }
 

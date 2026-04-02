@@ -26,6 +26,7 @@ import {
 } from "@codetrail/core";
 
 import { HISTORY_EXPORT_PROGRESS_CHANNEL } from "../shared/historyExport";
+import { LIVE_STATUS_CHANGED_CHANNEL } from "../shared/liveStatusPush";
 import type { AppStateStore } from "./appStateStore";
 import { initializeBookmarkStore, resolveBookmarksDbPath } from "./data/bookmarkStore";
 import { type QueryService, createQueryService } from "./data/queryService";
@@ -216,6 +217,13 @@ export async function bootstrapMainProcess(
     homeDir: app.getPath("home"),
     instrumentationEnabled: liveInstrumentationEnabled,
     ...(options.onBackgroundError ? { onBackgroundError: options.onBackgroundError } : {}),
+    onSnapshotInvalidated: () => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          window.webContents.send(LIVE_STATUS_CHANGED_CHANNEL);
+        }
+      }
+    },
   });
   await runtime.liveSessionStore.prepareClaudeHookLogForAppStart().catch((error: unknown) => {
     if (options.onBackgroundError) {
@@ -397,7 +405,7 @@ export async function bootstrapMainProcess(
                 source: "watch_targeted",
                 ...(prefetchedJsonlChunks.length > 0 ? { prefetchedJsonlChunks } : {}),
               });
-          await enqueuePromise.catch((error: unknown) => {
+          void enqueuePromise.catch((error: unknown) => {
             if (options.onBackgroundError) {
               options.onBackgroundError("watcher-triggered indexing failed", error, {
                 requiresFullScan: batch.requiresFullScan,

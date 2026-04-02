@@ -127,6 +127,7 @@ function renderHarness(
         }),
         onHistoryExportProgress: () => () => undefined,
         onAppCommand: () => () => undefined,
+        onLiveStatusChanged: () => () => undefined,
       }}
     >
       <Harness {...props} />
@@ -365,6 +366,7 @@ describe("useKeyboardShortcuts", () => {
           }),
           onHistoryExportProgress: () => () => undefined,
           onAppCommand: () => () => undefined,
+        onLiveStatusChanged: () => () => undefined,
         }}
       >
         <Harness {...{ ...props, activeHistoryPane: "session", lastHistoryPane: "session" }} />
@@ -423,6 +425,7 @@ describe("useKeyboardShortcuts", () => {
           }),
           onHistoryExportProgress: () => () => undefined,
           onAppCommand: () => () => undefined,
+        onLiveStatusChanged: () => () => undefined,
         }}
       >
         <Harness {...{ ...props, activeHistoryPane: "session", lastHistoryPane: "session" }} />
@@ -689,6 +692,7 @@ describe("useKeyboardShortcuts", () => {
           }),
           onHistoryExportProgress: () => () => undefined,
           onAppCommand: () => () => undefined,
+        onLiveStatusChanged: () => () => undefined,
         }}
       >
         <Harness {...{ ...props, activeHistoryPane: "session", lastHistoryPane: "session" }} />

@@ -92,6 +92,7 @@ export type CodetrailBridge = {
   watcherStop(payload: IpcRequestInput<"watcher:stop">): Promise<IpcResponse<"watcher:stop">>;
   onHistoryExportProgress(listener: (payload: HistoryExportProgressPayload) => void): () => void;
   onAppCommand(listener: (command: AppCommand) => void): () => void;
+  onLiveStatusChanged(listener: () => void): () => void;
 };
 
 export const CHANNEL_TO_BRIDGE_METHOD = {

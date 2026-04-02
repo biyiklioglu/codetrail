@@ -9,6 +9,7 @@ import {
   HISTORY_EXPORT_PROGRESS_CHANNEL,
   type HistoryExportProgressPayload,
 } from "../shared/historyExport";
+import { LIVE_STATUS_CHANGED_CHANNEL } from "../shared/liveStatusPush";
 
 function invoke<C extends IpcChannel>(
   channel: C,
@@ -69,6 +70,15 @@ const api: CodetrailBridge = {
     ipcRenderer.on(APP_COMMAND_CHANNEL, handler);
     return () => {
       ipcRenderer.removeListener(APP_COMMAND_CHANNEL, handler);
+    };
+  },
+  onLiveStatusChanged: (listener) => {
+    const handler = () => {
+      listener();
+    };
+    ipcRenderer.on(LIVE_STATUS_CHANGED_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(LIVE_STATUS_CHANGED_CHANNEL, handler);
     };
   },
 };

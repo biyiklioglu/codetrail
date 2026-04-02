@@ -72,6 +72,7 @@ export type LiveSessionStoreOptions = {
   instrumentationEnabled?: boolean;
   now?: () => number;
   onBackgroundError?: (message: string, error: unknown, details?: Record<string, unknown>) => void;
+  onSnapshotInvalidated?: () => void;
   createFileWatcher?: (
     roots: string[],
     onFilesChanged: (batch: FileWatcherBatch) => void | Promise<void>,
@@ -88,6 +89,7 @@ export class LiveSessionStore {
   private readonly onBackgroundError:
     | ((message: string, error: unknown, details?: Record<string, unknown>) => void)
     | undefined;
+  private readonly onSnapshotInvalidated: (() => void) | undefined;
   private readonly createFileWatcher: NonNullable<LiveSessionStoreOptions["createFileWatcher"]>;
 
   private enabled = false;
@@ -116,6 +118,7 @@ export class LiveSessionStore {
     this.instrumentationEnabled = options.instrumentationEnabled ?? false;
     this.now = options.now ?? (() => Date.now());
     this.onBackgroundError = options.onBackgroundError;
+    this.onSnapshotInvalidated = options.onSnapshotInvalidated;
     this.createFileWatcher =
       options.createFileWatcher ??
       ((roots, onFilesChanged, watcherOptions) =>
@@ -659,6 +662,9 @@ export class LiveSessionStore {
   private invalidateSnapshotCache(): void {
     this.snapshotDirty = true;
     this.snapshotCacheExpiresAtMs = 0;
+    if (this.enabled && this.onSnapshotInvalidated) {
+      this.onSnapshotInvalidated();
+    }
   }
 
   private getClaudeSettingsPath(): string {
