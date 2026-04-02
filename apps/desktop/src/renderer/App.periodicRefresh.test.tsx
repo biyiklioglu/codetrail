@@ -352,6 +352,108 @@ describe("App periodic refresh", () => {
     });
   });
 
+  it("does not refetch bookmark states when a refreshed session detail keeps the same visible message ids", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let sessionRevision = 0;
+    let sessionEndedAt = "2026-03-01T10:00:05.000Z";
+    const detailMessages = [
+      {
+        id: "message_1",
+        sourceId: "source_1",
+        sessionId: "session_1",
+        provider: "claude",
+        category: "user",
+        content: "Please review markdown table rendering",
+        createdAt: "2026-03-01T10:00:00.000Z",
+        tokenInput: 0,
+        tokenOutput: 0,
+      },
+      {
+        id: "message_2",
+        sourceId: "source_2",
+        sessionId: "session_1",
+        provider: "claude",
+        category: "assistant",
+        content: "Saved markdown summary",
+        createdAt: "2026-03-01T10:00:03.000Z",
+        tokenInput: 0,
+        tokenOutput: 0,
+      },
+    ];
+    const client = createAppClient({
+      "sessions:list": () => ({
+        sessions: [makeSessionSummary({ endedAt: sessionEndedAt })],
+      }),
+      "sessions:getDetail": () => {
+        sessionRevision += 1;
+        return {
+          session: {
+            ...makeSessionSummary({
+              endedAt: sessionEndedAt,
+              messageCount: detailMessages.length,
+            }),
+          },
+          totalCount: detailMessages.length,
+          categoryCounts: {
+            user: 1,
+            assistant: 1,
+            tool_use: 0,
+            tool_edit: 0,
+            tool_result: 0,
+            thinking: 0,
+            system: 0,
+          },
+          page: 0,
+          pageSize: 100,
+          focusIndex: null,
+          messages: detailMessages.map((message) => ({
+            ...message,
+            content:
+              sessionRevision % 2 === 0 ? `${message.content} (refresh)` : `${message.content}`,
+          })),
+        };
+      },
+      "bookmarks:getStates": () => ({
+        projectId: "project_1",
+        bookmarkedMessageIds: [],
+      }),
+    });
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Saved markdown summary")).toBeInTheDocument();
+      expect(countChannelCalls(client, "bookmarks:getStates")).toBeGreaterThan(0);
+      expect(countChannelCalls(client, "sessions:getDetail")).toBeGreaterThan(0);
+    });
+
+    const bookmarkCallsBefore = countChannelCalls(client, "bookmarks:getStates");
+    const sessionDetailCallsBefore = countChannelCalls(client, "sessions:getDetail");
+
+    await user.click(screen.getByRole("button", { name: "Auto-refresh strategy" }));
+    await user.click(screen.getByRole("button", { name: "5s scan" }));
+    sessionEndedAt = "2026-03-01T10:00:06.000Z";
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(110);
+    });
+
+    await waitFor(() => {
+      expect(countChannelCalls(client, "sessions:getDetail")).toBeGreaterThan(sessionDetailCallsBefore);
+    });
+    expect(countChannelCalls(client, "bookmarks:getStates")).toBe(bookmarkCallsBefore);
+  });
+
   it("auto-refresh skips project_all detail reload when the selected project fingerprint is unchanged", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const client = createAppClient({
@@ -565,6 +667,19 @@ describe("App periodic refresh", () => {
       />,
       client,
     );
+
+    let projectTwoFolderButton: HTMLButtonElement | null = null;
+    await waitFor(() => {
+      projectTwoFolderButton = document.querySelector<HTMLButtonElement>(
+        '[data-folder-id="/workspace/project-two"]',
+      );
+      expect(projectTwoFolderButton).not.toBeNull();
+    });
+    if (!projectTwoFolderButton) {
+      throw new Error("Expected project-two folder row");
+    }
+
+    await user.click(projectTwoFolderButton);
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Project Two/i })).toBeInTheDocument();
@@ -912,6 +1027,19 @@ describe("App periodic refresh", () => {
       />,
       client,
     );
+
+    let projectTwoFolderButton: HTMLButtonElement | null = null;
+    await waitFor(() => {
+      projectTwoFolderButton = document.querySelector<HTMLButtonElement>(
+        '[data-folder-id="/workspace/project-two"]',
+      );
+      expect(projectTwoFolderButton).not.toBeNull();
+    });
+    if (!projectTwoFolderButton) {
+      throw new Error("Expected project-two folder row");
+    }
+
+    await user.click(projectTwoFolderButton);
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Project Two/i })).toBeInTheDocument();

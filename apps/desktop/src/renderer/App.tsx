@@ -58,8 +58,44 @@ let _testStrategyIntervalOverrides: Partial<Record<ScanRefreshStrategy, number>>
 const IS_TEST_ENV =
   typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("jsdom");
 const WATCH_STATS_POLL_MS = IS_TEST_ENV ? 0 : 1000;
-const INDEXING_STATUS_POLL_MS = IS_TEST_ENV ? 0 : 1000;
-const WATCHER_STATUS_POLL_MS = IS_TEST_ENV ? 0 : 250;
+const INDEXING_STATUS_ACTIVE_POLL_MS = IS_TEST_ENV ? 0 : 1000;
+const INDEXING_STATUS_IDLE_POLL_MS = IS_TEST_ENV ? 0 : 3000;
+const INDEXING_STATUS_HIDDEN_POLL_MS = IS_TEST_ENV ? 0 : 5000;
+const WATCHER_STATUS_BURST_POLL_MS = IS_TEST_ENV ? 0 : 250;
+const WATCHER_STATUS_ACTIVE_POLL_MS = IS_TEST_ENV ? 0 : 1000;
+const WATCHER_STATUS_IDLE_POLL_MS = IS_TEST_ENV ? 0 : 3000;
+const WATCHER_STATUS_HIDDEN_POLL_MS = IS_TEST_ENV ? 0 : 5000;
+const WATCHER_STATUS_BURST_WINDOW_MS = 5000;
+
+export function resolveIndexingStatusPollMs(input: {
+  documentVisible: boolean;
+  indexingRunning: boolean;
+}): number {
+  if (!input.documentVisible) {
+    return INDEXING_STATUS_HIDDEN_POLL_MS;
+  }
+  return input.indexingRunning ? INDEXING_STATUS_ACTIVE_POLL_MS : INDEXING_STATUS_IDLE_POLL_MS;
+}
+
+export function resolveWatcherStatusPollMs(input: {
+  watchStrategyActive: boolean;
+  documentVisible: boolean;
+  nowMs: number;
+  burstUntilMs: number;
+  pendingPathCount: number;
+}): number {
+  if (!input.watchStrategyActive) {
+    return 0;
+  }
+  if (!input.documentVisible) {
+    return WATCHER_STATUS_HIDDEN_POLL_MS;
+  }
+  if (input.nowMs < input.burstUntilMs) {
+    return WATCHER_STATUS_BURST_POLL_MS;
+  }
+  return input.pendingPathCount > 0 ? WATCHER_STATUS_ACTIVE_POLL_MS : WATCHER_STATUS_IDLE_POLL_MS;
+}
+
 export function setTestStrategyIntervalOverrides(
   overrides: Partial<Record<ScanRefreshStrategy, number>> | null,
 ): void {
@@ -152,6 +188,7 @@ export function App({
   }, []);
   const previousMainViewRef = useRef<MainView>(mainView);
   const wasIndexingRef = useRef(false);
+  const indexingInBackgroundRef = useRef(false);
   const lastCompletedJobsRef = useRef(-1);
   const watchStatsLoadedRef = useRef(false);
   const skipNextStatusDrivenReloadRef = useRef(false);
@@ -161,6 +198,8 @@ export function App({
   >(null);
   const refreshLiveStatusRef = useRef<(() => Promise<unknown>) | null>(null);
   const watcherLifecycleRef = useRef(0);
+  const watcherPendingPathCountRef = useRef(0);
+  const watcherStatusBurstUntilRef = useRef(0);
   const helpViewRef = useRef<HTMLElement | null>(null);
   const settingsViewRef = useRef<HTMLElement | null>(null);
   const viewFocusRafRef = useRef<number | null>(null);
@@ -245,6 +284,14 @@ export function App({
   useEffect(() => {
     refreshLiveStatusRef.current = refreshLiveStatus;
   }, [refreshLiveStatus]);
+
+  useEffect(() => {
+    indexingInBackgroundRef.current = indexingInBackground;
+  }, [indexingInBackground]);
+
+  useEffect(() => {
+    watcherPendingPathCountRef.current = watcherPendingPathCount;
+  }, [watcherPendingPathCount]);
 
   useEffect(() => {
     if (mainView !== "settings" || appearance.settingsInfo || appearance.settingsLoading) {
@@ -473,11 +520,7 @@ export function App({
   useEffect(() => {
     let cancelled = false;
     const watchStrategyActive = isWatchRefreshStrategy(refreshStrategy);
-    const scheduledPollIntervals = [
-      mainView === "settings" ? WATCH_STATS_POLL_MS : 0,
-      INDEXING_STATUS_POLL_MS,
-      watchStrategyActive ? WATCHER_STATUS_POLL_MS : 0,
-    ].filter((value) => value > 0);
+    const timeoutIds = new Set<number>();
 
     const loadWatchStats = async (showLoading: boolean) => {
       if (mainView !== "settings") {
@@ -511,7 +554,8 @@ export function App({
         if (cancelled) {
           return;
         }
-        setIndexingInBackground(status.running);
+        indexingInBackgroundRef.current = status.running;
+        setIndexingInBackground((current) => (current === status.running ? current : status.running));
         const wasIndexing = wasIndexingRef.current;
         wasIndexingRef.current = status.running;
         const prevCompleted = lastCompletedJobsRef.current;
@@ -540,13 +584,80 @@ export function App({
       try {
         const status = await codetrail.invoke("watcher:getStatus", {});
         if (!cancelled) {
-          setWatcherPendingPathCount(status.pendingPathCount);
+          watcherPendingPathCountRef.current = status.pendingPathCount;
+          setWatcherPendingPathCount((current) =>
+            current === status.pendingPathCount ? current : status.pendingPathCount,
+          );
         }
       } catch (error) {
         if (!cancelled) {
           logError("Watcher status refresh failed", error);
         }
       }
+    };
+
+    const scheduleTimeout = (callback: () => void, delayMs: number) => {
+      if (cancelled || delayMs <= 0) {
+        return;
+      }
+      const timeoutId = window.setTimeout(() => {
+        timeoutIds.delete(timeoutId);
+        callback();
+      }, delayMs);
+      timeoutIds.add(timeoutId);
+    };
+
+    const isDocumentHidden = () =>
+      typeof document !== "undefined" && document.visibilityState !== "visible";
+
+    const getIndexingStatusPollMs = () =>
+      resolveIndexingStatusPollMs({
+        documentVisible: !isDocumentHidden(),
+        indexingRunning: indexingInBackgroundRef.current,
+      });
+
+    const getWatcherStatusPollMs = () =>
+      resolveWatcherStatusPollMs({
+        watchStrategyActive,
+        documentVisible: !isDocumentHidden(),
+        nowMs: Date.now(),
+        burstUntilMs: watcherStatusBurstUntilRef.current,
+        pendingPathCount: watcherPendingPathCountRef.current,
+      });
+
+    const scheduleWatchStatsPoll = () => {
+      if (mainView !== "settings" || WATCH_STATS_POLL_MS <= 0) {
+        return;
+      }
+      scheduleTimeout(() => {
+        void loadWatchStats(false).finally(() => {
+          scheduleWatchStatsPoll();
+        });
+      }, WATCH_STATS_POLL_MS);
+    };
+
+    const scheduleIndexingStatusPoll = () => {
+      const delayMs = getIndexingStatusPollMs();
+      if (delayMs <= 0) {
+        return;
+      }
+      scheduleTimeout(() => {
+        void syncIndexingStatus().finally(() => {
+          scheduleIndexingStatusPoll();
+        });
+      }, delayMs);
+    };
+
+    const scheduleWatcherStatusPoll = () => {
+      const delayMs = getWatcherStatusPollMs();
+      if (delayMs <= 0) {
+        return;
+      }
+      scheduleTimeout(() => {
+        void syncWatcherStatus().finally(() => {
+          scheduleWatcherStatusPoll();
+        });
+      }, delayMs);
     };
 
     if (mainView === "settings") {
@@ -556,46 +667,35 @@ export function App({
     if (watchStrategyActive) {
       void syncWatcherStatus();
     } else {
-      setWatcherPendingPathCount(0);
+      watcherPendingPathCountRef.current = 0;
+      setWatcherPendingPathCount((current) => (current === 0 ? current : 0));
     }
 
-    if (scheduledPollIntervals.length === 0) {
-      return () => {
-        cancelled = true;
-      };
-    }
+    scheduleWatchStatsPoll();
+    scheduleIndexingStatusPoll();
+    scheduleWatcherStatusPoll();
 
-    const schedulerTickMs = Math.min(...scheduledPollIntervals);
-    let watchStatsElapsedMs = 0;
-    let indexingStatusElapsedMs = 0;
-    let watcherStatusElapsedMs = 0;
-    const intervalId = window.setInterval(() => {
-      if (mainView === "settings" && WATCH_STATS_POLL_MS > 0) {
-        watchStatsElapsedMs += schedulerTickMs;
-        if (watchStatsElapsedMs >= WATCH_STATS_POLL_MS) {
-          watchStatsElapsedMs = 0;
-          void loadWatchStats(false);
-        }
+    const handleVisibilityChange = () => {
+      if (isDocumentHidden()) {
+        return;
       }
-      if (INDEXING_STATUS_POLL_MS > 0) {
-        indexingStatusElapsedMs += schedulerTickMs;
-        if (indexingStatusElapsedMs >= INDEXING_STATUS_POLL_MS) {
-          indexingStatusElapsedMs = 0;
-          void syncIndexingStatus();
-        }
+      void syncIndexingStatus();
+      if (watchStrategyActive) {
+        void syncWatcherStatus();
       }
-      if (watchStrategyActive && WATCHER_STATUS_POLL_MS > 0) {
-        watcherStatusElapsedMs += schedulerTickMs;
-        if (watcherStatusElapsedMs >= WATCHER_STATUS_POLL_MS) {
-          watcherStatusElapsedMs = 0;
-          void syncWatcherStatus();
-        }
+      if (mainView === "settings") {
+        void loadWatchStats(false);
       }
-    }, schedulerTickMs);
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      for (const timeoutId of timeoutIds) {
+        window.clearTimeout(timeoutId);
+      }
+      timeoutIds.clear();
     };
   }, [codetrail, logError, mainView, refreshStrategy]);
 
@@ -886,6 +986,7 @@ export function App({
     if (!isWatchRefreshStrategy(refreshStrategy)) return;
     const lifecycleId = watcherLifecycleRef.current + 1;
     watcherLifecycleRef.current = lifecycleId;
+    watcherStatusBurstUntilRef.current = Date.now() + WATCHER_STATUS_BURST_WINDOW_MS;
     let cancelled = false;
 
     void codetrail
@@ -911,6 +1012,7 @@ export function App({
     return () => {
       cancelled = true;
       watcherLifecycleRef.current += 1;
+      watcherStatusBurstUntilRef.current = Date.now() + WATCHER_STATUS_BURST_WINDOW_MS;
       void codetrail.invoke("watcher:stop", {}).catch((error: unknown) => {
         logError("Failed to stop file watcher", error);
       });

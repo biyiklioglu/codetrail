@@ -275,6 +275,33 @@ if (hasSingleInstanceLock) {
     const appStateStore = createAppStateStore(join(app.getPath("userData"), "ui-state.json"), {
       platform: mainPlatform.platform,
     });
+    const updateApplicationMenu = () => {
+      Menu.setApplicationMenu(
+        Menu.buildFromTemplate(
+          buildAppMenuTemplate({
+            appName: APP_NAME,
+            platform: mainPlatform.platform,
+            isDevelopment: !app.isPackaged,
+            dispatchAppCommand,
+            reloadFocusedWindow: () => {
+              withFocusedWindow((window) => {
+                window.webContents.reload();
+              });
+            },
+            forceReloadFocusedWindow: () => {
+              withFocusedWindow((window) => {
+                window.webContents.reloadIgnoringCache();
+              });
+            },
+            toggleFocusedWindowDevTools: () => {
+              withFocusedWindow((window) => {
+                window.webContents.toggleDevTools();
+              });
+            },
+          }),
+        ),
+      );
+    };
     const dockIconPath = resolveWindowIconPath();
     if (dockIconPath && mainPlatform.shouldSetDockIcon) {
       const icon = nativeImage.createFromPath(dockIconPath);
@@ -313,31 +340,7 @@ if (hasSingleInstanceLock) {
       });
       writeDebugLog("bootstrapMainProcess success");
       mainWindowRef = createWindow(appStateStore);
-      Menu.setApplicationMenu(
-        Menu.buildFromTemplate(
-          buildAppMenuTemplate({
-            appName: APP_NAME,
-            platform: mainPlatform.platform,
-            isDevelopment: !app.isPackaged,
-            dispatchAppCommand,
-            reloadFocusedWindow: () => {
-              withFocusedWindow((window) => {
-                window.webContents.reload();
-              });
-            },
-            forceReloadFocusedWindow: () => {
-              withFocusedWindow((window) => {
-                window.webContents.reloadIgnoringCache();
-              });
-            },
-            toggleFocusedWindowDevTools: () => {
-              withFocusedWindow((window) => {
-                window.webContents.toggleDevTools();
-              });
-            },
-          }),
-        ),
-      );
+      updateApplicationMenu();
       writeDebugLog("createWindow success");
     } catch (error) {
       logAppError("bootstrap failure", error);

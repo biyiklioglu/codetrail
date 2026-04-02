@@ -58,6 +58,7 @@ async function buildMainAndPreload(): Promise<void> {
 }
 
 async function buildRenderer(): Promise<void> {
+  const rendererDevMode = process.env.CODETRAIL_RENDERER_DEV === "1";
   const rendererBuild = await Bun.build({
     entrypoints: [join(srcDir, "renderer", "main.tsx")],
     outdir: join(outDir, "renderer"),
@@ -66,6 +67,10 @@ async function buildRenderer(): Promise<void> {
     sourcemap: "linked",
     minify: false,
     splitting: false,
+    define: {
+      "process.env.NODE_ENV": JSON.stringify("production"),
+      __CODETRAIL_RENDERER_DEV__: JSON.stringify(rendererDevMode),
+    },
   });
   ensureBuildSuccess("renderer", rendererBuild);
 }

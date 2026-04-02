@@ -1194,6 +1194,14 @@ export function useHistoryController({
     sessionPaneCollapsed,
     sessionPaneWidth,
   });
+  const activeHistoryMessageIds = useMemo(
+    () => activeHistoryMessages.map((message) => message.id),
+    [activeHistoryMessages],
+  );
+  const activeHistoryMessageIdsFingerprint = useMemo(
+    () => activeHistoryMessageIds.join("\u0000"),
+    [activeHistoryMessageIds],
+  );
 
   useEffect(() => {
     historyCategoriesRef.current = historyCategories;
@@ -1240,8 +1248,7 @@ export function useHistoryController({
       return;
     }
 
-    const messageIds = activeHistoryMessages.map((message) => message.id);
-    if (messageIds.length === 0) {
+    if (activeHistoryMessageIds.length === 0) {
       setVisibleBookmarkedMessageIds([]);
       return;
     }
@@ -1250,7 +1257,7 @@ export function useHistoryController({
     void codetrail
       .invoke("bookmarks:getStates", {
         projectId: selectedProjectId,
-        messageIds,
+        messageIds: activeHistoryMessageIds,
       })
       .then((response) => {
         if (!cancelled) {
@@ -1267,7 +1274,7 @@ export function useHistoryController({
       cancelled = true;
     };
   }, [
-    activeHistoryMessages,
+    activeHistoryMessageIdsFingerprint,
     bookmarksResponse.projectId,
     bookmarksResponse.results,
     bookmarkStatesRefreshNonce,

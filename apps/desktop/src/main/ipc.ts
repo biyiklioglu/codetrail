@@ -36,9 +36,7 @@ export function registerIpcHandlers(
     ipcMain.handle(channel, async (event, payload) => {
       const request = ipcContractSchemas[channel].request.safeParse(payload ?? {});
       if (!request.success) {
-        const error = new IpcValidationError(
-          `Invalid payload for ${channel}: ${request.error.message}`,
-        );
+        const error = new IpcValidationError(`Invalid payload for ${channel}: ${request.error.message}`);
         options.onValidationError?.({
           channel,
           stage: "request",

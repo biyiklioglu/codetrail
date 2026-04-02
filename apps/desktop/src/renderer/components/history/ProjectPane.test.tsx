@@ -395,17 +395,31 @@ describe("ProjectPane", () => {
       },
     });
 
-    expect(screen.getByRole("button", { name: "Collapse all folders" })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Collapse all folders" }));
-
     expect(screen.getByRole("button", { name: "Expand all folders" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Project One/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Project Two/i })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Expand all folders" }));
+
+    expect(screen.getByRole("button", { name: "Collapse all folders" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Project Two/i })).toBeInTheDocument();
 
     rerender(<ProjectPaneHarness overrides={{ data: { viewMode: "list" } }} />);
 
     expect(screen.queryByRole("button", { name: "Expand all folders" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Collapse all folders" })).toBeNull();
+  });
+
+  it("keeps unselected folders collapsed on initial tree render", () => {
+    renderProjectPane({
+      data: {
+        viewMode: "tree",
+      },
+    });
+
+    expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Project Two/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Project Three/i })).toBeNull();
   });
 
   it("offers a tree-view toggle to hide the Sessions pane from the project overflow menu", async () => {
@@ -692,15 +706,14 @@ describe("ProjectPane", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("Today 1:00 PM")).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Collapse all folders" }));
-    await user.click(screen.getByRole("button", { name: "~/project-one, 1 projects" }));
+    await user.click(screen.getByRole("button", { name: "~/project-two, 1 projects" }));
 
     expect(onSelectProject).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: /Project One/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Project Two/i })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Project One/i }));
+    await user.click(screen.getByRole("button", { name: /Project Two/i }));
 
-    expect(onSelectProject).toHaveBeenCalledWith("project_1");
+    expect(onSelectProject).toHaveBeenCalledWith("project_2");
   });
 
   it("queues a no-op debounced tree navigation step when a folder row receives focus", () => {
@@ -797,9 +810,8 @@ describe("ProjectPane", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Collapse all folders" }));
-    await user.click(screen.getByRole("button", { name: "~/project-one, 1 projects" }));
-    expect(screen.queryByRole("button", { name: /Project One/i })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "~/project-two, 1 projects" }));
+    expect(screen.queryByRole("button", { name: /Project Two/i })).toBeNull();
 
     rerender(
       <ProjectPaneHarness
@@ -840,11 +852,11 @@ describe("ProjectPane", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "~/project-one, 1 projects" }));
-    await user.click(screen.getByRole("button", { name: /Project One/i }));
+    await user.click(screen.getByRole("button", { name: "~/project-two, 1 projects" }));
+    await user.click(screen.getByRole("button", { name: /Project Two/i }));
 
-    expect(onSelectProject).toHaveBeenCalledWith("project_1");
-    expect(screen.getByRole("button", { name: /Project One/i })).toHaveAttribute(
+    expect(onSelectProject).toHaveBeenCalledWith("project_2");
+    expect(screen.getByRole("button", { name: /Project Two/i })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
@@ -997,7 +1009,7 @@ describe("ProjectPane", () => {
         overrides={{
           data: {
             sortedProjects: [projects[2]!, projects[0]!, projects[1]!],
-            selectedProjectId: "project_1",
+            selectedProjectId: "project_3",
             viewMode: "tree",
             updateSource: "auto",
             projectUpdates: { project_3: { messageDelta: 4, updatedAt: Date.now() } },

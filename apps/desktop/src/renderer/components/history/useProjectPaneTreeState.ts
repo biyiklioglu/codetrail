@@ -42,17 +42,11 @@ export function useProjectPaneTreeState({
   onConsumeAutoRevealSessionRequest,
 }: UseProjectPaneTreeStateArgs) {
   const folderOrderControlKeyRef = useRef("");
-  const folderExpansionResetKeyRef = useRef<string | null>(null);
-  const seenFolderIdsRef = useRef<Set<string>>(new Set());
   const [folderOrderIds, setFolderOrderIds] = useState<string[]>([]);
   const [expandedFolderIds, setExpandedFolderIds] = useState<string[]>([]);
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([]);
   const [treeFocusedRow, setTreeFocusedRow] = useState<ProjectPaneTreeFocusedRow | null>(null);
 
-  const folderExpansionResetKey = useMemo(
-    () => [sortField, sortDirection, projectProvidersKey, projectQueryInput].join("\u0000"),
-    [projectProvidersKey, projectQueryInput, sortDirection, sortField],
-  );
   const folderOrderControlKey = useMemo(
     () => [sortField, sortDirection, projectProvidersKey, projectQueryInput].join("\u0000"),
     [projectProvidersKey, projectQueryInput, sortDirection, sortField],
@@ -84,18 +78,10 @@ export function useProjectPaneTreeState({
 
   useEffect(() => {
     if (viewMode !== "tree") {
-      folderExpansionResetKeyRef.current = null;
-      seenFolderIdsRef.current.clear();
       setExpandedFolderIds([]);
       setExpandedProjectIds([]);
-      return;
     }
-    if (folderExpansionResetKeyRef.current === folderExpansionResetKey) {
-      return;
-    }
-    folderExpansionResetKeyRef.current = folderExpansionResetKey;
-    seenFolderIdsRef.current.clear();
-  }, [folderExpansionResetKey, viewMode]);
+  }, [viewMode]);
 
   useEffect(() => {
     if (viewMode !== "tree" || !autoRevealSessionRequest) {
@@ -205,12 +191,10 @@ export function useProjectPaneTreeState({
       let changed = next.length !== current.length;
 
       for (const group of folderGroups) {
-        const isNewFolder = !seenFolderIdsRef.current.has(group.id);
-        seenFolderIdsRef.current.add(group.id);
         const shouldForceOpen =
           projectQueryInput.trim().length > 0 ||
           group.projects.some((project) => project.id === selectedProjectId);
-        if ((isNewFolder || shouldForceOpen) && !nextSet.has(group.id)) {
+        if (shouldForceOpen && !nextSet.has(group.id)) {
           next.push(group.id);
           nextSet.add(group.id);
           changed = true;

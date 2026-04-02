@@ -122,12 +122,13 @@ async function bootRenderer(): Promise<void> {
       initialPaneState?.darkShikiTheme ?? null,
       initialPaneState?.lightShikiTheme ?? null,
     );
+    const appTree = (
+      <AppErrorBoundary>
+        <App initialPaneState={initialPaneState} />
+      </AppErrorBoundary>
+    );
     createRoot(rootElement).render(
-      <StrictMode>
-        <AppErrorBoundary>
-          <App initialPaneState={initialPaneState} />
-        </AppErrorBoundary>
-      </StrictMode>,
+      __CODETRAIL_RENDERER_DEV__ ? <StrictMode>{appTree}</StrictMode> : appTree,
     );
   } catch (error) {
     console.error("[codetrail] renderer bootstrap failed", error);

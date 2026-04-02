@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createClaudeHookStateFixture, createLiveStatusFixture } from "@codetrail/core/testing";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -26,6 +26,10 @@ import type { PaneStateSnapshot } from "./app/types";
 import { SEARCH_PLACEHOLDERS } from "./lib/searchLabels";
 import { createAppClient, installScrollIntoViewMock } from "./test/appTestFixtures";
 import { renderWithClient } from "./test/renderWithClient";
+
+function countChannelCalls(client: ReturnType<typeof createAppClient>, channel: string): number {
+  return client.invoke.mock.calls.filter(([name]) => name === channel).length;
+}
 
 function installDialogMock(): void {
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
