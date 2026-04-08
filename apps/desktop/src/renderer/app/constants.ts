@@ -59,23 +59,17 @@ export const EMPTY_SYSTEM_MESSAGE_REGEX_RULES: SystemMessageRegexRules = createP
 );
 
 export const COMMON_SYNTAX_ITEMS = [
-  { syntax: "term", description: "Match a word" },
-  { syntax: "term*", description: "Match words with this prefix", note: "* only works at the end" },
-  { syntax: "focus+on", description: "Punctuation can still match" },
-  { syntax: "focus-on", description: "Punctuation can still match" },
-  { syntax: "focus+on+something", description: "Multiple separators still match" },
+  { syntax: "react", description: "Match a word" },
+  { syntax: "react*", description: "Prefix match (e.g. reactive, reactivity)" },
+  { syntax: "focus+on", description: "Multiple terms - punctuation still matches" },
 ] as const;
 
 export const ADVANCED_SYNTAX_ITEMS = [
-  { syntax: '"exact phrase"', description: "Match an exact phrase" },
-  { syntax: "A OR B", description: "Match either A or B" },
-  { syntax: "A NOT B", description: "Match A without B" },
-  {
-    syntax: '"and" / "or" / "not"',
-    description: "Match these words literally",
-    note: "Unquoted AND / OR / NOT are operators",
-  },
-  { syntax: "(A OR B) C", description: "Group terms with parentheses" },
+  { syntax: '"exact phrase"', description: "Literal phrase match" },
+  { syntax: "A OR B", description: "Match either term" },
+  { syntax: "A NOT B", description: "Exclude a term" },
+  { syntax: "(A OR B) C", description: "Group with parentheses" },
+  { syntax: '"and" / "or" / "not"', description: "Quote operators to match literally" },
 ] as const;
 
 export const MONO_FONT_STACKS: Record<MonoFontFamily, string> = {

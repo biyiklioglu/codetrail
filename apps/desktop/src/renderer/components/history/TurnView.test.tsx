@@ -312,7 +312,7 @@ describe("TurnView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
 
-    expect(screen.getAllByText("1 file changed")).toHaveLength(2);
+    expect(screen.getByText("1 file changed")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Collapse diff for query.ts" })).toBeInTheDocument();
     expect(screen.queryByText("Best Effort")).toBeNull();
   });
@@ -669,7 +669,7 @@ describe("TurnView", () => {
       "message_1",
       "message_3",
     ]);
-    expect(screen.getAllByText("1 file changed")).toHaveLength(2);
+    expect(screen.getByText("1 file changed")).toBeInTheDocument();
   });
 
   it("ignores tool_result diff output in combined changes", () => {

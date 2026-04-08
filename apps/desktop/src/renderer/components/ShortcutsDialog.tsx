@@ -1,8 +1,8 @@
-type ShortcutItem = {
-  group: string;
-  shortcut: string;
-  description: string;
-};
+import type { CSSProperties, ReactNode } from "react";
+
+import type { MessageCategory } from "@codetrail/core/browser";
+
+import type { ShortcutRegistry } from "../lib/shortcutRegistry";
 
 type SyntaxItem = {
   syntax: string;
@@ -10,223 +10,500 @@ type SyntaxItem = {
   note?: string;
 };
 
+type ShortcutSectionRow = {
+  label: string;
+  shortcuts: string[];
+};
+
+type FilterRow = {
+  category: MessageCategory;
+  label: string;
+  colorVar:
+    | "--cat-user-text"
+    | "--cat-assistant-text"
+    | "--cat-write-text"
+    | "--cat-tool-use-text"
+    | "--cat-tool-result-text"
+    | "--cat-thinking-text"
+    | "--cat-system-text";
+};
+
+const MODIFIER_SYMBOLS: Record<string, string> = {
+  Cmd: "⌘",
+  Ctrl: "⌃",
+  Shift: "⇧",
+  Alt: "⌥",
+  Option: "⌥",
+};
+
+const KEY_SYMBOLS: Record<string, string> = {
+  Left: "←",
+  Right: "→",
+  Up: "↑",
+  Down: "↓",
+  Plus: "+",
+  "Page Up": "PgUp",
+  "Page Down": "PgDn",
+};
+
+const FILTER_ROWS: FilterRow[] = [
+  { category: "user", label: "User", colorVar: "--cat-user-text" },
+  { category: "assistant", label: "Assistant", colorVar: "--cat-assistant-text" },
+  { category: "tool_edit", label: "Write", colorVar: "--cat-write-text" },
+  { category: "tool_use", label: "Tool Use", colorVar: "--cat-tool-use-text" },
+  { category: "tool_result", label: "Tool Result", colorVar: "--cat-tool-result-text" },
+  { category: "thinking", label: "Thinking", colorVar: "--cat-thinking-text" },
+  { category: "system", label: "System", colorVar: "--cat-system-text" },
+] as const;
+
 export function ShortcutsDialog({
-  shortcutItems,
+  shortcuts,
   commonSyntaxItems,
   advancedSyntaxItems,
 }: {
-  shortcutItems: ShortcutItem[];
+  shortcuts: ShortcutRegistry;
   commonSyntaxItems: SyntaxItem[];
   advancedSyntaxItems: SyntaxItem[];
 }) {
-  const shortcutGroups = groupShortcuts(shortcutItems);
+  const syntaxItems = [
+    ...commonSyntaxItems.map((item) => ({ ...item, advanced: false })),
+    ...advancedSyntaxItems.map((item) => ({ ...item, advanced: true })),
+  ];
+  const searchRows: ShortcutSectionRow[] = [
+    {
+      label: "Search current view",
+      shortcuts: [findShortcut(shortcuts, "Search current view")],
+    },
+    {
+      label: "Global search",
+      shortcuts: [shortcuts.actions.openGlobalSearch],
+    },
+  ];
+  const navigationRows: ShortcutSectionRow[] = [
+    {
+      label: "Previous page / turn",
+      shortcuts: [shortcuts.actions.previousPage],
+    },
+    {
+      label: "Next page / turn",
+      shortcuts: [shortcuts.actions.nextPage],
+    },
+    {
+      label: "Previous message / result",
+      shortcuts: [findShortcut(shortcuts, "Previous message or result")],
+    },
+    {
+      label: "Next message / result",
+      shortcuts: [findShortcut(shortcuts, "Next message or result")],
+    },
+    {
+      label: "Previous session / project",
+      shortcuts: [
+        findShortcut(
+          shortcuts,
+          "Previous session, or previous project when Sessions pane is collapsed or hidden",
+        ),
+      ],
+    },
+    {
+      label: "Next session / project",
+      shortcuts: [
+        findShortcut(
+          shortcuts,
+          "Next session, or next project when Sessions pane is collapsed or hidden",
+        ),
+      ],
+    },
+    {
+      label: "Previous project",
+      shortcuts: [findShortcut(shortcuts, "Previous project")],
+    },
+    {
+      label: "Next project",
+      shortcuts: [findShortcut(shortcuts, "Next project")],
+    },
+  ];
+  const scrollRows: ShortcutSectionRow[] = [
+    {
+      label: "Page up",
+      shortcuts: sortPageTraversalShortcuts(findShortcuts(shortcuts, "Page up in current list")),
+    },
+    {
+      label: "Page down",
+      shortcuts: sortPageTraversalShortcuts(findShortcuts(shortcuts, "Page down in current list")),
+    },
+  ];
+  const paneRows: ShortcutSectionRow[] = [
+    { label: "Next pane", shortcuts: ["Tab"] },
+    { label: "Previous pane", shortcuts: ["Shift+Tab"] },
+  ];
+  const viewRows: ShortcutSectionRow[] = [
+    {
+      label: "Messages view",
+      shortcuts: [shortcuts.actions.showMessagesView],
+    },
+    {
+      label: "Turns view",
+      shortcuts: [shortcuts.actions.cycleMessagesTurnsView],
+    },
+    {
+      label: "Bookmarks view",
+      shortcuts: [shortcuts.actions.showBookmarksView],
+    },
+    {
+      label: "Toggle Projects pane",
+      shortcuts: [shortcuts.actions.toggleProjectPane],
+    },
+    {
+      label: "Toggle Sessions pane",
+      shortcuts: [shortcuts.actions.toggleSessionPane],
+    },
+    {
+      label: "Expand / collapse / restore",
+      shortcuts: [shortcuts.actions.toggleAllMessagesExpanded],
+    },
+  ];
+  const refreshRows: ShortcutSectionRow[] = [
+    {
+      label: "Refresh now",
+      shortcuts: [shortcuts.actions.refreshNow],
+    },
+    {
+      label: "Toggle auto-refresh",
+      shortcuts: [shortcuts.actions.toggleAutoRefresh],
+    },
+  ];
+  const systemRows: ShortcutSectionRow[] = [
+    {
+      label: "Settings",
+      shortcuts: [shortcuts.actions.openSettings],
+    },
+    {
+      label: "Zoom in",
+      shortcuts: [shortcuts.actions.zoomIn],
+    },
+    {
+      label: "Zoom out",
+      shortcuts: [shortcuts.actions.zoomOut],
+    },
+    {
+      label: "Reset zoom",
+      shortcuts: [shortcuts.actions.zoomReset],
+    },
+  ];
 
   return (
     <div className="help-view">
       <div className="help-page">
-        <div className="help-grid">
-          <section className="help-card">
-            <div className="help-card-header">
-              <div className="help-card-icon success" aria-hidden>
-                ⌨
-              </div>
-              <div>
-                <h3 className="help-card-title help-card-title-shortcuts">Keyboard Shortcuts</h3>
-                <p className="help-card-description">
-                  Navigate and control the app without touching your mouse.
-                </p>
-              </div>
-            </div>
-            <div className="help-shortcut-list">
-              {shortcutGroups.map((group) => (
-                <div key={group.name}>
-                  <div className="help-group-label">{group.name}</div>
-                  {group.items.map((item) => (
-                    <div
-                      key={`shortcut-${item.shortcut}-${item.description}`}
-                      className="help-shortcut-row"
-                    >
-                      <span className="help-shortcut-description">{item.description}</span>
-                      <div className="help-shortcut-keys">
-                        {shortcutParts(item.shortcut).map((part, index) => (
-                          <span key={`${item.shortcut}-${part.key}`} className="help-key-fragment">
-                            {index > 0 ? <span className="help-key-separator">+</span> : null}
-                            <kbd className="help-key">{part.label}</kbd>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </section>
+        <header className="help-header">
+          <div>
+            <h1 className="help-title">
+              Code Trail <span>Help</span>
+            </h1>
+            <p className="help-subtitle">Keyboard shortcuts and search syntax reference</p>
+          </div>
+          <div className="help-close-hint">
+            <span>Press</span>
+            {renderShortcutSequence("?")}
+            <span>to toggle</span>
+            <span className="help-close-divider" aria-hidden>
+              ·
+            </span>
+            {renderShortcutSequence("Esc")}
+            <span>to close</span>
+          </div>
+        </header>
 
-          <section className="help-card">
-            <div className="help-card-header">
-              <div className="help-card-icon success" aria-hidden>
-                ⌕
-              </div>
-              <div>
-                <h3 className="help-card-title help-card-title-search">Search Syntax</h3>
-                <p className="help-card-description">
-                  Build precise queries across your session history.
-                </p>
-              </div>
-            </div>
-            <div className="help-syntax-section">
-              <div className="help-syntax-block common">
-                <div className="help-syntax-block-header">
-                  <span className="help-group-label">Common</span>
-                  <span className="help-syntax-tag common">Normal + Advanced</span>
+        <HelpSection title="Search">
+          <ShortcutGrid rows={searchRows} />
+        </HelpSection>
+
+        <HelpSection title="Search Syntax">
+          <div className="help-syntax-grid">
+            {syntaxItems.map((item) => (
+              <div key={`${item.syntax}-${item.description}`} className="help-syntax-row">
+                <div className="help-syntax-example">{renderSyntaxToken(item.syntax)}</div>
+                <div className="help-syntax-copy">
+                  <span className="help-syntax-description">{item.description}</span>
+                  {item.advanced ? <span className="help-badge">Advanced</span> : null}
+                  {item.note ? <div className="help-syntax-note">{item.note}</div> : null}
                 </div>
-                {commonSyntaxItems.map((item) => (
-                  <div
-                    key={`syntax-common-${item.syntax}-${item.description}`}
-                    className="help-syntax-row"
-                  >
-                    <span className="help-syntax-token">{renderSyntaxToken(item.syntax)}</span>
-                    <div>
-                      <div className="help-syntax-description">{item.description}</div>
-                      {item.note ? <div className="help-syntax-note">{item.note}</div> : null}
-                    </div>
-                  </div>
+              </div>
+            ))}
+          </div>
+          <div className="help-info-box">
+            <strong>Advanced mode</strong> applies to history and global message search only.
+            Project search uses plain text filtering.
+          </div>
+        </HelpSection>
+
+        <HelpSection title="Navigation">
+          <ShortcutGrid rows={navigationRows} />
+          <div className="help-subheading">Scroll current list</div>
+          <ShortcutGrid rows={scrollRows} />
+          <div className="help-subheading">Panes</div>
+          <ShortcutGrid rows={paneRows} />
+        </HelpSection>
+
+        <HelpSection title="Views & Panels">
+          <ShortcutGrid rows={viewRows} />
+        </HelpSection>
+
+        <HelpSection title="Message Filters">
+          <p className="help-section-copy">
+            Each message type has three filter modes. The number key selects the type:
+          </p>
+          <div className="help-filter-table-wrap">
+            <table className="help-filter-table">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Show / Hide</th>
+                  <th>Expand / Collapse</th>
+                  <th>Focus (solo)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {FILTER_ROWS.map((row) => (
+                  <tr key={row.category}>
+                    <td>
+                      <span
+                        className="help-filter-dot"
+                        aria-hidden
+                        style={{ "--help-filter-color": `var(${row.colorVar})` } as CSSProperties}
+                      />
+                      {row.label}
+                    </td>
+                    <td>
+                      {renderShortcutSequence(shortcuts.historyCategoryShortcuts[row.category])}
+                    </td>
+                    <td>
+                      {renderShortcutSequence(
+                        shortcuts.historyCategoryExpandShortcuts[row.category],
+                      )}
+                    </td>
+                    <td>
+                      {renderShortcutSequence(shortcuts.historyCategorySoloShortcuts[row.category])}
+                    </td>
+                  </tr>
                 ))}
-              </div>
+              </tbody>
+            </table>
+          </div>
+          <div className="help-section-divider" aria-hidden />
+          <ShortcutGrid
+            rows={[
+              {
+                label: "Toggle User + Assistant + Write",
+                shortcuts: [shortcuts.historyCategoryShortcuts.user.replace(/\d$/u, "8")],
+              },
+              {
+                label: "Focus User + Assistant + Write",
+                shortcuts: [shortcuts.historyCategorySoloShortcuts.user.replace(/\d$/u, "8")],
+              },
+              {
+                label: "Toggle all types",
+                shortcuts: [shortcuts.historyCategoryShortcuts.user.replace(/\d$/u, "9")],
+              },
+              {
+                label: "Focus all types",
+                shortcuts: [shortcuts.historyCategorySoloShortcuts.user.replace(/\d$/u, "9")],
+              },
+            ]}
+          />
+          <p className="help-matrix-note">
+            Pattern:{" "}
+            {renderShortcutSequence(shortcuts.historyCategoryShortcuts.user.replace(/\d$/u, ""))}
+            <span> toggles visibility </span>
+            <span className="help-close-divider" aria-hidden>
+              ·
+            </span>
+            {renderShortcutSequence(
+              shortcuts.historyCategoryExpandShortcuts.user.replace(/\d$/u, ""),
+            )}
+            <span> expands/collapses </span>
+            <span className="help-close-divider" aria-hidden>
+              ·
+            </span>
+            {renderShortcutSequence(
+              shortcuts.historyCategorySoloShortcuts.user.replace(/\d$/u, ""),
+            )}
+            <span> focuses (hides everything else)</span>
+          </p>
+        </HelpSection>
 
-              <div className="help-syntax-block advanced">
-                <div className="help-syntax-block-header">
-                  <span className="help-group-label">Advanced Only</span>
-                  <span className="help-syntax-tag advanced">Advanced mode</span>
-                </div>
-                {advancedSyntaxItems.map((item) => (
-                  <div
-                    key={`syntax-advanced-${item.syntax}-${item.description}`}
-                    className="help-syntax-row"
-                  >
-                    <span className="help-syntax-token">{renderSyntaxToken(item.syntax)}</span>
-                    <div>
-                      <div className="help-syntax-description">{item.description}</div>
-                      {item.note ? <div className="help-syntax-note">{item.note}</div> : null}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="help-tip-box">
-                <span className="help-tip-icon" aria-hidden>
-                  i
-                </span>
-                <p className="help-tip-text">
-                  <strong>Advanced mode</strong> applies to history and global message search only.
-                  Project search uses plain text filtering.
-                </p>
-              </div>
-            </div>
-          </section>
+        <div className="help-two-col">
+          <HelpSection title="Refresh">
+            <ShortcutList rows={refreshRows} />
+          </HelpSection>
+          <HelpSection title="System">
+            <ShortcutList rows={systemRows} />
+          </HelpSection>
         </div>
       </div>
     </div>
   );
 }
 
-function groupShortcuts(shortcuts: ShortcutItem[]): Array<{ name: string; items: ShortcutItem[] }> {
-  const map = new Map<string, ShortcutItem[]>();
-  for (const item of shortcuts) {
-    const existing = map.get(item.group);
-    if (existing) {
-      existing.push(item);
-      continue;
-    }
-    map.set(item.group, [item]);
-  }
-  return Array.from(map.entries()).map(([name, items]) => ({ name, items }));
+function HelpSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="help-section">
+      <h2 className="help-section-title">{title}</h2>
+      {children}
+    </section>
+  );
 }
 
-function shortcutParts(shortcut: string): Array<{ key: string; label: string }> {
-  const normalized = shortcut.endsWith("++") ? `${shortcut.slice(0, -2)}+Plus` : shortcut;
-  const rawParts = normalized
+function ShortcutGrid({ rows }: { rows: ShortcutSectionRow[] }) {
+  return (
+    <div className="help-shortcut-grid">
+      {rows.map((row) => (
+        <ShortcutRow key={`${row.label}-${row.shortcuts.join("|")}`} row={row} />
+      ))}
+    </div>
+  );
+}
+
+function ShortcutList({ rows }: { rows: ShortcutSectionRow[] }) {
+  return (
+    <div className="help-shortcut-list-simple">
+      {rows.map((row) => (
+        <ShortcutRow key={`${row.label}-${row.shortcuts.join("|")}`} row={row} />
+      ))}
+    </div>
+  );
+}
+
+function ShortcutRow({ row }: { row: ShortcutSectionRow }) {
+  return (
+    <div className="help-shortcut-row">
+      <span className="help-shortcut-label">{row.label}</span>
+      <span className="help-shortcut-keys">
+        {row.shortcuts.map((shortcut, index) => (
+          <span key={`${row.label}-${shortcut}`} className="help-shortcut-sequence">
+            {index > 0 ? <span className="help-shortcut-or">or</span> : null}
+            {renderShortcutSequence(shortcut)}
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
+function renderShortcutSequence(shortcut: string): ReactNode {
+  const normalized = shortcut.trim().endsWith("++")
+    ? `${shortcut.trim().slice(0, -2)}+Plus`
+    : shortcut;
+  const tokens = normalized
     .split("+")
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
-  const parts: Array<{ key: string; label: string }> = [];
-  let cursor = 0;
-  for (const part of rawParts) {
-    const start = normalized.indexOf(part, cursor);
-    const position = start >= 0 ? start : cursor;
-    parts.push({
-      key: `${part}-${position}`,
-      label: part,
-    });
-    cursor = position + part.length;
-  }
-  return parts;
+  const tokenOccurrenceCounts = new Map<string, number>();
+  return (
+    <span className="help-key-group" aria-label={shortcut}>
+      {tokens.map((token, index) => {
+        const occurrence = tokenOccurrenceCounts.get(token) ?? 0;
+        tokenOccurrenceCounts.set(token, occurrence + 1);
+        return (
+          <span key={`${shortcut}-${token}-${occurrence}`} className="help-key-fragment">
+            {index > 0 ? <span className="help-key-separator">+</span> : null}
+            <kbd className="help-key">{formatKeyToken(token)}</kbd>
+          </span>
+        );
+      })}
+    </span>
+  );
 }
 
 function renderSyntaxToken(syntax: string) {
   const parts = syntax.split(/(AND|OR|NOT|and|or|not|"|[+*()\/-]|\s+)/g).filter(Boolean);
-  const nodes = [];
-  let cursor = 0;
-  for (const part of parts) {
-    const start = syntax.indexOf(part, cursor);
-    const position = start >= 0 ? start : cursor;
-    const key = `${part}-${position}`;
-    cursor = position + part.length;
-    if (/^\s+$/.test(part)) {
-      nodes.push(<span key={key}>{part}</span>);
-      continue;
+  return parts.map((part, index) => {
+    const key = `${syntax}-${part}-${index}`;
+    if (/^\s+$/u.test(part)) {
+      return <span key={key}>{part}</span>;
     }
-
-    if (part === "AND" || part === "OR" || part === "NOT") {
-      nodes.push(
-        <span key={key} className="help-syntax-part op">
+    if (part === "OR") {
+      return (
+        <span key={key} className="help-syntax-part is-or">
           {part}
-        </span>,
+        </span>
       );
-      continue;
     }
-
+    if (part === "NOT") {
+      return (
+        <span key={key} className="help-syntax-part is-not">
+          {part}
+        </span>
+      );
+    }
+    if (part === "AND") {
+      return (
+        <span key={key} className="help-syntax-part is-and">
+          {part}
+        </span>
+      );
+    }
+    if (
+      part === '"' ||
+      part === "+" ||
+      part === "*" ||
+      part === "-" ||
+      part === "(" ||
+      part === ")" ||
+      part === "/"
+    ) {
+      return (
+        <span key={key} className="help-syntax-part is-symbol">
+          {part}
+        </span>
+      );
+    }
     if (part === "and" || part === "or" || part === "not") {
-      nodes.push(
-        <span key={key} className="help-syntax-part meta">
+      return (
+        <span key={key} className="help-syntax-part is-literal-op">
           {part}
-        </span>,
+        </span>
       );
-      continue;
     }
-
-    if (part === '"') {
-      nodes.push(
-        <span key={key} className="help-syntax-part quote">
-          {part}
-        </span>,
-      );
-      continue;
-    }
-
-    if (part === "/") {
-      nodes.push(
-        <span key={key} className="help-syntax-part separator">
-          {part}
-        </span>,
-      );
-      continue;
-    }
-
-    if (part === "+" || part === "*" || part === "-" || part === "(" || part === ")") {
-      nodes.push(
-        <span key={key} className="help-syntax-part symbol">
-          {part}
-        </span>,
-      );
-      continue;
-    }
-
-    nodes.push(
-      <span key={key} className="help-syntax-part literal">
+    return (
+      <span key={key} className="help-syntax-part is-literal">
         {part}
-      </span>,
+      </span>
     );
+  });
+}
+
+function findShortcut(shortcuts: ShortcutRegistry, description: string): string {
+  const item = shortcuts.shortcutItems.find((entry) => entry.description === description);
+  if (!item) {
+    throw new Error(`Missing shortcut for "${description}".`);
   }
-  return nodes;
+  return item.shortcut;
+}
+
+function findShortcuts(shortcuts: ShortcutRegistry, description: string): string[] {
+  const matches = shortcuts.shortcutItems
+    .filter((entry) => entry.description === description)
+    .map((entry) => entry.shortcut);
+  return Array.from(new Set(matches));
+}
+
+function sortPageTraversalShortcuts(shortcuts: string[]): string[] {
+  return [...shortcuts].sort(
+    (left, right) => getPageTraversalRank(left) - getPageTraversalRank(right),
+  );
+}
+
+function getPageTraversalRank(shortcut: string): number {
+  if (shortcut === "Page Up" || shortcut === "Page Down") {
+    return 0;
+  }
+  if (shortcut === "Ctrl+U" || shortcut === "Ctrl+D") {
+    return 1;
+  }
+  return 2;
+}
+
+function formatKeyToken(token: string): string {
+  return MODIFIER_SYMBOLS[token] ?? KEY_SYMBOLS[token] ?? token;
 }

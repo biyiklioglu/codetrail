@@ -1779,6 +1779,370 @@ describe("App shell", () => {
     });
   });
 
+  it("recovers from stale turn anchors when switching projects in Turns view", async () => {
+    const user = userEvent.setup();
+    const projectTurns = {
+      project_1: [
+        {
+          anchorMessageId: "p1_turn_1",
+          sessionId: "session_1",
+          messages: [
+            {
+              id: "p1_turn_1",
+              sourceId: "src_p1_turn_1",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "user",
+              content: "Project One latest turn",
+              createdAt: "2026-03-01T10:00:06.000Z",
+              tokenInput: null,
+              tokenOutput: null,
+              operationDurationMs: null,
+              operationDurationSource: null,
+              operationDurationConfidence: null,
+            },
+            {
+              id: "p1_turn_1_reply",
+              sourceId: "src_p1_turn_1_reply",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "assistant",
+              content: "Project One latest reply",
+              createdAt: "2026-03-01T10:00:07.000Z",
+              tokenInput: 8,
+              tokenOutput: 5,
+              operationDurationMs: 1000,
+              operationDurationSource: "native",
+              operationDurationConfidence: "high",
+            },
+          ],
+        },
+        {
+          anchorMessageId: "p1_turn_2",
+          sessionId: "session_1",
+          messages: [
+            {
+              id: "p1_turn_2",
+              sourceId: "src_p1_turn_2",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "user",
+              content: "Project One oldest turn",
+              createdAt: "2026-03-01T10:00:00.000Z",
+              tokenInput: null,
+              tokenOutput: null,
+              operationDurationMs: null,
+              operationDurationSource: null,
+              operationDurationConfidence: null,
+            },
+            {
+              id: "p1_turn_2_reply",
+              sourceId: "src_p1_turn_2_reply",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "assistant",
+              content: "Project One oldest reply",
+              createdAt: "2026-03-01T10:00:01.000Z",
+              tokenInput: 6,
+              tokenOutput: 4,
+              operationDurationMs: 1000,
+              operationDurationSource: "native",
+              operationDurationConfidence: "high",
+            },
+          ],
+        },
+      ],
+      project_2: [
+        {
+          anchorMessageId: "p2_turn_1",
+          sessionId: "session_2",
+          messages: [
+            {
+              id: "p2_turn_1",
+              sourceId: "src_p2_turn_1",
+              sessionId: "session_2",
+              provider: "codex",
+              category: "user",
+              content: "Project Two latest turn",
+              createdAt: "2026-03-01T11:00:00.000Z",
+              tokenInput: null,
+              tokenOutput: null,
+              operationDurationMs: null,
+              operationDurationSource: null,
+              operationDurationConfidence: null,
+            },
+            {
+              id: "p2_turn_1_reply",
+              sourceId: "src_p2_turn_1_reply",
+              sessionId: "session_2",
+              provider: "codex",
+              category: "assistant",
+              content: "Project Two latest reply",
+              createdAt: "2026-03-01T11:00:01.000Z",
+              tokenInput: 7,
+              tokenOutput: 4,
+              operationDurationMs: 1000,
+              operationDurationSource: "native",
+              operationDurationConfidence: "high",
+            },
+          ],
+        },
+      ],
+    } as const;
+    const categoryCounts = {
+      user: 1,
+      assistant: 1,
+      tool_use: 0,
+      tool_edit: 0,
+      tool_result: 0,
+      thinking: 0,
+      system: 0,
+    } as const;
+    const client = createAppClient({
+      "projects:list": () => ({
+        projects: [
+          {
+            id: "project_1",
+            provider: "claude",
+            name: "Project One",
+            path: "/workspace/project-one",
+            sessionCount: 1,
+            messageCount: 4,
+            bookmarkCount: 0,
+            lastActivity: "2026-03-01T10:00:07.000Z",
+          },
+          {
+            id: "project_2",
+            provider: "codex",
+            name: "Project Two",
+            path: "/workspace/project-two",
+            sessionCount: 1,
+            messageCount: 2,
+            bookmarkCount: 0,
+            lastActivity: "2026-03-01T11:00:01.000Z",
+          },
+        ],
+      }),
+      "sessions:list": () => ({
+        sessions: [
+          {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Project One session",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:07.000Z",
+            durationMs: 7000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 4,
+            bookmarkCount: 0,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+          {
+            id: "session_2",
+            projectId: "project_2",
+            provider: "codex",
+            filePath: "/workspace/project-two/session-1.jsonl",
+            title: "Project Two session",
+            modelNames: "gpt-5.4",
+            startedAt: "2026-03-01T11:00:00.000Z",
+            endedAt: "2026-03-01T11:00:01.000Z",
+            durationMs: 1000,
+            gitBranch: "main",
+            cwd: "/workspace/project-two",
+            messageCount: 2,
+            bookmarkCount: 0,
+            tokenInputTotal: 7,
+            tokenOutputTotal: 4,
+          },
+        ],
+      }),
+      "projects:getCombinedDetail": (request) => {
+        const projectId = String(request.projectId ?? "project_1") as keyof typeof projectTurns;
+        const latestTurn = projectTurns[projectId][0];
+        return {
+          projectId,
+          totalCount: latestTurn.messages.length,
+          categoryCounts,
+          page: 0,
+          pageSize: 100,
+          focusIndex: null,
+          messages: latestTurn.messages.map((message) => ({
+            ...message,
+            sessionTitle: projectId === "project_1" ? "Project One session" : "Project Two session",
+            sessionActivity:
+              latestTurn.messages.at(-1)?.createdAt ?? latestTurn.messages[0].createdAt,
+            sessionStartedAt: latestTurn.messages[0].createdAt,
+            sessionEndedAt:
+              latestTurn.messages.at(-1)?.createdAt ?? latestTurn.messages[0].createdAt,
+            sessionGitBranch: "main",
+            sessionCwd:
+              projectId === "project_1" ? "/workspace/project-one" : "/workspace/project-two",
+          })),
+        };
+      },
+      "sessions:getTurn": (request) => {
+        const projectId = String(request.projectId ?? "project_1") as keyof typeof projectTurns;
+        const turns = projectTurns[projectId];
+        const requestedAnchorMessageId =
+          typeof request.anchorMessageId === "string" && request.anchorMessageId.length > 0
+            ? request.anchorMessageId
+            : null;
+        const requestedTurnNumber =
+          typeof request.turnNumber === "number" ? Math.trunc(request.turnNumber) : null;
+        const turnIndex =
+          request.latest === true
+            ? 0
+            : requestedTurnNumber !== null
+              ? requestedTurnNumber - 1
+              : requestedAnchorMessageId
+                ? turns.findIndex((turn) => turn.anchorMessageId === requestedAnchorMessageId)
+                : -1;
+
+        if (turnIndex < 0 || turnIndex >= turns.length) {
+          return {
+            session: {
+              id: projectId === "project_1" ? "session_1" : "session_2",
+              projectId,
+              provider: projectId === "project_1" ? "claude" : "codex",
+              filePath:
+                projectId === "project_1"
+                  ? "/workspace/project-one/session-1.jsonl"
+                  : "/workspace/project-two/session-1.jsonl",
+              title: projectId === "project_1" ? "Project One session" : "Project Two session",
+              modelNames: projectId === "project_1" ? "claude-opus-4-1" : "gpt-5.4",
+              startedAt: null,
+              endedAt: null,
+              durationMs: 0,
+              gitBranch: "main",
+              cwd: projectId === "project_1" ? "/workspace/project-one" : "/workspace/project-two",
+              messageCount: turns.flatMap((turn) => turn.messages).length,
+              tokenInputTotal: 0,
+              tokenOutputTotal: 0,
+            },
+            anchorMessageId: null,
+            anchorMessage: null,
+            turnNumber: 0,
+            totalTurns: turns.length,
+            previousTurnAnchorMessageId: null,
+            nextTurnAnchorMessageId: null,
+            firstTurnAnchorMessageId: turns.at(-1)?.anchorMessageId ?? null,
+            latestTurnAnchorMessageId: turns[0]?.anchorMessageId ?? null,
+            totalCount: 0,
+            categoryCounts,
+            queryError: null,
+            highlightPatterns: [],
+            matchedMessageIds: undefined,
+            messages: [],
+          };
+        }
+
+        const turn = turns[turnIndex];
+        return {
+          session: {
+            id: turn.sessionId,
+            projectId,
+            provider: projectId === "project_1" ? "claude" : "codex",
+            filePath:
+              projectId === "project_1"
+                ? "/workspace/project-one/session-1.jsonl"
+                : "/workspace/project-two/session-1.jsonl",
+            title: projectId === "project_1" ? "Project One session" : "Project Two session",
+            modelNames: projectId === "project_1" ? "claude-opus-4-1" : "gpt-5.4",
+            startedAt: turn.messages[0].createdAt,
+            endedAt: turn.messages.at(-1)?.createdAt ?? turn.messages[0].createdAt,
+            durationMs: 1000,
+            gitBranch: "main",
+            cwd: projectId === "project_1" ? "/workspace/project-one" : "/workspace/project-two",
+            messageCount: turn.messages.length,
+            tokenInputTotal: 0,
+            tokenOutputTotal: 0,
+          },
+          anchorMessageId: turn.anchorMessageId,
+          anchorMessage: turn.messages[0],
+          turnNumber: turnIndex + 1,
+          totalTurns: turns.length,
+          previousTurnAnchorMessageId:
+            turnIndex + 1 < turns.length ? turns[turnIndex + 1].anchorMessageId : null,
+          nextTurnAnchorMessageId: turnIndex > 0 ? turns[turnIndex - 1].anchorMessageId : null,
+          firstTurnAnchorMessageId: turns.at(-1)?.anchorMessageId ?? null,
+          latestTurnAnchorMessageId: turns[0]?.anchorMessageId ?? null,
+          totalCount: turn.messages.length,
+          categoryCounts,
+          queryError: null,
+          highlightPatterns: [],
+          matchedMessageIds: undefined,
+          messages: turn.messages,
+        };
+      },
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            historyMode: "project_all",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Project Two/i })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+      expect(screen.getByText("Project One latest turn")).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("2");
+      expect(screen.getByText("Project One oldest turn")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "/workspace/project-two, 1 projects" }));
+
+    await waitFor(() => {
+      expect(
+        document.querySelector(
+          '[data-project-nav-kind="project"][data-project-nav-id="project_2"]',
+        ),
+      ).not.toBeNull();
+    });
+
+    await user.click(
+      document.querySelector('[data-project-nav-kind="project"][data-project-nav-id="project_2"]')!,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+      expect(screen.getByText("Project Two latest turn")).toBeInTheDocument();
+      expect(screen.getByText("2 of 2 turn messages")).toBeInTheDocument();
+      expect(screen.getByText("of 1")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("button", { name: "Previous turn" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next turn" })).toBeDisabled();
+    expect(
+      client.invoke.mock.calls.some(
+        ([channel, payload]) =>
+          channel === "sessions:getTurn" &&
+          (payload as { projectId?: string; anchorMessageId?: string }).projectId === "project_2" &&
+          (payload as { anchorMessageId?: string }).anchorMessageId === "p1_turn_2",
+      ),
+    ).toBe(true);
+  });
+
   it("treats Turns as a peer visualization when switching from Bookmarks", async () => {
     const client = createAppClient();
 
@@ -2058,17 +2422,11 @@ describe("App shell", () => {
 
     await user.click(screen.getByRole("button", { name: "Open help" }));
 
-    expect(screen.getByText("Previous page or turn")).toBeInTheDocument();
-    expect(screen.getByText("Next page or turn")).toBeInTheDocument();
-    expect(screen.getByText("Show Turns view")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Previous session, or previous project when Sessions pane is collapsed or hidden",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Next session, or next project when Sessions pane is collapsed or hidden"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Previous page / turn")).toBeInTheDocument();
+    expect(screen.getByText("Next page / turn")).toBeInTheDocument();
+    expect(screen.getByText("Turns view")).toBeInTheDocument();
+    expect(screen.getByText("Previous session / project")).toBeInTheDocument();
+    expect(screen.getByText("Next session / project")).toBeInTheDocument();
   });
 
   it("stores pane widths in CSS variables instead of inline grid columns", async () => {

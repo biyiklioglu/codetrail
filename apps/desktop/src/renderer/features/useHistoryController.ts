@@ -1370,14 +1370,21 @@ export function useHistoryController({
       buildTurnCategoryCounts(sessionTurnDetail?.messages ?? [], turnAnchorMessage),
     [sessionTurnDetail?.categoryCounts, sessionTurnDetail?.messages, turnAnchorMessage],
   );
-  const turnTotalPages = Math.max(1, sessionTurnDetail?.totalTurns ?? 1);
+  const turnTotalCount = sessionTurnDetail?.totalTurns ?? 0;
+  const turnTotalPages = Math.max(1, turnTotalCount || 1);
   const turnDisplayPage = useMemo(() => {
-    const canonicalTurnNumber = sessionTurnDetail?.turnNumber ?? 1;
+    if (turnTotalCount === 0) {
+      return 0;
+    }
+    const canonicalTurnNumber = Math.min(
+      turnTotalPages,
+      Math.max(1, sessionTurnDetail?.turnNumber ?? 1),
+    );
     if (turnViewSortDirection === "desc") {
       return Math.max(0, turnTotalPages - canonicalTurnNumber);
     }
     return Math.max(0, canonicalTurnNumber - 1);
-  }, [sessionTurnDetail?.turnNumber, turnTotalPages, turnViewSortDirection]);
+  }, [sessionTurnDetail?.turnNumber, turnTotalCount, turnTotalPages, turnViewSortDirection]);
   const turnVisualizationSelection = useMemo(
     () =>
       getTurnVisualizationSelection({
@@ -1821,6 +1828,37 @@ export function useHistoryController({
     ],
   );
 
+  const loadResolvedTurnDetail = useCallback(
+    async (
+      request: Pick<
+        IpcRequestInput<"sessions:getTurn">,
+        "sessionId" | "anchorMessageId" | "turnNumber" | "latest"
+      >,
+      options: {
+        queryOverride?: string;
+        scopeSelection?: HistorySelection;
+      } = {},
+    ) => {
+      const response = await loadTurnDetail(request, options);
+      if (response.totalTurns === 0 || response.turnNumber > 0) {
+        return response;
+      }
+
+      const fallbackRequest =
+        turnViewSortDirection === "desc" ? { latest: true } : { turnNumber: 1 as const };
+      const requestedTurnNumber =
+        typeof request.turnNumber === "number" ? request.turnNumber : null;
+      if (
+        (fallbackRequest.latest === true && request.latest === true) ||
+        (requestedTurnNumber !== null && requestedTurnNumber === fallbackRequest.turnNumber)
+      ) {
+        return response;
+      }
+      return loadTurnDetail(fallbackRequest, options);
+    },
+    [loadTurnDetail, turnViewSortDirection],
+  );
+
   const handleRevealInTurn = useCallback(
     (message: HistoryMessage) => {
       if (!selectedProjectId) {
@@ -1950,7 +1988,7 @@ export function useHistoryController({
         : turnViewSortDirection === "desc"
           ? { latest: true }
           : { turnNumber: 1 };
-    void loadTurnDetail(request)
+    void loadResolvedTurnDetail(request)
       .then((response) => {
         if (!cancelled) {
           setSessionTurnDetail(response);
@@ -1970,7 +2008,7 @@ export function useHistoryController({
   }, [
     canToggleTurnView,
     historyDetailMode,
-    loadTurnDetail,
+    loadResolvedTurnDetail,
     logError,
     turnAnchorMessageId,
     turnDetailRefreshNonce,
@@ -1986,7 +2024,7 @@ export function useHistoryController({
       options: { queryOverride?: string } = {},
     ) => {
       try {
-        const response = await loadTurnDetail(request, options);
+        const response = await loadResolvedTurnDetail(request, options);
         setSessionTurnDetail(response);
         setTurnAnchorMessageId(response.anchorMessageId ?? "");
         setTurnSourceSessionId(response.session?.id ?? "");
@@ -1996,7 +2034,7 @@ export function useHistoryController({
         return null;
       }
     },
-    [loadTurnDetail, logError],
+    [loadResolvedTurnDetail, logError],
   );
 
   const goToPreviousTurn = useCallback(async () => {

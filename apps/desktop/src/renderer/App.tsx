@@ -1307,7 +1307,7 @@ export function App({
             ) : mainView === "help" ? (
               <section className="pane content-pane" ref={helpViewRef} tabIndex={-1}>
                 <ShortcutsDialog
-                  shortcutItems={[...shortcuts.shortcutItems]}
+                  shortcuts={shortcuts}
                   commonSyntaxItems={[...COMMON_SYNTAX_ITEMS]}
                   advancedSyntaxItems={[...ADVANCED_SYNTAX_ITEMS]}
                 />

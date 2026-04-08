@@ -211,9 +211,33 @@ export function HistoryDetailPane({
   const historySearchTooltip = getSearchQueryTooltip(advancedSearchEnabled);
   const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
   const [pageInputValue, setPageInputValue] = useState(() => `${history.sessionPage + 1}`);
+  const pageInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingCommittedPageInputValueRef = useRef<string | null>(null);
+  const previousPageInputScopeKeyRef = useRef<string | null>(null);
   const skipNextPageInputBlurResetRef = useRef(false);
   const lastLiveUiTraceRef = useRef<string | null>(null);
   const handledCtrlFilterMouseDownRef = useRef<MessageCategory | null>(null);
+  const pageInputScopeKey = useMemo(
+    () =>
+      [
+        history.historyDetailMode,
+        history.historyVisualization,
+        history.historyMode,
+        history.selectedProjectId,
+        history.selectedSessionId,
+        history.sessionPage,
+        history.totalPages,
+      ].join("\u0000"),
+    [
+      history.historyDetailMode,
+      history.historyMode,
+      history.historyVisualization,
+      history.selectedProjectId,
+      history.selectedSessionId,
+      history.sessionPage,
+      history.totalPages,
+    ],
+  );
   const liveSessionSelection = useMemo(
     () =>
       selectRelevantLiveSessionCandidate({
@@ -289,8 +313,30 @@ export function HistoryDetailPane({
   }, [liveUiTracePayload, recordLiveUiTrace]);
 
   useEffect(() => {
-    setPageInputValue(`${history.sessionPage + 1}`);
-  }, [history.sessionPage]);
+    const nextPageInputValue = `${history.sessionPage + 1}`;
+    const didPageInputScopeChange = previousPageInputScopeKeyRef.current !== pageInputScopeKey;
+    previousPageInputScopeKeyRef.current = pageInputScopeKey;
+    if (pageInputValue === nextPageInputValue) {
+      pendingCommittedPageInputValueRef.current = null;
+      return;
+    }
+    if (didPageInputScopeChange) {
+      pendingCommittedPageInputValueRef.current = null;
+      setPageInputValue(nextPageInputValue);
+      return;
+    }
+    if (pendingCommittedPageInputValueRef.current === pageInputValue) {
+      return;
+    }
+
+    const pageInputFocused =
+      typeof document !== "undefined" && document.activeElement === pageInputRef.current;
+    if (pageInputFocused) {
+      return;
+    }
+
+    setPageInputValue(nextPageInputValue);
+  }, [history.sessionPage, pageInputScopeKey, pageInputValue]);
 
   const liveTimer = liveSession
     ? formatCompactLiveAge(liveSession.lastActivityAt, liveNowMs)
@@ -302,6 +348,7 @@ export function HistoryDetailPane({
   const liveSummary = liveSession ? buildLiveSummary(liveSession, liveTimer) : null;
 
   const resetPageInputValue = () => {
+    pendingCommittedPageInputValueRef.current = null;
     setPageInputValue(`${history.sessionPage + 1}`);
   };
 
@@ -316,7 +363,10 @@ export function HistoryDetailPane({
     const nextPageNumber = Math.max(1, Math.min(history.totalPages, parsedValue));
     setPageInputValue(`${nextPageNumber}`);
     if (nextPageNumber !== history.sessionPage + 1) {
+      pendingCommittedPageInputValueRef.current = `${nextPageNumber}`;
       history.goToHistoryPage(nextPageNumber - 1);
+    } else {
+      pendingCommittedPageInputValueRef.current = null;
     }
     focusMessagePane();
   };
@@ -788,12 +838,14 @@ export function HistoryDetailPane({
           <label className="page-jump-control">
             <span className="page-jump-label-text">{isTurnView ? "Turn" : "Page"}</span>
             <input
+              ref={pageInputRef}
               className="page-jump-input"
               type="text"
               inputMode="numeric"
               pattern="[0-9]*"
               value={pageInputValue}
               onChange={(event) => {
+                pendingCommittedPageInputValueRef.current = null;
                 setPageInputValue(event.target.value);
               }}
               onBlur={() => {
