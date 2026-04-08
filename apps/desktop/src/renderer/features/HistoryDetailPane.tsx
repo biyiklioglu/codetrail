@@ -336,7 +336,13 @@ export function HistoryDetailPane({
                 history.handleSelectMessagesView();
                 focusMessagePane();
               }}
-              title="Messages"
+              title={formatTooltipLabel("Messages", [
+                shortcuts.actions.showMessagesView,
+                {
+                  label: "Cycle",
+                  shortcut: shortcuts.actions.cycleMessagesTurnsView,
+                },
+              ])}
             >
               <ToolbarIcon name="history" />
               <span>Messages</span>
@@ -352,7 +358,13 @@ export function HistoryDetailPane({
                 focusMessagePane();
               }}
               disabled={!history.canToggleTurnView && !isTurnView}
-              title={formatTooltipLabel("Turns", shortcuts.actions.showTurnsView)}
+              title={formatTooltipLabel("Turns", [
+                shortcuts.actions.showTurnsView,
+                {
+                  label: "Cycle",
+                  shortcut: shortcuts.actions.cycleMessagesTurnsView,
+                },
+              ])}
             >
               <ToolbarIcon name="turns" />
               <span>Turns</span>
@@ -703,10 +715,7 @@ export function HistoryDetailPane({
                 : history.bookmarkedMessageIds.has(message.id)
                   ? { onRevealInBookmarks: history.handleRevealInBookmarks }
                   : {})}
-              {...(message.category === "user" &&
-              (message.provider === "claude" || message.provider === "codex")
-                ? { onViewTurn: history.handleEnterTurnView }
-                : {})}
+              {...(history.canToggleTurnView ? { onRevealInTurn: history.handleRevealInTurn } : {})}
             />
           ))
         ) : history.historyMode === "bookmarks" &&

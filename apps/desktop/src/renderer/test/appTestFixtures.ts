@@ -377,12 +377,18 @@ export function createAppClient(overrides: Record<string, ChannelHandler> = {}) 
     "sessions:getTurn": (request) => {
       const latest = request.latest === true;
       const turnNumber = typeof request.turnNumber === "number" ? request.turnNumber : null;
-      const anchorMessageId =
+      const requestedAnchorMessageId =
         typeof request.anchorMessageId === "string" && request.anchorMessageId.length > 0
           ? request.anchorMessageId
-          : latest || turnNumber === 2
+          : null;
+      const anchorMessageId =
+        requestedAnchorMessageId === "m1" || requestedAnchorMessageId === "m2"
+          ? "m1"
+          : requestedAnchorMessageId === "m3" || requestedAnchorMessageId === "m4"
             ? "m3"
-            : "m1";
+            : latest || turnNumber === 2
+              ? "m3"
+              : "m1";
       const messages =
         anchorMessageId === "m3"
           ? [

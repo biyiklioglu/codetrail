@@ -166,7 +166,7 @@ describe("MessageContent", () => {
     expect(document.querySelector(".content-viewer-body")).toBeNull();
   });
 
-  it("toggles collapsible diffs from the empty header area without making path text toggle", async () => {
+  it("toggles collapsible diffs from the filename, diff counts, and empty header area", async () => {
     const user = userEvent.setup();
 
     render(
@@ -184,6 +184,17 @@ describe("MessageContent", () => {
     );
 
     await user.click(screen.getByText("/workspace/src/file.ts"));
+    expect(screen.getByRole("button", { name: "Expand diff for file.ts" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Expand diff for file.ts" }));
+    expect(screen.getByRole("button", { name: "Collapse diff for file.ts" })).toBeInTheDocument();
+
+    const diffCounts = document.querySelector<HTMLButtonElement>(".content-viewer-diff-counts");
+    expect(diffCounts).not.toBeNull();
+    await user.click(diffCounts!);
+    expect(screen.getByRole("button", { name: "Expand diff for file.ts" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Expand diff for file.ts" }));
     expect(screen.getByRole("button", { name: "Collapse diff for file.ts" })).toBeInTheDocument();
 
     const headerHitArea = document.querySelector<HTMLButtonElement>(

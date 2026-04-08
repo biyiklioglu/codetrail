@@ -481,6 +481,89 @@ describe("theme-aware Shiki rendering", () => {
     });
   });
 
+  it("switches the rendered layout when toggling between unified and split diff views", async () => {
+    document.documentElement.dataset.defaultDiffViewMode = "unified";
+    resetContentViewerCachesForTests();
+
+    render(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Unified" })).toBeInTheDocument();
+    });
+    expect(document.querySelectorAll(".diff-row").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll(".diff-split-row")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Unified" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
+      expect(document.querySelectorAll(".diff-split-row").length).toBeGreaterThan(0);
+    });
+    expect(document.querySelectorAll(".diff-row")).toHaveLength(0);
+  });
+
+  it("resets a rerendered diff viewer back to the configured default view mode", async () => {
+    document.documentElement.dataset.defaultDiffViewMode = "unified";
+    resetContentViewerCachesForTests();
+
+    const { rerender } = render(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Unified" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Unified" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
+      expect(document.querySelectorAll(".diff-split-row").length).toBeGreaterThan(0);
+    });
+
+    rerender(
+      <DiffBlock
+        codeValue={[
+          "diff --git a/b.ts b/b.ts",
+          "--- a/b.ts",
+          "+++ b/b.ts",
+          "@@ -1,1 +1,1 @@",
+          "-export const beforeValue = 1;",
+          "+export const afterValue = 2;",
+        ].join("\n")}
+        filePath="/Users/acme/repo/b.ts"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Unified" })).toBeInTheDocument();
+      expect(document.querySelectorAll(".diff-row").length).toBeGreaterThan(0);
+    });
+    expect(document.querySelectorAll(".diff-split-row")).toHaveLength(0);
+  });
+
   it("renders split diffs with inserted JSX lines as standalone add rows", async () => {
     document.documentElement.dataset.defaultDiffViewMode = "split";
     resetContentViewerCachesForTests();
@@ -546,7 +629,7 @@ describe("theme-aware Shiki rendering", () => {
     expect(screen.queryByText("diff --git a/a.ts b/a.ts")).toBeNull();
   });
 
-  it("only toggles collapsible diffs when the chevron button is clicked", () => {
+  it("toggles collapsible diffs when the filename is clicked", () => {
     render(
       <DiffBlock
         codeValue={[
@@ -564,8 +647,8 @@ describe("theme-aware Shiki rendering", () => {
 
     fireEvent.click(screen.getByText("/Users/acme/repo/a.ts"));
 
-    expect(screen.getByRole("button", { name: "Collapse diff for a.ts" })).toBeInTheDocument();
-    expect(document.querySelector(".content-viewer-body")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Expand diff for a.ts" })).toBeInTheDocument();
+    expect(document.querySelector(".content-viewer-body")).toBeNull();
   });
 
   it("renders large expanded diffs with exact layout after Show Rest", async () => {

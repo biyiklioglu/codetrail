@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createClaudeHookStateFixture, createLiveStatusFixture } from "@codetrail/core/testing";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -1675,6 +1675,110 @@ describe("App shell", () => {
     });
   });
 
+  it("restores the last viewed turn when switching back from Messages in the same scope", async () => {
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+    });
+
+    fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("2");
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "m", metaKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("2");
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+  });
+
+  it("resets the remembered turn when the history scope changes", async () => {
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+    });
+
+    fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("2");
+      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "m", metaKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: /All Sessions/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+      expect(screen.getByText("Review the latest turn")).toBeInTheDocument();
+    });
+  });
+
   it("treats Turns as a peer visualization when switching from Bookmarks", async () => {
     const client = createAppClient();
 
@@ -1706,6 +1810,153 @@ describe("App shell", () => {
         "false",
       );
       expect(screen.getByRole("textbox", { name: "Turn number" })).toBeInTheDocument();
+    });
+  });
+
+  it("shows direct and cycle shortcuts in the Messages and Turns tooltips", async () => {
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
+      "title",
+      "Messages  ⌘⇧M • Cycle: ⌘T",
+    );
+    expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute(
+      "title",
+      "Turns  ⌘⇧T • Cycle: ⌘T",
+    );
+  });
+
+  it("reveals assistant messages in Turn view and keeps the message focused", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    let assistantMessageCard: HTMLElement | null = null;
+    await waitFor(() => {
+      assistantMessageCard = screen.getByText("Everything checks out.").closest("article");
+      expect(assistantMessageCard).not.toBeNull();
+    });
+    if (!assistantMessageCard) {
+      throw new Error("Expected assistant message card");
+    }
+
+    await user.click(
+      within(assistantMessageCard).getByRole("button", { name: "Reveal this message in turn" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("2");
+    });
+
+    await waitFor(() => {
+      const focusedTurnCard = screen.getByText("Everything checks out.").closest("article");
+      expect(focusedTurnCard).not.toBeNull();
+      expect(focusedTurnCard).toHaveClass("focused");
+    });
+
+    const focusedTurnCard = screen.getByText("Everything checks out.").closest("article");
+    if (!focusedTurnCard) {
+      throw new Error("Expected focused turn card");
+    }
+
+    await user.click(
+      within(focusedTurnCard).getByRole("button", { name: "Reveal this message in session" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    await waitFor(() => {
+      const focusedMessageCard = screen.getByText("Everything checks out.").closest("article");
+      expect(focusedMessageCard).not.toBeNull();
+      expect(focusedMessageCard).toHaveClass("focused");
+    });
+  });
+
+  it("exits Turn view before revealing a message in the project view", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient();
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+    });
+
+    let assistantTurnCard: HTMLElement | null = null;
+    await waitFor(() => {
+      assistantTurnCard = screen.getByText("Latest turn reply").closest("article");
+      expect(assistantTurnCard).not.toBeNull();
+    });
+    if (!assistantTurnCard) {
+      throw new Error("Expected assistant turn card");
+    }
+
+    await user.click(
+      within(assistantTurnCard).getByRole("button", { name: "Reveal this message in project" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Messages/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(
+        screen.getByRole("button", { name: /first \(all sessions\)\. switch to/i }),
+      ).toBeInTheDocument();
     });
   });
 

@@ -43,7 +43,7 @@ type MessageCardProps = {
   onRevealInSession?: (messageId: string, sourceId: string) => void;
   onRevealInProject?: (messageId: string, sourceId: string, sessionId: string) => void;
   onRevealInBookmarks?: (messageId: string, sourceId: string) => void;
-  onViewTurn?: (message: SessionMessage) => void;
+  onRevealInTurn?: (message: SessionMessage) => void;
   cardRef?: Ref<HTMLDivElement> | null;
 };
 
@@ -62,7 +62,7 @@ function MessageCardComponent({
   onRevealInSession,
   onRevealInProject,
   onRevealInBookmarks,
-  onViewTurn,
+  onRevealInTurn,
   cardRef,
 }: MessageCardProps) {
   const paneFocus = usePaneFocus();
@@ -176,9 +176,9 @@ function MessageCardComponent({
     paneFocus.focusHistoryPane("message");
   };
 
-  const handleViewTurnButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
+  const handleRevealInTurnButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    onViewTurn?.(message);
+    onRevealInTurn?.(message);
     paneFocus.focusHistoryPane("message");
   };
 
@@ -304,16 +304,16 @@ function MessageCardComponent({
               Reveal in Bookmarks
             </button>
           ) : null}
-          {onViewTurn ? (
+          {onRevealInTurn ? (
             <button
               type="button"
               className="message-action-button"
               {...preserveMessagePaneFocusProps}
-              onClick={handleViewTurnButtonClick}
-              aria-label="View this turn"
-              title="View Turn"
+              onClick={handleRevealInTurnButtonClick}
+              aria-label="Reveal this message in turn"
+              title="Reveal in Turn"
             >
-              View Turn
+              Reveal in Turn
             </button>
           ) : null}
           {onToggleBookmark ? (

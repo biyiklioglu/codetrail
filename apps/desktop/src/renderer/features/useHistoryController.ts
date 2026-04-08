@@ -1733,6 +1733,7 @@ export function useHistoryController({
 
   const handleRevealInSessionWithTurnExit = useCallback(
     (messageId: string, sourceId: string) => {
+      setHistoryVisualization("messages");
       clearTurnViewState();
       handleRevealInSession(messageId, sourceId);
     },
@@ -1741,6 +1742,7 @@ export function useHistoryController({
 
   const handleRevealInProjectWithTurnExit = useCallback(
     (messageId: string, sourceId: string, sessionId: string) => {
+      setHistoryVisualization("messages");
       clearTurnViewState();
       handleRevealInProject(messageId, sourceId, sessionId);
     },
@@ -1819,12 +1821,9 @@ export function useHistoryController({
     ],
   );
 
-  const handleEnterTurnView = useCallback(
+  const handleRevealInTurn = useCallback(
     (message: HistoryMessage) => {
-      if (
-        message.category !== "user" ||
-        (message.provider !== "claude" && message.provider !== "codex")
-      ) {
+      if (!selectedProjectId) {
         return;
       }
       const nextSelection = createHistorySelection("session", selectedProjectId, message.sessionId);
@@ -1836,17 +1835,14 @@ export function useHistoryController({
       setTurnSourceSessionId(message.sessionId);
       setTurnQueryInput("");
       setSessionTurnDetail(null);
-      setFocusMessageId("");
+      setFocusMessageId(message.id);
     },
     [currentUiHistorySelection, selectedProjectId, setHistorySelectionImmediate],
   );
 
   const handleSelectMessagesView = useCallback(() => {
-    if (historyDetailMode === "turn") {
-      clearTurnViewState();
-    }
     setHistoryVisualization("messages");
-  }, [clearTurnViewState, historyDetailMode]);
+  }, []);
 
   const handleSelectTurnsView = useCallback(async () => {
     if (historyDetailMode === "turn") {
@@ -1859,10 +1855,6 @@ export function useHistoryController({
       setHistorySelectionImmediate(turnVisualizationSelection);
     }
     setHistoryVisualization("turns");
-    setTurnAnchorMessageId("");
-    setTurnSourceSessionId("");
-    setSessionTurnDetail(null);
-    setTurnViewCombinedChangesExpandedOverride(null);
     setFocusMessageId("");
   }, [
     canToggleTurnView,
@@ -1881,9 +1873,6 @@ export function useHistoryController({
   }, [handleSelectMessagesView, handleSelectTurnsView, historyDetailMode]);
 
   const handleSelectBookmarksVisualization = useCallback(() => {
-    if (historyDetailMode === "turn") {
-      clearTurnViewState();
-    }
     if (!currentUiHistorySelection.projectId) {
       return;
     }
@@ -1891,13 +1880,7 @@ export function useHistoryController({
     setHistorySelectionImmediate(
       createHistorySelection("bookmarks", currentUiHistorySelection.projectId, uiSelectedSessionId),
     );
-  }, [
-    clearTurnViewState,
-    currentUiHistorySelection.projectId,
-    historyDetailMode,
-    setHistorySelectionImmediate,
-    uiSelectedSessionId,
-  ]);
+  }, [currentUiHistorySelection.projectId, setHistorySelectionImmediate, uiSelectedSessionId]);
 
   const handleToggleBookmarksView = useCallback(() => {
     if (historyMode === "bookmarks" && historyDetailMode !== "turn") {
@@ -1935,24 +1918,19 @@ export function useHistoryController({
   ]);
 
   useEffect(() => {
-    if (historyDetailMode !== "turn") {
-      turnScopeKeyRef.current = "";
+    if (turnScopeKeyRef.current === "" && historyDetailMode === "turn") {
+      turnScopeKeyRef.current = currentTurnScopeKey;
       return;
     }
     if (turnScopeKeyRef.current === "") {
-      turnScopeKeyRef.current = currentTurnScopeKey;
       return;
     }
     if (turnScopeKeyRef.current === currentTurnScopeKey) {
       return;
     }
-    turnScopeKeyRef.current = currentTurnScopeKey;
-    setTurnAnchorMessageId("");
-    setTurnSourceSessionId("");
-    setSessionTurnDetail(null);
-    setTurnViewCombinedChangesExpandedOverride(null);
+    clearTurnViewState();
     setFocusMessageId("");
-  }, [currentTurnScopeKey, historyDetailMode]);
+  }, [clearTurnViewState, currentTurnScopeKey, historyDetailMode]);
 
   useEffect(() => {
     if (historyDetailMode !== "turn") {
@@ -2011,6 +1989,7 @@ export function useHistoryController({
         const response = await loadTurnDetail(request, options);
         setSessionTurnDetail(response);
         setTurnAnchorMessageId(response.anchorMessageId ?? "");
+        setTurnSourceSessionId(response.session?.id ?? "");
         return response;
       } catch (error) {
         logError("Failed loading session turn", error);
@@ -2880,7 +2859,7 @@ export function useHistoryController({
     handleRevealInSessionWithTurnExit,
     handleRevealInProjectWithTurnExit,
     handleRevealInBookmarksWithTurnExit,
-    handleEnterTurnView,
+    handleRevealInTurn,
     handleSelectMessagesView,
     handleSelectTurnsView,
     handleSelectBookmarksVisualization,

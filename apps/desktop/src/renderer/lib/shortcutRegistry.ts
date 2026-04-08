@@ -106,12 +106,17 @@ function getShortcutItems(platform: DesktopPlatform) {
     },
     {
       group: "Search & Navigation",
+      shortcut: `${modifier}+T`,
+      description: "Cycle Messages and Turns",
+    },
+    {
+      group: "Search & Navigation",
       shortcut: `${modifier}+Shift+M`,
       description: "Show Messages view",
     },
     {
       group: "Search & Navigation",
-      shortcut: `${modifier}+T`,
+      shortcut: `${modifier}+Shift+T`,
       description: "Show Turns view",
     },
     {
@@ -266,6 +271,7 @@ export type ShortcutRegistry = {
     toggleSessionPane: string;
     previousPage: string;
     nextPage: string;
+    cycleMessagesTurnsView: string;
     showMessagesView: string;
     showTurnsView: string;
     showBookmarksView: string;
@@ -312,8 +318,9 @@ export function createShortcutRegistry(platform: DesktopPlatform): ShortcutRegis
       toggleSessionPane: `${modifier}+Alt+B`,
       previousPage: `${modifier}+Left`,
       nextPage: `${modifier}+Right`,
+      cycleMessagesTurnsView: `${modifier}+T`,
       showMessagesView: `${modifier}+Shift+M`,
-      showTurnsView: `${modifier}+T`,
+      showTurnsView: `${modifier}+Shift+T`,
       showBookmarksView: `${modifier}+Shift+B`,
       zoomIn: `${modifier}++`,
       zoomOut: `${modifier}+-`,

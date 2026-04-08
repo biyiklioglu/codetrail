@@ -466,6 +466,25 @@ describe("queryService in-memory", () => {
     ]);
   });
 
+  it("resolves non-user anchor message ids to the containing turn anchor", () => {
+    const db = seedQueryDb();
+    const service = createQueryServiceFromDb(db);
+
+    const turn = service.getSessionTurn({
+      scopeMode: "session",
+      sessionId: "session_1",
+      anchorMessageId: "message_2",
+      query: "",
+      sortDirection: "asc",
+    });
+
+    expect(turn.anchorMessageId).toBe("message_1");
+    expect(turn.anchorMessage?.id).toBe("message_1");
+    expect(turn.turnNumber).toBe(1);
+    expect(turn.totalTurns).toBe(1);
+    expect(turn.messages.map((message) => message.id)).toEqual(["message_1", "message_2"]);
+  });
+
   it("returns the full turn and separate match ids for turn search", () => {
     const db = seedQueryDb();
     db.prepare(

@@ -23,6 +23,14 @@
   padding: 0;
 }
 
+.turn-combined-card.is-empty {
+  contain-intrinsic-size: 56px;
+}
+
+.turn-combined-empty-body {
+  padding: 2px 12px 8px 39px;
+}
+
 .turn-combined-card .turn-combined-file {
   border-top: 1px solid var(--chrome-border);
 }
@@ -3596,6 +3604,15 @@ button svg *,
   box-shadow: none;
 }
 
+.content-viewer-meta-click-target {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
 .content-viewer-toggle-icon {
   width: 16px;
   height: 16px;
@@ -3654,10 +3671,6 @@ button svg *,
   text-align: left;
 }
 
-.content-viewer-header.is-collapsible .content-viewer-path {
-  pointer-events: none;
-}
-
 .content-viewer-path-text {
   display: inline-flex;
   align-items: center;
@@ -3714,6 +3727,18 @@ button svg *,
 .content-viewer-action {
   min-height: 24px;
   padding: 0 6px;
+}
+
+.content-viewer-action.turn-representation-toggle {
+  border: 1px solid color-mix(in srgb, var(--accent-teal) 24%, var(--border));
+  background: color-mix(in srgb, var(--accent-teal) 10%, var(--bg-elevated));
+  color: var(--accent-teal);
+  font-weight: 600;
+}
+
+.content-viewer-action.turn-representation-toggle:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-teal) 16%, var(--bg-elevated));
+  color: var(--accent-teal);
 }
 
 .diff-meta-added {
@@ -6617,6 +6642,12 @@ mark {
   color: var(--text-tertiary);
   font-size: 13px;
   padding: 18px 10px;
+}
+
+.turn-combined-card .turn-combined-empty-state {
+  margin: 0;
+  padding: 0;
+  line-height: 1.4;
 }
 
 .empty-state-with-action {

@@ -3,6 +3,13 @@ import { useCallback } from "react";
 import { type DesktopPlatform, isMacPlatform } from "../../shared/desktopPlatform";
 import { useDesktopPlatform } from "./codetrailClient";
 
+type TooltipShortcut =
+  | string
+  | {
+      label: string;
+      shortcut: string | null | undefined;
+    };
+
 const MODIFIER_SYMBOLS = {
   Cmd: "⌘",
   Ctrl: "⌃",
@@ -59,19 +66,40 @@ export function formatShortcutDisplay(shortcut: string, platform: DesktopPlatfor
 
 export function formatTooltip(
   action: string,
-  shortcut: string | null | undefined,
+  shortcut: TooltipShortcut | ReadonlyArray<TooltipShortcut> | null | undefined,
   platform: DesktopPlatform,
 ): string {
-  if (!shortcut) {
+  const shortcutItems = (Array.isArray(shortcut) ? shortcut : [shortcut]).filter(
+    (item): item is TooltipShortcut => item != null,
+  );
+  if (shortcutItems.length === 0) {
     return action;
   }
-  return `${action}  ${formatShortcutDisplay(shortcut, platform)}`;
+  const formattedShortcuts = shortcutItems
+    .map((item) => {
+      if (typeof item === "string") {
+        return formatShortcutDisplay(item, platform);
+      }
+      if (!item.shortcut) {
+        return "";
+      }
+      return `${item.label}: ${formatShortcutDisplay(item.shortcut, platform)}`;
+    })
+    .filter((item) => item.length > 0);
+  if (formattedShortcuts.length === 0) {
+    return action;
+  }
+  return `${action}  ${formattedShortcuts.join(" • ")}`;
 }
 
-export function useTooltipFormatter(): (action: string, shortcut?: string | null) => string {
+export function useTooltipFormatter(): (
+  action: string,
+  shortcut?: TooltipShortcut | ReadonlyArray<TooltipShortcut> | null,
+) => string {
   const desktopPlatform = useDesktopPlatform();
   return useCallback(
-    (action: string, shortcut?: string | null) => formatTooltip(action, shortcut, desktopPlatform),
+    (action: string, shortcut?: TooltipShortcut | ReadonlyArray<TooltipShortcut> | null) =>
+      formatTooltip(action, shortcut, desktopPlatform),
     [desktopPlatform],
   );
 }

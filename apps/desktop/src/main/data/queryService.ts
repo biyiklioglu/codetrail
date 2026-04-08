@@ -1361,6 +1361,92 @@ function loadTurnAnchorByMessageId(
     .get(...scope.params, anchorMessageId) as TurnAnchorRow | undefined;
 }
 
+function loadScopedTurnTargetMessage(
+  db: DatabaseHandle,
+  args: {
+    scopeMode?: "session" | "project_all" | "bookmarks";
+    projectId?: string;
+    sessionId?: string;
+    messageId: string;
+  },
+): TurnAnchorRow | undefined {
+  if (args.scopeMode === "bookmarks") {
+    return undefined;
+  }
+  if (args.scopeMode === "project_all") {
+    if (!args.projectId) {
+      return undefined;
+    }
+    return db
+      .prepare(
+        `SELECT
+           m.id,
+           m.session_id,
+           m.created_at,
+           m.created_at_ms
+         FROM messages m
+         JOIN sessions s ON s.id = m.session_id
+         WHERE s.project_id = ?
+           AND m.id = ?`,
+      )
+      .get(args.projectId, args.messageId) as TurnAnchorRow | undefined;
+  }
+  if (!args.sessionId) {
+    return undefined;
+  }
+  return db
+    .prepare(
+      `SELECT
+         m.id,
+         m.session_id,
+         m.created_at,
+         m.created_at_ms
+       FROM messages m
+       WHERE m.session_id = ?
+         AND m.id = ?`,
+    )
+    .get(args.sessionId, args.messageId) as TurnAnchorRow | undefined;
+}
+
+function loadContainingTurnAnchorByTargetMessage(
+  db: DatabaseHandle,
+  scope: TurnAnchorScopeSql,
+  targetMessage: TurnAnchorRow,
+): TurnAnchorRow | undefined {
+  return db
+    .prepare(
+      `SELECT
+         m.id,
+         m.session_id,
+         m.created_at,
+         m.created_at_ms
+       ${scope.fromSql}
+       WHERE ${scope.whereClause}
+         AND m.session_id = ?
+         AND (
+           m.created_at_ms < ?
+           OR (
+             m.created_at_ms = ?
+             AND (
+               m.created_at < ?
+               OR (m.created_at = ? AND m.id <= ?)
+             )
+           )
+         )
+       ORDER BY m.created_at_ms DESC, m.created_at DESC, m.id DESC
+       LIMIT 1`,
+    )
+    .get(
+      ...scope.params,
+      targetMessage.session_id,
+      targetMessage.created_at_ms,
+      targetMessage.created_at_ms,
+      targetMessage.created_at,
+      targetMessage.created_at,
+      targetMessage.id,
+    ) as TurnAnchorRow | undefined;
+}
+
 function resolveScopedTurnAnchorFromDatabase(
   db: DatabaseHandle,
   scope: TurnAnchorScopeSql,
@@ -1373,9 +1459,23 @@ function resolveScopedTurnAnchorFromDatabase(
   if (request.turnNumber !== undefined) {
     return loadTurnAnchorByNumber(db, scope, request.turnNumber);
   }
-  return request.anchorMessageId
-    ? loadTurnAnchorByMessageId(db, scope, request.anchorMessageId)
-    : undefined;
+  if (!request.anchorMessageId) {
+    return undefined;
+  }
+  const exactAnchor = loadTurnAnchorByMessageId(db, scope, request.anchorMessageId);
+  if (exactAnchor) {
+    return exactAnchor;
+  }
+  const targetMessage = loadScopedTurnTargetMessage(db, {
+    ...(request.scopeMode ? { scopeMode: request.scopeMode } : {}),
+    ...(request.projectId ? { projectId: request.projectId } : {}),
+    ...(request.sessionId ? { sessionId: request.sessionId } : {}),
+    messageId: request.anchorMessageId,
+  });
+  if (!targetMessage) {
+    return undefined;
+  }
+  return loadContainingTurnAnchorByTargetMessage(db, scope, targetMessage);
 }
 
 function countTurnAnchorsBeforeOrAt(

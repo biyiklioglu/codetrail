@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import type { useHistoryController } from "../../features/useHistoryController";
 import { copyTextToClipboard } from "../../lib/clipboard";
@@ -17,12 +17,13 @@ import {
   type TurnCombinedRepresentation,
   type TurnSequenceEdit,
   bestEffortRepresentationLabel,
-  bestEffortRepresentationTitle,
   buildDeleteOnlyDiff,
 } from "./turnCombinedModel";
 
 type HistoryController = ReturnType<typeof useHistoryController>;
 type TurnMessage = NonNullable<HistoryController["sessionTurnDetail"]>["messages"][number];
+const BEST_EFFORT_REPRESENTATION_TOOLTIP =
+  "Combined merges multiple edits into one diff.\nSequence shows the edits in chronological order.\nWhen a single merged diff is unreliable, Sequence is the safer view.";
 
 export function TurnView({ history }: { history: HistoryController }) {
   const detail = history.sessionTurnDetail;
@@ -65,6 +66,7 @@ export function TurnView({ history }: { history: HistoryController }) {
         />
       ) : null}
       <CombinedChangesCard
+        key={detail.anchorMessageId}
         expanded={history.effectiveTurnCombinedChangesExpanded}
         onExpandedChange={(value) => {
           const nextExpanded =
@@ -162,6 +164,7 @@ function CombinedChangesCard({
             diff: file.combinedUnifiedDiff,
           })),
         );
+  const isEmpty = files.length === 0;
   const allFilesExpanded =
     files.length > 0 &&
     files.every((file) => expandedFiles[buildCombinedFileKey(file)] ?? defaultDiffExpanded);
@@ -193,7 +196,7 @@ function CombinedChangesCard({
 
   return (
     <article
-      className={`message category-tool_edit turn-combined-card${expanded ? " expanded" : " collapsed"}`}
+      className={`message category-tool_edit turn-combined-card${expanded ? " expanded" : " collapsed"}${isEmpty ? " is-empty" : ""}`}
     >
       <header className="message-header">
         <button
@@ -247,11 +250,13 @@ function CombinedChangesCard({
         </div>
       </header>
       {expanded ? (
-        <div className="message-body">
-          <div className="message-content">
-            {files.length === 0 ? (
-              <p className="empty-state">No file changes in this turn.</p>
-            ) : (
+        files.length === 0 ? (
+          <div className="message-body turn-combined-empty-body">
+            <p className="empty-state turn-combined-empty-state">No file changes in this turn.</p>
+          </div>
+        ) : (
+          <div className="message-body">
+            <div className="message-content">
               <div className="tool-edit-view turn-combined-body">
                 <div className="tool-edit-summary">{preview}</div>
                 {files.map((file) => {
@@ -286,9 +291,9 @@ function CombinedChangesCard({
                   );
                 })}
               </div>
-            )}
+            </div>
           </div>
-        </div>
+        )
       ) : null}
     </article>
   );
@@ -347,8 +352,6 @@ function reconcileCombinedDiffRepresentationState(
 
 function buildCombinedFileBadges(
   file: TurnCombinedFile,
-  representation: TurnCombinedRepresentation,
-  onRepresentationChange?: (nextRepresentation: TurnCombinedRepresentation) => void,
 ): Array<{ label: string; title?: string; onClick?: () => void }> {
   const badges: Array<{ label: string; title?: string; onClick?: () => void }> = [];
   if (file.changeType === "delete") {
@@ -368,19 +371,28 @@ function buildCombinedFileBadges(
       title: `Renamed from ${file.previousFilePath}`,
     });
   }
-  if (file.exactness !== "exact") {
-    badges.push({
-      label: bestEffortRepresentationLabel(representation),
-      title: bestEffortRepresentationTitle(representation),
-      ...(onRepresentationChange
-        ? {
-            onClick: () =>
-              onRepresentationChange(representation === "combined" ? "sequence" : "combined"),
-          }
-        : {}),
-    });
-  }
   return badges;
+}
+
+function buildCombinedRepresentationActions(
+  file: TurnCombinedFile,
+  representation: TurnCombinedRepresentation,
+  onRepresentationChange: (nextRepresentation: TurnCombinedRepresentation) => void,
+): ReactNode {
+  if (file.exactness === "exact") {
+    return null;
+  }
+  const nextRepresentation = representation === "combined" ? "sequence" : "combined";
+  return (
+    <button
+      type="button"
+      className="content-viewer-action message-action-button turn-representation-toggle"
+      title={BEST_EFFORT_REPRESENTATION_TOOLTIP}
+      onClick={() => onRepresentationChange(nextRepresentation)}
+    >
+      {bestEffortRepresentationLabel(representation)}
+    </button>
+  );
 }
 
 function TurnCombinedFileView({
@@ -414,7 +426,12 @@ function TurnCombinedFileView({
         pathRoots={pathRoots}
         query={query}
         highlightPatterns={highlightPatterns}
-        metaBadges={buildCombinedFileBadges(file, representation, onRepresentationChange)}
+        metaBadges={buildCombinedFileBadges(file)}
+        headerActions={buildCombinedRepresentationActions(
+          file,
+          representation,
+          onRepresentationChange,
+        )}
         collapsible
         defaultExpanded={defaultExpanded}
         expanded={expanded}
@@ -432,7 +449,12 @@ function TurnCombinedFileView({
       pathRoots={pathRoots}
       query={query}
       highlightPatterns={highlightPatterns}
-      metaBadges={buildCombinedFileBadges(file, representation, onRepresentationChange)}
+      metaBadges={buildCombinedFileBadges(file)}
+      headerActions={buildCombinedRepresentationActions(
+        file,
+        representation,
+        onRepresentationChange,
+      )}
       collapsible
       defaultExpanded={defaultExpanded}
       expanded={expanded}

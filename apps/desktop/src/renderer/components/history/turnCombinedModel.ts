@@ -110,13 +110,13 @@ export function isInternalAssistantArtifactPath(filePath: string | null | undefi
 }
 
 export function bestEffortRepresentationLabel(representation: TurnCombinedRepresentation): string {
-  return representation === "combined" ? "Best Effort - Combined" : "Best Effort - Sequence";
+  return representation === "combined" ? "Combined" : "Sequence";
 }
 
 export function bestEffortRepresentationTitle(representation: TurnCombinedRepresentation): string {
   return representation === "combined"
-    ? "Approximate merged diff across multiple edits. Click to switch to the chronological edit sequence."
-    : "Chronological edit sequence for this file. Click to switch to the approximate merged diff.";
+    ? "Best effort merged diff across multiple edits. Click to switch to the chronological sequence."
+    : "Best effort chronological edit sequence for this file. Click to switch to the merged diff.";
 }
 
 export function representationFromExactness(

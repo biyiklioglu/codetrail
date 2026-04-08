@@ -976,6 +976,7 @@ function ContentViewer({
   query = "",
   highlightPatterns = [],
   metaBadges = [],
+  headerActions,
   startLine,
   collapsible = false,
   defaultExpanded = true,
@@ -991,6 +992,7 @@ function ContentViewer({
   query?: string;
   highlightPatterns?: string[];
   metaBadges?: ContentViewerMetaBadge[];
+  headerActions?: ReactNode;
   startLine?: number;
   collapsible?: boolean;
   defaultExpanded?: boolean;
@@ -1020,6 +1022,7 @@ function ContentViewer({
   );
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(defaultExpanded);
   const isExpanded = expanded ?? uncontrolledExpanded;
+  const diffViewIdentity = kind === "diff" ? `${filePath ?? ""}\u0000${codeValue}` : null;
 
   const setExpandedState = (nextExpanded: boolean | ((current: boolean) => boolean)) => {
     const resolvedExpanded =
@@ -1035,8 +1038,11 @@ function ContentViewer({
   }, [defaultViewerWrapMode]);
 
   useEffect(() => {
+    if (!diffViewIdentity) {
+      return;
+    }
     setDiffMode(defaultDiffViewMode);
-  }, [defaultDiffViewMode]);
+  }, [defaultDiffViewMode, diffViewIdentity]);
 
   useEffect(() => {
     setVisibleCount(isLarge ? Math.min(totalLines, INITIAL_EXPANDED_LINES) : totalLines);
@@ -1238,14 +1244,17 @@ function ContentViewer({
               </svg>
             </button>
             {kind === "diff" && diffModel ? (
-              <span
-                className="content-viewer-diff-counts"
-                aria-label={`${diffModel.addedLineCount} added lines and ${diffModel.removedLineCount} removed lines`}
-                title={`${diffModel.addedLineCount} added, ${diffModel.removedLineCount} removed`}
+              <button
+                type="button"
+                className="content-viewer-meta-click-target content-viewer-diff-counts"
+                aria-hidden="true"
+                tabIndex={-1}
+                title={diffToggleLabel}
+                onClick={handleDiffToggle}
               >
                 <span className="diff-meta-added">+{diffModel.addedLineCount}</span>
                 <span className="diff-meta-removed">-{diffModel.removedLineCount}</span>
-              </span>
+              </button>
             ) : null}
             {metaBadges.map((badge) =>
               badge.onClick ? (
@@ -1272,11 +1281,18 @@ function ContentViewer({
               ),
             )}
             {displayedMetaPath ? (
-              <span className="content-viewer-path">
+              <button
+                type="button"
+                className="content-viewer-meta-click-target content-viewer-path"
+                aria-hidden="true"
+                tabIndex={-1}
+                title={diffToggleLabel}
+                onClick={handleDiffToggle}
+              >
                 <span className="content-viewer-path-text" title={metaPath ?? undefined}>
                   {displayedMetaPath}
                 </span>
-              </span>
+              </button>
             ) : null}
           </div>
         ) : (
@@ -1329,6 +1345,7 @@ function ContentViewer({
           </div>
         )}
         <div className="content-viewer-actions">
+          {headerActions}
           {kind === "diff" ? (
             <button
               type="button"
@@ -2700,6 +2717,7 @@ export function CodeBlock({
   query = "",
   highlightPatterns = [],
   metaBadges = [],
+  headerActions,
   collapsible = false,
   defaultExpanded = true,
   expanded,
@@ -2714,6 +2732,7 @@ export function CodeBlock({
   query?: string;
   highlightPatterns?: string[];
   metaBadges?: ContentViewerMetaBadge[];
+  headerActions?: ReactNode;
   collapsible?: boolean;
   defaultExpanded?: boolean;
   expanded?: boolean;
@@ -2732,6 +2751,7 @@ export function CodeBlock({
       query={query}
       highlightPatterns={highlightPatterns}
       metaBadges={metaBadges}
+      headerActions={headerActions}
       collapsible={collapsible}
       defaultExpanded={defaultExpanded}
       {...(expanded !== undefined ? { expanded } : {})}
@@ -2825,6 +2845,7 @@ export function DiffBlock({
   query = "",
   highlightPatterns = [],
   metaBadges = [],
+  headerActions,
   collapsible = false,
   defaultExpanded = true,
   expanded,
@@ -2836,6 +2857,7 @@ export function DiffBlock({
   query?: string;
   highlightPatterns?: string[];
   metaBadges?: ContentViewerMetaBadge[];
+  headerActions?: ReactNode;
   collapsible?: boolean;
   defaultExpanded?: boolean;
   expanded?: boolean;
@@ -2852,6 +2874,7 @@ export function DiffBlock({
       query={query}
       highlightPatterns={highlightPatterns}
       metaBadges={metaBadges}
+      headerActions={headerActions}
       collapsible={collapsible}
       defaultExpanded={defaultExpanded}
       {...(expanded !== undefined ? { expanded } : {})}

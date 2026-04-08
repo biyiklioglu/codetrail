@@ -43,6 +43,7 @@ describe("MessageCard", () => {
     const onRevealInSession = vi.fn();
     const onRevealInProject = vi.fn();
     const onRevealInBookmarks = vi.fn();
+    const onRevealInTurn = vi.fn();
 
     renderWithPaneFocus(
       <MessageCard
@@ -58,6 +59,7 @@ describe("MessageCard", () => {
         onRevealInSession={onRevealInSession}
         onRevealInProject={onRevealInProject}
         onRevealInBookmarks={onRevealInBookmarks}
+        onRevealInTurn={onRevealInTurn}
       />,
     );
 
@@ -70,6 +72,7 @@ describe("MessageCard", () => {
     await user.click(screen.getByRole("button", { name: "Reveal this message in session" }));
     await user.click(screen.getByRole("button", { name: "Reveal this message in project" }));
     await user.click(screen.getByRole("button", { name: "Reveal this message in bookmarks" }));
+    await user.click(screen.getByRole("button", { name: "Reveal this message in turn" }));
     await user.click(screen.getByRole("button", { name: "Bookmark this message" }));
 
     expect(onToggleExpanded).toHaveBeenCalledWith("message_1", "assistant");
@@ -77,6 +80,7 @@ describe("MessageCard", () => {
     expect(onRevealInSession).toHaveBeenCalledWith("message_1", "source_1");
     expect(onRevealInProject).toHaveBeenCalledWith("message_1", "source_1", "session_1");
     expect(onRevealInBookmarks).toHaveBeenCalledWith("message_1", "source_1");
+    expect(onRevealInTurn).toHaveBeenCalledWith(message);
     expect(onToggleBookmark).toHaveBeenCalledWith(message);
   });
 

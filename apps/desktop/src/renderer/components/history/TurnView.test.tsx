@@ -376,9 +376,9 @@ describe("TurnView", () => {
 
     expect(screen.getByRole("button", { name: "Expand diff for query.ts" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand diff for other.ts" })).toBeInTheDocument();
-    expect(screen.getByText("Best Effort - Combined")).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Combined" })).toHaveAttribute(
       "title",
-      expect.stringContaining("Approximate merged diff"),
+      expect.stringContaining("Combined merges multiple edits into one diff."),
     );
   });
 
@@ -480,13 +480,13 @@ describe("TurnView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
 
-    expect(screen.getByText("Best Effort - Sequence")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sequence" })).toBeInTheDocument();
     expect(container.textContent).toContain("========= Edit 1 · +1 -1 ·");
     expect(screen.getAllByText("src/controller.ts").length).toBeGreaterThan(0);
     expect(screen.queryByText("/workspace/project-one/src/controller.ts")).toBeNull();
     expect(screen.getByText("No Wrap")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Best Effort - Sequence"));
-    expect(screen.getByText("Best Effort - Combined")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sequence" }));
+    expect(screen.getByRole("button", { name: "Combined" })).toBeInTheDocument();
     expect(container.textContent).not.toContain("Edit 1 · +1 -1 ·");
   });
 
@@ -550,6 +550,114 @@ describe("TurnView", () => {
     expect(screen.getByRole("button", { name: "Expand diff for other.ts" })).toBeInTheDocument();
   });
 
+  it("resets per-file representation state when navigating between turns", () => {
+    const firstTurn = createHistoryStub();
+    firstTurn.turnViewCombinedChangesExpanded = true;
+    firstTurn.effectiveTurnCombinedChangesExpanded = true;
+    replaceTurnMessage(firstTurn, 1, {
+      toolEditFiles: [
+        {
+          filePath: "/workspace/project-one/src/controller.ts",
+          previousFilePath: null,
+          changeType: "update",
+          unifiedDiff: [
+            "--- a//workspace/project-one/src/controller.ts",
+            "+++ b//workspace/project-one/src/controller.ts",
+            "@@ -1,1 +1,1 @@",
+            "-export const beforeValue = 1;",
+            "+export const afterValue = 2;",
+          ].join("\n"),
+          addedLineCount: 1,
+          removedLineCount: 1,
+          exactness: "best_effort",
+        },
+      ],
+    });
+    syncTurnDerived(firstTurn);
+
+    const { rerenderHistory } = renderTurnView(firstTurn);
+
+    expect(screen.getByRole("button", { name: "Combined" })).toBeInTheDocument();
+
+    const secondTurn = cloneHistoryStub(firstTurn);
+    secondTurn.sessionTurnDetail.anchorMessageId = "message_turn_2";
+    secondTurn.sessionTurnDetail.anchorMessage = {
+      ...secondTurn.sessionTurnDetail.anchorMessage,
+      id: "message_turn_2",
+      sourceId: "source_turn_2",
+      content: "Next turn",
+      createdAt: "2026-04-07T10:05:00.000Z",
+    };
+    secondTurn.sessionTurnDetail.messages = [
+      {
+        id: "message_turn_2_edit_2",
+        sourceId: "source_turn_2_edit_2",
+        sessionId: "session_1",
+        provider: "codex",
+        category: "tool_edit",
+        content: JSON.stringify({
+          name: "apply_patch",
+          input: [
+            "*** Begin Patch",
+            "*** Update File: src/controller.ts",
+            "@@",
+            " function loadValue() {",
+            '-  return "mid";',
+            '+  return "new";',
+            " }",
+            "*** End Patch",
+          ].join("\n"),
+        }),
+        createdAt: "2026-04-07T10:05:02.000Z",
+        tokenInput: null,
+        tokenOutput: null,
+        operationDurationMs: null,
+        operationDurationSource: null,
+        operationDurationConfidence: null,
+      },
+      {
+        id: "message_turn_2_edit_1",
+        sourceId: "source_turn_2_edit_1",
+        sessionId: "session_1",
+        provider: "codex",
+        category: "tool_edit",
+        content: JSON.stringify({
+          name: "apply_patch",
+          input: [
+            "*** Begin Patch",
+            "*** Update File: src/controller.ts",
+            "@@",
+            " function loadValue() {",
+            '-  return "old";',
+            '+  return "mid";',
+            " }",
+            "*** End Patch",
+          ].join("\n"),
+        }),
+        createdAt: "2026-04-07T10:05:01.000Z",
+        tokenInput: null,
+        tokenOutput: null,
+        operationDurationMs: null,
+        operationDurationSource: null,
+        operationDurationConfidence: null,
+      },
+      secondTurn.sessionTurnDetail.anchorMessage,
+    ];
+    secondTurn.sessionTurnDetail.totalCount = secondTurn.sessionTurnDetail.messages.length;
+    secondTurn.messageExpansionOverrides = {
+      message_turn_2: true,
+      message_turn_2_edit_1: false,
+      message_turn_2_edit_2: false,
+    };
+    syncTurnDerived(secondTurn);
+
+    rerenderHistory(secondTurn);
+    expect(screen.getByRole("button", { name: "Sequence" })).toBeInTheDocument();
+
+    rerenderHistory(firstTurn);
+    expect(screen.getByRole("button", { name: "Combined" })).toBeInTheDocument();
+  });
+
   it("keeps combined changes sourced from the full turn when the timeline is filtered", () => {
     const history = createHistoryStub();
     history.sessionTurnDetail.matchedMessageIds = ["message_3"];
@@ -600,6 +708,7 @@ describe("TurnView", () => {
     fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
 
     expect(container.querySelector(".turn-combined-file .diff-table")).toBeNull();
+    expect(container.querySelector(".turn-combined-card.is-empty")).not.toBeNull();
     expect(screen.getByText("No file changes in this turn.")).toBeInTheDocument();
   });
 
