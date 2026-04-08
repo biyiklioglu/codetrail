@@ -1072,113 +1072,64 @@ function getSessionTurnWithDatabase(
       anchor.id,
     ) as FocusTargetRow | undefined;
 
+  const rows = loadTurnMessages(db, anchor.session_id, anchor, nextUser, request.sortDirection);
+  const messages = mapSessionMessageRows(db, rows);
+  const anchorMessage = messages.find((message) => message.id === anchor.id) ?? null;
+  const totalCount = rows.length;
+  const unfilteredCategoryCounts = countMessageCategories(rows);
+
   if (queryPlan.error) {
     return {
       session: sessionRow ? mapSessionSummaryRow(sessionRow) : null,
       anchorMessageId: anchor.id,
-      anchorMessage: loadAnchorSessionMessage(db, anchor.session_id, anchor.id),
+      anchorMessage,
       ...navigation,
-      totalCount: loadTurnMessageCount(db, anchor.session_id, anchor, nextUser),
-      categoryCounts: loadTurnCategoryCounts(db, anchor.session_id, anchor, nextUser),
+      totalCount,
+      categoryCounts: unfilteredCategoryCounts,
       queryError: queryPlan.error,
       highlightPatterns: [],
       matchedMessageIds: [],
-      messages: mapSessionMessageRows(
-        db,
-        loadTurnMessages(db, anchor.session_id, anchor, nextUser, request.sortDirection),
-      ),
+      messages,
     };
   }
   if (normalizedQuery.length > 0 && !queryPlan.hasTerms) {
     return {
       session: sessionRow ? mapSessionSummaryRow(sessionRow) : null,
       anchorMessageId: anchor.id,
-      anchorMessage: loadAnchorSessionMessage(db, anchor.session_id, anchor.id),
+      anchorMessage,
       ...navigation,
-      totalCount: loadTurnMessageCount(db, anchor.session_id, anchor, nextUser),
-      categoryCounts: loadTurnCategoryCounts(db, anchor.session_id, anchor, nextUser),
+      totalCount,
+      categoryCounts: unfilteredCategoryCounts,
       queryError: null,
       highlightPatterns: [],
       matchedMessageIds: [],
-      messages: mapSessionMessageRows(
-        db,
-        loadTurnMessages(db, anchor.session_id, anchor, nextUser, request.sortDirection),
-      ),
+      messages,
     };
   }
 
-  const turnScope = buildTurnMessageFilters({
-    sessionId: anchor.session_id,
-    anchor,
-    ...(nextUser ? { nextUser } : {}),
-    queryPlan: EMPTY_SEARCH_QUERY_PLAN,
-  });
-  const queryOnlyTurnScope = queryPlan.hasTerms
-    ? buildTurnMessageFilters({
+  const { categoryCounts, matchedMessageIds } = queryPlan.hasTerms
+    ? loadTurnMatchedMessageMetadata(db, {
         sessionId: anchor.session_id,
         anchor,
         ...(nextUser ? { nextUser } : {}),
         queryPlan,
       })
-    : turnScope;
-  const rows = db
-    .prepare(
-      `SELECT
-         m.id,
-         m.source_id,
-         m.session_id,
-         m.provider,
-         m.category,
-         m.content,
-         m.created_at,
-         m.created_at_ms,
-         m.token_input,
-         m.token_output,
-         m.operation_duration_ms,
-         m.operation_duration_source,
-         m.operation_duration_confidence
-       FROM messages m
-       WHERE ${turnScope.whereClause}
-       ORDER BY ${
-         request.sortDirection === "desc"
-           ? "m.created_at_ms DESC, m.created_at DESC, m.id DESC"
-           : "m.created_at_ms ASC, m.created_at ASC, m.id ASC"
-       }`,
-    )
-    .all(...turnScope.params) as MessageRow[];
-  const totalCount = db
-    .prepare(`SELECT COUNT(*) as count FROM messages m WHERE ${turnScope.whereClause}`)
-    .get(...turnScope.params) as { count: number };
-  const categoryCounts = loadCategoryCounts(
-    db,
-    "FROM messages m",
-    queryOnlyTurnScope.whereClause,
-    queryOnlyTurnScope.params,
-  );
-  const matchedMessageIds = queryPlan.hasTerms
-    ? (
-        db
-          .prepare(
-            `SELECT m.id
-             FROM messages m
-             WHERE ${queryOnlyTurnScope.whereClause}
-             ORDER BY m.created_at_ms ASC, m.created_at ASC, m.id ASC`,
-          )
-          .all(...queryOnlyTurnScope.params) as Array<{ id: string }>
-      ).map((row) => row.id)
-    : undefined;
+    : {
+        categoryCounts: unfilteredCategoryCounts,
+        matchedMessageIds: undefined,
+      };
 
   return {
     session: sessionRow ? mapSessionSummaryRow(sessionRow) : null,
     anchorMessageId: anchor.id,
-    anchorMessage: loadAnchorSessionMessage(db, anchor.session_id, anchor.id),
+    anchorMessage,
     ...navigation,
-    totalCount: totalCount.count,
+    totalCount,
     categoryCounts,
     queryError: null,
     highlightPatterns: queryPlan.highlightPatterns,
     matchedMessageIds,
-    messages: mapSessionMessageRows(db, rows),
+    messages,
   };
 }
 
@@ -1645,66 +1596,6 @@ function loadTurnMessages(
     .all(...turnScope.params) as MessageRow[];
 }
 
-function loadTurnMessageCount(
-  db: DatabaseHandle,
-  sessionId: string,
-  anchor: FocusTargetRow,
-  nextUser: FocusTargetRow | undefined,
-): number {
-  const turnScope = buildTurnMessageFilters({
-    sessionId,
-    anchor,
-    ...(nextUser ? { nextUser } : {}),
-    queryPlan: EMPTY_SEARCH_QUERY_PLAN,
-  });
-  const totalCount = db
-    .prepare(`SELECT COUNT(*) as count FROM messages m WHERE ${turnScope.whereClause}`)
-    .get(...turnScope.params) as { count: number };
-  return totalCount.count;
-}
-
-function loadTurnCategoryCounts(
-  db: DatabaseHandle,
-  sessionId: string,
-  anchor: FocusTargetRow,
-  nextUser: FocusTargetRow | undefined,
-) {
-  const turnScope = buildTurnMessageFilters({
-    sessionId,
-    anchor,
-    ...(nextUser ? { nextUser } : {}),
-    queryPlan: EMPTY_SEARCH_QUERY_PLAN,
-  });
-  return loadCategoryCounts(db, "FROM messages m", turnScope.whereClause, turnScope.params);
-}
-
-function loadAnchorSessionMessage(db: DatabaseHandle, sessionId: string, anchorMessageId: string) {
-  const row = db
-    .prepare(
-      `SELECT
-         m.id,
-         m.source_id,
-         m.session_id,
-         m.provider,
-         m.category,
-         m.content,
-         m.created_at,
-         m.created_at_ms,
-         m.token_input,
-         m.token_output,
-         m.operation_duration_ms,
-         m.operation_duration_source,
-         m.operation_duration_confidence
-       FROM messages m
-       WHERE m.session_id = ? AND m.id = ?`,
-    )
-    .get(sessionId, anchorMessageId) as MessageRow | undefined;
-  if (!row) {
-    return null;
-  }
-  return mapSessionMessageRows(db, [row])[0] ?? null;
-}
-
 function deleteSessionWithStore(
   db: DatabaseHandle,
   bookmarkStore: BookmarkStore,
@@ -2052,6 +1943,46 @@ function loadCategoryCounts(
   }
 
   return categoryCounts;
+}
+
+function countMessageCategories(
+  rows: ReadonlyArray<{
+    category: string;
+  }>,
+): Record<MessageCategory, number> {
+  const categoryCounts = makeEmptyCategoryCounts();
+  for (const row of rows) {
+    categoryCounts[normalizeMessageCategory(row.category)] += 1;
+  }
+  return categoryCounts;
+}
+
+function loadTurnMatchedMessageMetadata(
+  db: DatabaseHandle,
+  args: {
+    sessionId: string;
+    anchor: FocusTargetRow;
+    nextUser?: FocusTargetRow;
+    queryPlan: SearchQueryPlan;
+  },
+): {
+  categoryCounts: Record<MessageCategory, number>;
+  matchedMessageIds: string[];
+} {
+  const turnScope = buildTurnMessageFilters(args);
+  const rows = db
+    .prepare(
+      `SELECT m.id, m.category
+       FROM messages m
+       WHERE ${turnScope.whereClause}
+       ORDER BY m.created_at_ms ASC, m.created_at ASC, m.id ASC`,
+    )
+    .all(...turnScope.params) as Array<{ id: string; category: string }>;
+
+  return {
+    categoryCounts: countMessageCategories(rows),
+    matchedMessageIds: rows.map((row) => row.id),
+  };
 }
 
 function resolveFocusTarget(

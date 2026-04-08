@@ -1,12 +1,13 @@
 import { performance } from "node:perf_hooks";
 
 import type { IpcChannel, IpcRequestInput, IpcResponse } from "@codetrail/core/browser";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup } from "@testing-library/react";
 import { JSDOM } from "jsdom";
 import React from "react";
 
 import { MessageCard } from "../src/renderer/components/messages/MessageCard";
 import type { SessionMessage } from "../src/renderer/components/messages/types";
+import { renderWithPaneFocus } from "../src/renderer/test/renderWithPaneFocus";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "http://localhost",
@@ -174,7 +175,7 @@ function renderCard(message: SessionMessage, isExpanded: boolean) {
 }
 
 async function measureExpand(sample: Sample): Promise<number> {
-  const view = render(renderCard(sample.message, false));
+  const view = renderWithPaneFocus(renderCard(sample.message, false));
   const startedAt = performance.now();
   await act(async () => {
     view.rerender(renderCard(sample.message, true));
