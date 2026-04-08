@@ -554,6 +554,7 @@ function collectDashboardAiCodeStats(
     add: 0,
     update: 0,
     delete: 0,
+    move: 0,
   };
   const recentActivityByDate = new Map(
     recentDateKeys.map((date) => [
