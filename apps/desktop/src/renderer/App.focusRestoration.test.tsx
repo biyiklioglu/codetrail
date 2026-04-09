@@ -146,13 +146,13 @@ describe("App focus restoration", () => {
 
     clickToolbarButton(screen.getByRole("button", { name: "Open help" }));
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Code Trail Help" })).toBeInTheDocument();
+      expect(container.querySelector(".help-view")).toBeInTheDocument();
     });
 
     fireEvent.keyDown(window, { key: "Escape" });
 
     await waitFor(() => {
-      expect(screen.queryByRole("heading", { name: "Code Trail Help" })).toBeNull();
+      expect(container.querySelector(".help-view")).toBeNull();
       expect(document.activeElement).toBe(container.querySelector(".msg-scroll.message-list"));
     });
   });
@@ -179,13 +179,13 @@ describe("App focus restoration", () => {
 
     clickToolbarButton(screen.getByRole("button", { name: "Open help" }));
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Code Trail Help" })).toBeInTheDocument();
+      expect(container.querySelector(".help-view")).toBeInTheDocument();
     });
 
     clickToolbarButton(screen.getByRole("button", { name: "Return to history view" }));
 
     await waitFor(() => {
-      expect(screen.queryByRole("heading", { name: "Code Trail Help" })).toBeNull();
+      expect(container.querySelector(".help-view")).toBeNull();
       expect(document.activeElement).toBe(container.querySelector(".list-scroll.session-list"));
     });
   });

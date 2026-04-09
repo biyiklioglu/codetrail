@@ -6897,45 +6897,6 @@ mark {
   margin: 0 auto;
 }
 
-.help-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 24px;
-  margin-bottom: 48px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--help-border-subtle);
-}
-
-.help-title {
-  margin: 0;
-  font-size: 28px;
-  font-weight: 650;
-  letter-spacing: -0.03em;
-  color: var(--text-primary);
-}
-
-.help-title span {
-  color: var(--help-accent);
-}
-
-.help-subtitle {
-  margin: 6px 0 0;
-  font-size: 13px;
-  color: var(--help-muted);
-}
-
-.help-close-hint {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
-  padding-top: 10px;
-  color: var(--help-muted);
-  font-size: 12px;
-}
-
 .help-close-divider {
   color: var(--text-tertiary);
 }
@@ -7276,19 +7237,10 @@ mark {
     padding: 20px 14px 30px;
   }
 
-  .help-header {
-    margin-bottom: 32px;
-  }
-
   .help-shortcut-grid,
   .help-syntax-grid,
   .help-two-col {
     grid-template-columns: 1fr;
-  }
-
-  .help-close-hint {
-    justify-content: flex-start;
-    padding-top: 0;
   }
 
   .help-syntax-row {

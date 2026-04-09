@@ -16,7 +16,6 @@ describe("ShortcutsDialog", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Code Trail Help");
     expect(screen.getByText("Search")).toBeInTheDocument();
     expect(screen.getByText("Search Syntax")).toBeInTheDocument();
     expect(screen.getByText("Navigation")).toBeInTheDocument();
@@ -33,7 +32,6 @@ describe("ShortcutsDialog", () => {
     expect(screen.getByText("Match either term")).toBeInTheDocument();
     expect(screen.getByText("Advanced")).toBeInTheDocument();
     expect(screen.getByText("Focus (solo)")).toBeInTheDocument();
-    expect(container.querySelector(".help-header")).toBeInTheDocument();
   });
 
   it("renders platform-specific shortcuts from the live registry", () => {

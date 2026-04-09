@@ -195,25 +195,6 @@ export function ShortcutsDialog({
   return (
     <div className="help-view">
       <div className="help-page">
-        <header className="help-header">
-          <div>
-            <h1 className="help-title">
-              Code Trail <span>Help</span>
-            </h1>
-            <p className="help-subtitle">Keyboard shortcuts and search syntax reference</p>
-          </div>
-          <div className="help-close-hint">
-            <span>Press</span>
-            {renderShortcutSequence("?")}
-            <span>to toggle</span>
-            <span className="help-close-divider" aria-hidden>
-              ·
-            </span>
-            {renderShortcutSequence("Esc")}
-            <span>to close</span>
-          </div>
-        </header>
-
         <HelpSection title="Search">
           <ShortcutGrid rows={searchRows} />
         </HelpSection>
