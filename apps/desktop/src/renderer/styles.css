@@ -3892,6 +3892,7 @@ button svg *,
   align-items: center;
   gap: 10px;
   width: 100%;
+  box-sizing: border-box;
   min-height: 32px;
   padding: 3px 10px;
   border: 0;
@@ -4081,7 +4082,8 @@ button svg *,
 }
 
 .diff-split-pane .diff-sequence-marker:not(:first-child) .diff-sequence-marker-button,
-.diff-split-pane .diff-sequence-marker:not(:first-child) .diff-sequence-marker-spacer {
+.diff-split-pane .diff-sequence-marker:not(:first-child) .diff-sequence-marker-spacer,
+.diff-table-split.wrap .diff-sequence-marker:not(:first-child) .diff-sequence-marker-button {
   margin-top: 8px;
 }
 
