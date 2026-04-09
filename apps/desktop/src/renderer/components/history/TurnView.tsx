@@ -4,14 +4,11 @@ import type { useHistoryController } from "../../features/useHistoryController";
 import { copyTextToClipboard } from "../../lib/clipboard";
 import { usePaneFocus } from "../../lib/paneFocusController";
 import { MessageCard } from "../messages/MessageCard";
-import {
-  DiffBlock,
-  useDocumentCollapseMultiFileToolDiffs,
-} from "../messages/textRendering";
+import { DiffBlock, useDocumentCollapseMultiFileToolDiffs } from "../messages/textRendering";
 import { formatToolEditFileSummary } from "../messages/toolEditUtils";
 import { trimProjectPrefixFromPath } from "../messages/viewerDiffModel";
 import { aggregateTurnCombinedFiles } from "./turnCombinedDiff";
-import { type TurnCombinedFile, type TurnSequenceEdit } from "./turnCombinedModel";
+import type { TurnCombinedFile, TurnSequenceEdit } from "./turnCombinedModel";
 
 type HistoryController = ReturnType<typeof useHistoryController>;
 type TurnMessage = NonNullable<HistoryController["sessionTurnDetail"]>["messages"][number];
@@ -337,7 +334,7 @@ function TurnCombinedFileView({
   query: string;
   highlightPatterns: string[];
 }) {
-  if (file.displayMode === "diff" && file.displayUnifiedDiff) {
+  if (file.renderMode === "diff" && file.displayUnifiedDiff) {
     return (
       <DiffBlock
         codeValue={file.displayUnifiedDiff}
@@ -373,41 +370,51 @@ function TurnCombinedFileView({
 function buildCombinedCopyValue(files: TurnCombinedFile[], pathRoots: string[]): string {
   return files
     .map((file) => {
-      if (file.displayMode === "diff" && file.displayUnifiedDiff) {
+      if (file.renderMode === "diff" && file.displayUnifiedDiff) {
         return file.displayUnifiedDiff;
       }
-      return [`${buildCombinedFileLabel(file, pathRoots)}`, buildSequenceCopyValue(file.sequenceEdits)]
-        .join("\n");
+      return [
+        `${buildCombinedFileLabel(file, pathRoots)}`,
+        buildSequenceCopyValue(file.sequenceEdits),
+      ].join("\n");
     })
     .join("\n\n");
 }
 
 function buildSequenceCopyValue(sequenceEdits: TurnSequenceEdit[]): string {
-  return sequenceEdits
-    .map((edit, index) =>
-      [
-        formatSequenceMarkerLabel(index + 1, edit),
-        edit.unifiedDiff.trimEnd(),
-      ].join("\n"),
-    )
-    .join("\n\n");
+  return buildSequenceText(sequenceEdits, "\n\n");
 }
 
 function buildSequenceDisplayDiff(sequenceEdits: TurnSequenceEdit[]): string {
-  return sequenceEdits
-    .map((edit, index) =>
-      [formatSequenceMarkerLabel(index + 1, edit), edit.unifiedDiff.trimEnd()].join("\n"),
-    )
-    .join("\n");
+  return buildSequenceText(sequenceEdits, "\n");
 }
 
-function formatSequenceMarkerLabel(editNumber: number, edit: TurnSequenceEdit): string {
-  return `Edit ${editNumber} | +${edit.addedLineCount} -${edit.removedLineCount} | ${formatSequenceTimeLabel(edit.createdAt)}`;
+function buildSequenceText(sequenceEdits: TurnSequenceEdit[], separator: string): string {
+  if (sequenceEdits.length <= 1) {
+    return sequenceEdits[0]?.unifiedDiff.trimEnd() ?? "";
+  }
+  return sequenceEdits
+    .map((edit, index) =>
+      [
+        formatSequenceMarkerLabel(index + 1, sequenceEdits.length, edit),
+        edit.unifiedDiff.trimEnd(),
+      ].join("\n"),
+    )
+    .join(separator);
+}
+
+function formatSequenceMarkerLabel(
+  editNumber: number,
+  totalEdits: number,
+  edit: TurnSequenceEdit,
+): string {
+  return `Edit ${editNumber} of ${totalEdits} | +${edit.addedLineCount} -${edit.removedLineCount} | ${formatSequenceTimeLabel(edit.createdAt)}`;
 }
 
 function formatSequenceTimeLabel(createdAt: string): string {
   return new Date(createdAt).toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit",
+    second: "2-digit",
   });
 }

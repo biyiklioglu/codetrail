@@ -58,14 +58,12 @@ function aggregateFileSteps(steps: TurnSequenceEdit[]): TurnCombinedFile {
   const identity = deriveCombinedFileIdentity(steps);
   const isExactSingleEdit = steps.length === 1 && first.exactness === "exact";
   const displayUnifiedDiff = isExactSingleEdit ? first.unifiedDiff : null;
-  const counts = isExactSingleEdit
-    ? countDiffLines(displayUnifiedDiff)
-    : sumSequenceCounts(steps);
+  const counts = isExactSingleEdit ? countDiffLines(displayUnifiedDiff) : sumSequenceCounts(steps);
   return {
     filePath: identity.filePath,
     previousFilePath: identity.previousFilePath,
     changeType: identity.changeType,
-    displayMode: isExactSingleEdit ? "diff" : "sequence",
+    renderMode: isExactSingleEdit ? "diff" : "sequence",
     displayUnifiedDiff,
     addedLineCount: counts.added,
     removedLineCount: counts.removed,

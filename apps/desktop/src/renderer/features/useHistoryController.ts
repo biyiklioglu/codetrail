@@ -1858,6 +1858,8 @@ export function useHistoryController({
   const refreshViewport = useMemo(
     () => ({
       messageListRef,
+      historyDetailMode,
+      turnAnchorMessageId,
       setSessionScrollTop,
       sessionScrollTopRef,
       pendingRestoredSessionScrollRef,
@@ -1875,10 +1877,12 @@ export function useHistoryController({
     [
       focusMessageId,
       focusedMessagePosition,
+      historyDetailMode,
       loadedHistoryPage,
       pendingMessageAreaFocus,
       pendingMessagePageNavigation,
       setSessionScrollTop,
+      turnAnchorMessageId,
       visibleFocusedMessageId,
     ],
   );

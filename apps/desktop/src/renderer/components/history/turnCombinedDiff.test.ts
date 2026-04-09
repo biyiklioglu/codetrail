@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { type TurnCombinedMessage, aggregateTurnCombinedFiles } from "./turnCombinedDiff";
 
@@ -19,6 +19,10 @@ function createCodexPatchMessage(patch: string): TurnCombinedMessage {
 }
 
 describe("aggregateTurnCombinedFiles", () => {
+  beforeEach(() => {
+    codexMessageCounter = 0;
+  });
+
   it("shows a single exact edit as a diff", () => {
     const messages = [
       createCodexPatchMessage(
@@ -26,8 +30,8 @@ describe("aggregateTurnCombinedFiles", () => {
           "*** Begin Patch",
           "*** Update File: src/new-file.ts",
           "@@",
-          '-export const created = false;',
-          '+export const created = true;',
+          "-export const created = false;",
+          "+export const created = true;",
           "*** End Patch",
         ].join("\n"),
       ),
@@ -35,7 +39,7 @@ describe("aggregateTurnCombinedFiles", () => {
 
     const [file] = aggregateTurnCombinedFiles(messages);
 
-    expect(file?.displayMode).toBe("diff");
+    expect(file?.renderMode).toBe("diff");
     expect(file?.displayUnifiedDiff).toContain("+++ b/src/new-file.ts");
     expect(file?.displayUnifiedDiff).toContain("+export const created = true;");
     expect(file?.addedLineCount).toBe(1);
@@ -66,7 +70,7 @@ describe("aggregateTurnCombinedFiles", () => {
 
     const [file] = aggregateTurnCombinedFiles(messages);
 
-    expect(file?.displayMode).toBe("sequence");
+    expect(file?.renderMode).toBe("sequence");
     expect(file?.displayUnifiedDiff).toBeNull();
     expect(file?.changeType).toBe("delete");
     expect(file?.sequenceEdits).toHaveLength(1);
@@ -104,7 +108,7 @@ describe("aggregateTurnCombinedFiles", () => {
 
     const [file] = aggregateTurnCombinedFiles(messages);
 
-    expect(file?.displayMode).toBe("sequence");
+    expect(file?.renderMode).toBe("sequence");
     expect(file?.displayUnifiedDiff).toBeNull();
     expect(file?.sequenceEdits).toHaveLength(2);
     expect(file?.addedLineCount).toBe(3);
@@ -117,8 +121,8 @@ describe("aggregateTurnCombinedFiles", () => {
         [
           "*** Begin Patch",
           "*** Add File: src/historyRefreshPlanner.ts",
-          "+import { alpha } from \"./alpha\";",
-          "+import { beta } from \"./beta\";",
+          '+import { alpha } from "./alpha";',
+          '+import { beta } from "./beta";',
           "+",
           "+export const ready = true;",
           "*** End Patch",
@@ -141,7 +145,7 @@ describe("aggregateTurnCombinedFiles", () => {
 
     const [file] = aggregateTurnCombinedFiles(messages);
 
-    expect(file?.displayMode).toBe("sequence");
+    expect(file?.renderMode).toBe("sequence");
     expect(file?.displayUnifiedDiff).toBeNull();
     expect(file?.changeType).toBe("add");
     expect(file?.previousFilePath).toBeNull();
@@ -178,7 +182,7 @@ describe("aggregateTurnCombinedFiles", () => {
 
     const [file] = aggregateTurnCombinedFiles(messages);
 
-    expect(file?.displayMode).toBe("sequence");
+    expect(file?.renderMode).toBe("sequence");
     expect(file?.displayUnifiedDiff).toBeNull();
     expect(file?.sequenceEdits).toHaveLength(2);
     expect(file?.addedLineCount).toBe(2);
@@ -202,7 +206,7 @@ describe("aggregateTurnCombinedFiles", () => {
 
     const [file] = aggregateTurnCombinedFiles(messages);
 
-    expect(file?.displayMode).toBe("diff");
+    expect(file?.renderMode).toBe("diff");
     expect(file?.filePath).toBe("src/new-name.ts");
     expect(file?.previousFilePath).toBe("src/old-name.ts");
     expect(file?.changeType).toBe("move");

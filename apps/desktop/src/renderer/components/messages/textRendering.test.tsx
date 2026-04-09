@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   codeToTokensMock,
+  copyTextToClipboardMock,
   createHighlighterMock,
   listAvailableEditorsMock,
   paneStateMock,
@@ -35,6 +36,7 @@ const {
   createHighlighterMock: vi.fn(async () => ({
     codeToTokens: codeToTokensMock,
   })),
+  copyTextToClipboardMock: vi.fn(async () => {}),
   listAvailableEditorsMock: vi.fn(async () => ({ editors: [], diffTools: [] })),
   paneStateMock: {
     preferredExternalEditor: null,
@@ -67,6 +69,10 @@ vi.mock("../../lib/pathActions", () => ({
   openDiffInEditor: openDiffInEditorMock,
   openFileInEditor: openFileInEditorMock,
   openPath: openPathMock,
+}));
+
+vi.mock("../../lib/clipboard", () => ({
+  copyTextToClipboard: copyTextToClipboardMock,
 }));
 
 vi.mock("../../lib/codetrailClient", () => ({
@@ -1335,7 +1341,7 @@ describe("CodeBlock", () => {
     render(
       <DiffBlock
         codeValue={[
-          "Edit 1 | +1 -1 | 12:50 PM",
+          "Edit 1 of 2 | +1 -1 | 12:50:11 PM",
           "diff --git a/a.ts b/a.ts",
           "--- a/a.ts",
           "+++ b/a.ts",
@@ -1355,19 +1361,57 @@ describe("CodeBlock", () => {
         expect.objectContaining({
           title: "/Users/acme/repo/a.ts",
           language: "diff",
-          content: expect.stringContaining("=========== Edit 1 · +1 -1 · 12:50 PM ==========="),
+          content: expect.stringContaining(
+            "=========== Edit 1 of 2 · +1 -1 · 12:50:11 PM ===========",
+          ),
         }),
       );
       expect(openFileInEditorMock).not.toHaveBeenCalled();
       expect(openDiffInEditorMock).toHaveBeenCalledWith(
         expect.objectContaining({
           leftContent: expect.stringContaining(
-            "=========== Edit 1 · +1 -1 · 12:50 PM ===========",
+            "=========== Edit 1 of 2 · +1 -1 · 12:50:11 PM ===========",
           ),
           rightContent: expect.stringContaining(
-            "=========== Edit 1 · +1 -1 · 12:50 PM ===========",
+            "=========== Edit 1 of 2 · +1 -1 · 12:50:11 PM ===========",
           ),
         }),
+      );
+    });
+  });
+
+  it("copies sequenced diffs using external marker formatting", async () => {
+    resetContentViewerCachesForTests();
+    copyTextToClipboardMock.mockClear();
+
+    render(
+      <DiffBlock
+        codeValue={[
+          "Edit 1 of 2 | +1 -1 | 12:50:11 PM",
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n")}
+        filePath="/Users/acme/repo/a.ts"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Copy" }));
+
+    await waitFor(() => {
+      expect(copyTextToClipboardMock).toHaveBeenCalledWith(
+        [
+          "=========== Edit 1 of 2 · +1 -1 · 12:50:11 PM ===========",
+          "diff --git a/a.ts b/a.ts",
+          "--- a/a.ts",
+          "+++ b/a.ts",
+          "@@ -1,1 +1,1 @@",
+          "-const beforeValue = 1;",
+          "+const afterValue = 2;",
+        ].join("\n"),
       );
     });
   });

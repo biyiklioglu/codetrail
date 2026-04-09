@@ -3239,13 +3239,13 @@ describe("runIncrementalIndexing", () => {
       }>;
 
       expect(rows).toHaveLength(2);
-      expect(rows[0]?.unified_diff).toContain('@@ -243,5 +243,5 @@');
+      expect(rows[0]?.unified_diff).toContain("@@ -243,5 +243,5 @@");
       expect(rows[0]?.unified_diff).toContain('-export const targetValue = "before";');
       expect(rows[0]?.unified_diff).toContain('+export const targetValue = "mid";');
-      expect(rows[1]?.unified_diff).toContain('@@ -243,5 +243,5 @@');
+      expect(rows[1]?.unified_diff).toContain("@@ -243,5 +243,5 @@");
       expect(rows[1]?.unified_diff).toContain('-export const targetValue = "mid";');
       expect(rows[1]?.unified_diff).toContain('+export const targetValue = "after";');
-      expect(rows[1]?.unified_diff).not.toContain('@@ -1,1 +1,1 @@');
+      expect(rows[1]?.unified_diff).not.toContain("@@ -1,1 +1,1 @@");
       expect(rows[0]?.exactness).toBe("best_effort");
       expect(rows[1]?.exactness).toBe("best_effort");
     } finally {

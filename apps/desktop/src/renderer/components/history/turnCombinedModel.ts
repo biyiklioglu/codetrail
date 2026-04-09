@@ -1,6 +1,6 @@
 import { countUnifiedDiffLines } from "@codetrail/core/tooling/unifiedDiff";
 
-export type TurnCombinedDisplayMode = "diff" | "sequence";
+export type TurnCombinedRenderMode = "diff" | "sequence";
 
 export type TurnCombinedSourceMessage = {
   id: string;
@@ -40,7 +40,7 @@ export type TurnCombinedFile = {
   filePath: string;
   previousFilePath: string | null;
   changeType: "add" | "update" | "delete" | "move";
-  displayMode: TurnCombinedDisplayMode;
+  renderMode: TurnCombinedRenderMode;
   displayUnifiedDiff: string | null;
   addedLineCount: number;
   removedLineCount: number;

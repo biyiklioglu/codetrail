@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDiffViewModel } from "./viewerDiffModel";
+import { buildDiffViewModel, parseDiffSequenceMarker } from "./viewerDiffModel";
 
 describe("viewerDiffModel", () => {
   it("pairs multi-line removed and added blocks in order", () => {
@@ -138,6 +138,17 @@ describe("viewerDiffModel", () => {
     ]);
   });
 
+  it("does not parse whitespace-padded marker lines as sequence markers", () => {
+    expect(parseDiffSequenceMarker("Edit 2 of 4 | +3 -1 | 12:50:11 PM")).toEqual({
+      editNumber: 2,
+      totalEdits: 4,
+      addedLineCount: 3,
+      removedLineCount: 1,
+      timeLabel: "12:50:11 PM",
+    });
+    expect(parseDiffSequenceMarker("  Edit 2 of 4 | +3 -1 | 12:50:11 PM  ")).toBeNull();
+  });
+
   it("leaves blocks unpaired when changed lines share no meaningful similarity", () => {
     const diff = [
       "diff --git a/a.ts b/a.ts",
@@ -268,14 +279,14 @@ describe("viewerDiffModel", () => {
 
   it("preserves sequence marker rows inside a unified diff stream", () => {
     const diff = [
-      "Edit 1 | +1 -1 | 12:34 PM",
+      "Edit 1 of 2 | +1 -1 | 12:34:01 PM",
       "diff --git a/a.ts b/a.ts",
       "--- a/a.ts",
       "+++ b/a.ts",
       "@@ -1,1 +1,1 @@",
       "-before",
       "+after",
-      "Edit 2 | +1 -1 | 12:35 PM",
+      "Edit 2 of 2 | +1 -1 | 12:35:02 PM",
       "diff --git a/a.ts b/a.ts",
       "--- a/a.ts",
       "+++ b/a.ts",
@@ -288,11 +299,11 @@ describe("viewerDiffModel", () => {
 
     expect(model.rows[0]).toEqual({
       kind: "marker",
-      text: "Edit 1 | +1 -1 | 12:34 PM",
+      text: "Edit 1 of 2 | +1 -1 | 12:34:01 PM",
     });
     expect(model.rows[3]).toEqual({
       kind: "marker",
-      text: "Edit 2 | +1 -1 | 12:35 PM",
+      text: "Edit 2 of 2 | +1 -1 | 12:35:02 PM",
     });
     expect(model.addedLineCount).toBe(2);
     expect(model.removedLineCount).toBe(2);
@@ -300,14 +311,14 @@ describe("viewerDiffModel", () => {
 
   it("resets synthetic line numbering at each sequence marker when a later edit has bare hunks", () => {
     const diff = [
-      "Edit 1 | +1 -1 | 12:34 PM",
+      "Edit 1 of 2 | +1 -1 | 12:34:01 PM",
       "diff --git a/a.ts b/a.ts",
       "--- a/a.ts",
       "+++ b/a.ts",
       "@@ -42,1 +42,1 @@",
       "-before",
       "+after",
-      "Edit 2 | +1 -1 | 12:35 PM",
+      "Edit 2 of 2 | +1 -1 | 12:35:02 PM",
       "diff --git a/a.ts b/a.ts",
       "--- a/a.ts",
       "+++ b/a.ts",

@@ -376,7 +376,7 @@ describe("TurnView", () => {
 
     expect(screen.getByRole("button", { name: "Expand Diffs" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Expand Diffs" }));
-    expect(container.querySelectorAll(".diff-sequence-marker")).toHaveLength(1);
+    expect(container.querySelectorAll(".diff-sequence-marker")).toHaveLength(0);
     expect(screen.getByRole("button", { name: "Collapse diff for other.ts" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Combined" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Sequence" })).toBeNull();
@@ -481,13 +481,15 @@ describe("TurnView", () => {
     fireEvent.click(screen.getByRole("button", { name: /expand combined changes/i }));
 
     expect(container.querySelectorAll(".diff-sequence-marker")).toHaveLength(2);
-    expect(container.textContent).toContain("Edit 1");
-    expect(container.textContent).toContain("Edit 2");
+    expect(container.textContent).toContain("Edit 1 of 2");
+    expect(container.textContent).toContain("Edit 2 of 2");
     expect(screen.getAllByText("src/controller.ts").length).toBeGreaterThan(0);
     expect(screen.queryByText("/workspace/project-one/src/controller.ts")).toBeNull();
     expect(screen.queryByText("PLAIN")).toBeNull();
     expect(screen.getAllByRole("button", { name: "Unified" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Collapse diff for controller.ts" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Collapse diff for controller.ts" })).toHaveLength(
+      1,
+    );
     expect(screen.getAllByText("No Wrap")).toHaveLength(1);
     expect(container.textContent).not.toContain("========= Edit 1");
     expect(screen.queryByRole("button", { name: "Combined" })).toBeNull();

@@ -57,6 +57,7 @@ import {
   buildDiffRenderSource,
   buildDiffViewModel,
   getPathBaseName,
+  parseDiffSequenceMarker,
   trimProjectPrefixFromPath,
 } from "./viewerDiffModel";
 
@@ -1135,12 +1136,12 @@ function ContentViewer({
         row.kind === "marker"
           ? formatExternalDiffSequenceMarker(row.text)
           : row.kind === "context"
-          ? row.text
-          : row.kind === "remove"
             ? row.text
-            : row.kind === "paired"
-              ? row.leftText
-              : "",
+            : row.kind === "remove"
+              ? row.text
+              : row.kind === "paired"
+                ? row.leftText
+                : "",
       )
       .join("\n");
     const rightContent = diffModel.rows
@@ -1149,12 +1150,12 @@ function ContentViewer({
         row.kind === "marker"
           ? formatExternalDiffSequenceMarker(row.text)
           : row.kind === "context"
-          ? row.text
-          : row.kind === "add"
             ? row.text
-            : row.kind === "paired"
-              ? row.rightText
-              : "",
+            : row.kind === "add"
+              ? row.text
+              : row.kind === "paired"
+                ? row.rightText
+                : "",
       )
       .join("\n");
     const targetLine =
@@ -1387,7 +1388,9 @@ function ContentViewer({
             className="content-viewer-action message-action-button"
             title="Copy content"
             onClick={() => {
-              void copyTextToClipboard(codeValue);
+              void copyTextToClipboard(
+                kind === "diff" ? buildExternalDiffContent(codeValue) : codeValue,
+              );
             }}
           >
             Copy
@@ -1831,9 +1834,6 @@ function DiffViewerBody({
         if (row.kind === "marker") {
           return (
             <div key={key} className="diff-split-row diff-sequence-marker">
-              <span className="diff-ln diff-sequence-marker-ln" aria-hidden="true">
-                {" "}
-              </span>
               <span className="diff-code diff-sequence-marker-code">
                 {renderDiffSequenceMarkerContent(row.text)}
               </span>
@@ -1951,9 +1951,6 @@ function DiffViewerBody({
         if (row.kind === "marker") {
           return (
             <div key={key} className="diff-row diff-sequence-marker">
-              <span className="diff-ln diff-sequence-marker-ln" aria-hidden="true">
-                {" "}
-              </span>
               <span className="diff-code diff-sequence-marker-code">
                 {renderDiffSequenceMarkerContent(row.text)}
               </span>
@@ -2073,25 +2070,26 @@ function DiffViewerBody({
 }
 
 function renderDiffSequenceMarkerContent(line: string): ReactNode {
-  const match = /^Edit (\d+) \| \+(\d+) -(\d+) \| (.+)$/.exec(line.trim());
-  if (!match) {
+  const marker = parseDiffSequenceMarker(line);
+  if (!marker) {
     return line;
   }
-  const [, editNumber, addedLineCount, removedLineCount, timeLabel] = match;
   return (
     <>
-      <span className="diff-sequence-marker-title">Edit {editNumber}</span>
+      <span className="diff-sequence-marker-title">
+        Edit {marker.editNumber} of {marker.totalEdits}
+      </span>
       <span className="diff-sequence-marker-separator" aria-hidden="true">
         |
       </span>
       <span className="diff-sequence-marker-meta">
-        <span className="diff-meta-added">+{addedLineCount}</span>
-        <span className="diff-meta-removed">-{removedLineCount}</span>
+        <span className="diff-meta-added">+{marker.addedLineCount}</span>
+        <span className="diff-meta-removed">-{marker.removedLineCount}</span>
       </span>
       <span className="diff-sequence-marker-separator" aria-hidden="true">
         |
       </span>
-      <span className="diff-sequence-marker-time">{timeLabel}</span>
+      <span className="diff-sequence-marker-time">{marker.timeLabel}</span>
     </>
   );
 }
@@ -2099,20 +2097,16 @@ function renderDiffSequenceMarkerContent(line: string): ReactNode {
 function buildExternalDiffContent(codeValue: string): string {
   return codeValue
     .split(/\r?\n/)
-    .map((line) =>
-      /^Edit \d+ \| \+\d+ -\d+ \| .+$/.test(line.trim())
-        ? formatExternalDiffSequenceMarker(line)
-        : line,
-    )
+    .map((line) => (parseDiffSequenceMarker(line) ? formatExternalDiffSequenceMarker(line) : line))
     .join("\n");
 }
 
 function formatExternalDiffSequenceMarker(line: string): string {
-  const normalized = line.trim();
-  if (!normalized) {
+  const marker = parseDiffSequenceMarker(line);
+  if (!marker) {
     return line;
   }
-  return `=========== ${normalized.replace(/\s+\|\s+/g, " · ")} ===========`;
+  return `=========== Edit ${marker.editNumber} of ${marker.totalEdits} · +${marker.addedLineCount} -${marker.removedLineCount} · ${marker.timeLabel} ===========`;
 }
 
 export function renderRichText(

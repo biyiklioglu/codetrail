@@ -63,9 +63,11 @@ export function useHistoryRefreshController({
 
   useHistoryViewportEffects({
     messageListRef: viewport.messageListRef,
+    historyDetailMode: viewport.historyDetailMode,
     historyMode: selection.historyMode,
     selectedProjectId: selection.selectedProjectId,
     selectedSessionId: selection.selectedSessionId,
+    turnAnchorMessageId: viewport.turnAnchorMessageId,
     sessionPage: selection.effectiveHistoryPage,
     setSessionScrollTop: viewport.setSessionScrollTop,
     sessionScrollTopRef: viewport.sessionScrollTopRef,

@@ -69,6 +69,8 @@ export type HistoryRefreshDetailApi = {
 
 export type HistoryRefreshViewportBindings = {
   messageListRef: RefObject<HTMLDivElement | null>;
+  historyDetailMode: HistoryDetailMode;
+  turnAnchorMessageId: string;
   setSessionScrollTop: Dispatch<SetStateAction<number>>;
   sessionScrollTopRef: MutableRefObject<number>;
   pendingRestoredSessionScrollRef: MutableRefObject<{

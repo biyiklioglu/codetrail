@@ -3786,10 +3786,12 @@ button svg *,
   border-top: 1px solid color-mix(in srgb, var(--border) 78%, var(--accent-blue-dim));
   border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, var(--accent-blue-dim));
   background: color-mix(in srgb, var(--code-bg) 90%, var(--accent-blue-dim));
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 
-.diff-sequence-marker-ln {
-  color: transparent;
+.diff-sequence-marker:not(:first-child) {
+  margin-top: 8px;
 }
 
 .diff-sequence-marker-code {
@@ -3797,10 +3799,7 @@ button svg *,
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
-}
-
-.diff-split-row.diff-sequence-marker .diff-sequence-marker-code {
-  grid-column: 2 / 5;
+  grid-column: 1 / -1;
 }
 
 .diff-sequence-marker-title {

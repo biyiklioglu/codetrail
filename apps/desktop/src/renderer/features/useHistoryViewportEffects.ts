@@ -12,9 +12,11 @@ import type { RefreshContext } from "./historyControllerTypes";
 
 export function useHistoryViewportEffects({
   messageListRef,
+  historyDetailMode,
   historyMode,
   selectedProjectId,
   selectedSessionId,
+  turnAnchorMessageId,
   sessionPage,
   setSessionScrollTop,
   sessionScrollTopRef,
@@ -37,9 +39,11 @@ export function useHistoryViewportEffects({
   scrollPreservationRef,
 }: {
   messageListRef: RefObject<HTMLDivElement | null>;
+  historyDetailMode: "flat" | "turn";
   historyMode: "session" | "bookmarks" | "project_all";
   selectedProjectId: string;
   selectedSessionId: string;
+  turnAnchorMessageId: string;
   sessionPage: number;
   setSessionScrollTop: Dispatch<SetStateAction<number>>;
   sessionScrollTopRef: MutableRefObject<number>;
@@ -70,6 +74,7 @@ export function useHistoryViewportEffects({
   } | null>;
 }) {
   const autoFollowScrollCleanupRef = useRef<(() => void) | null>(null);
+  const viewportScopeKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -82,8 +87,23 @@ export function useHistoryViewportEffects({
     if (!messageListRef.current) {
       return;
     }
-    const scrollScopeId = historyMode === "project_all" ? selectedProjectId : selectedSessionId;
-    if (!scrollScopeId || sessionPage < 0) {
+    const scrollScopeId =
+      historyDetailMode === "turn"
+        ? turnAnchorMessageId
+        : historyMode === "project_all"
+          ? selectedProjectId
+          : selectedSessionId;
+    const scrollScopePage = historyDetailMode === "turn" ? 0 : sessionPage;
+    const viewportScopeKey =
+      scrollScopeId && scrollScopePage >= 0
+        ? `${historyDetailMode}\u0000${historyMode}\u0000${scrollScopeId}\u0000${scrollScopePage}`
+        : null;
+    if (viewportScopeKeyRef.current === viewportScopeKey) {
+      return;
+    }
+    viewportScopeKeyRef.current = viewportScopeKey;
+
+    if (!scrollScopeId || scrollScopePage < 0) {
       messageListRef.current.scrollTop = 0;
       sessionScrollTopRef.current = 0;
       setSessionScrollTop(0);
@@ -100,9 +120,10 @@ export function useHistoryViewportEffects({
 
     const pendingRestore = pendingRestoredSessionScrollRef.current;
     if (
+      historyDetailMode !== "turn" &&
       pendingRestore &&
       pendingRestore.sessionId === scrollScopeId &&
-      pendingRestore.sessionPage === sessionPage
+      pendingRestore.sessionPage === scrollScopePage
     ) {
       messageListRef.current.scrollTop = pendingRestore.scrollTop;
       sessionScrollTopRef.current = pendingRestore.scrollTop;
@@ -119,6 +140,7 @@ export function useHistoryViewportEffects({
     setSessionScrollTop(0);
   }, [
     historyMode,
+    historyDetailMode,
     messageListRef,
     pendingAutoScrollRef,
     pendingRestoredSessionScrollRef,
@@ -129,6 +151,7 @@ export function useHistoryViewportEffects({
     sessionPage,
     sessionScrollTopRef,
     setSessionScrollTop,
+    turnAnchorMessageId,
   ]);
 
   useEffect(() => {

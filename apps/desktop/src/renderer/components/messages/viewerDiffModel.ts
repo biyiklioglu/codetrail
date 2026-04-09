@@ -48,7 +48,15 @@ export type DiffViewModel = {
 
 const INLINE_DIFF_MAX_LINE_LENGTH = 240;
 const INLINE_DIFF_MAX_TOKEN_COUNT = 80;
-const DIFF_SEQUENCE_MARKER_PATTERN = /^Edit \d+ \| \+\d+ -\d+ \| .+$/;
+export const DIFF_SEQUENCE_MARKER_PATTERN = /^Edit (\d+) of (\d+) \| \+(\d+) -(\d+) \| (.+)$/;
+
+export type DiffSequenceMarker = {
+  editNumber: number;
+  totalEdits: number;
+  addedLineCount: number;
+  removedLineCount: number;
+  timeLabel: string;
+};
 
 export function buildDiffRenderSource(
   diffModel: DiffViewModel | null,
@@ -63,9 +71,7 @@ export function buildDiffRenderSource(
   if (mode === "unified") {
     return {
       unified: rows
-        .flatMap((row) =>
-          row.kind === "paired" ? [row.leftText, row.rightText] : [row.text],
-        )
+        .flatMap((row) => (row.kind === "paired" ? [row.leftText, row.rightText] : [row.text]))
         .join("\n"),
       splitLeft: "",
       splitRight: "",
@@ -78,12 +84,12 @@ export function buildDiffRenderSource(
         row.kind === "marker"
           ? row.text
           : row.kind === "context"
-          ? row.text
-          : row.kind === "paired"
-            ? row.leftText
-            : row.kind === "remove"
-              ? row.text
-              : "",
+            ? row.text
+            : row.kind === "paired"
+              ? row.leftText
+              : row.kind === "remove"
+                ? row.text
+                : "",
       )
       .join("\n"),
     splitRight: rows
@@ -91,12 +97,12 @@ export function buildDiffRenderSource(
         row.kind === "marker"
           ? row.text
           : row.kind === "context"
-          ? row.text
-          : row.kind === "paired"
-            ? row.rightText
-            : row.kind === "add"
-              ? row.text
-              : "",
+            ? row.text
+            : row.kind === "paired"
+              ? row.rightText
+              : row.kind === "add"
+                ? row.text
+                : "",
       )
       .join("\n"),
   };
@@ -212,8 +218,26 @@ export function buildDiffViewModel(
   };
 }
 
-function isDiffSequenceMarkerLine(line: string): boolean {
-  return DIFF_SEQUENCE_MARKER_PATTERN.test(line.trim());
+export function parseDiffSequenceMarker(line: string): DiffSequenceMarker | null {
+  const match = DIFF_SEQUENCE_MARKER_PATTERN.exec(line);
+  if (!match) {
+    return null;
+  }
+  const [, editNumber, totalEdits, addedLineCount, removedLineCount, timeLabel] = match;
+  if (!editNumber || !totalEdits || !addedLineCount || !removedLineCount || !timeLabel) {
+    return null;
+  }
+  return {
+    editNumber: Number.parseInt(editNumber, 10),
+    totalEdits: Number.parseInt(totalEdits, 10),
+    addedLineCount: Number.parseInt(addedLineCount, 10),
+    removedLineCount: Number.parseInt(removedLineCount, 10),
+    timeLabel,
+  };
+}
+
+export function isDiffSequenceMarkerLine(line: string): boolean {
+  return parseDiffSequenceMarker(line) !== null;
 }
 
 function resolveAbsoluteDiffFilePath(filePath: string | null, pathRoots: string[]): string | null {
