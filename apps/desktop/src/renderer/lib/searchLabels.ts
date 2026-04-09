@@ -19,6 +19,6 @@ export function getSearchQueryTooltip(advancedSearchEnabled: boolean): string {
     : "Search with words and term*.";
 }
 
-export function getAdvancedSearchToggleTitle(advancedSearchEnabled: boolean): string {
-  return advancedSearchEnabled ? "Turn off advanced search." : "Turn on advanced search.";
+export function getAdvancedSearchToggleTitle(): string {
+  return "Toggle advanced search syntax.";
 }

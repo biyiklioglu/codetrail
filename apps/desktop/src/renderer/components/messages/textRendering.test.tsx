@@ -453,7 +453,7 @@ describe("theme-aware Shiki rendering", () => {
     });
     const initialCallCount = codeToTokensMock.mock.calls.length;
 
-    fireEvent.click(screen.getByRole("button", { name: "Unified" }));
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
 
     await waitFor(() => {
       expect(codeToTokensMock.mock.calls.length).toBe(initialCallCount + 2);
@@ -482,9 +482,17 @@ describe("theme-aware Shiki rendering", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Wrap" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Unified" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "No Wrap" })).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Unified" })).toHaveAttribute(
+      "title",
+      "Switch between unified and split diff views",
+    );
+    expect(screen.getByRole("button", { name: "No Wrap" })).toHaveAttribute(
+      "title",
+      "Toggle line wrapping in the viewer",
+    );
   });
 
   it("switches the rendered layout when toggling between unified and split diff views", async () => {
@@ -506,15 +514,15 @@ describe("theme-aware Shiki rendering", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Unified" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
     });
     expect(document.querySelectorAll(".diff-row").length).toBeGreaterThan(0);
     expect(document.querySelectorAll(".diff-split-row")).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Unified" }));
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Unified" })).toBeInTheDocument();
       expect(document.querySelectorAll(".diff-split-row").length).toBeGreaterThan(0);
     });
     expect(document.querySelectorAll(".diff-row")).toHaveLength(0);
@@ -539,13 +547,13 @@ describe("theme-aware Shiki rendering", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Unified" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Unified" }));
+    fireEvent.click(screen.getByRole("button", { name: "Split" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Unified" })).toBeInTheDocument();
       expect(document.querySelectorAll(".diff-split-row").length).toBeGreaterThan(0);
     });
 
@@ -564,7 +572,7 @@ describe("theme-aware Shiki rendering", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Unified" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
       expect(document.querySelectorAll(".diff-row").length).toBeGreaterThan(0);
     });
     expect(document.querySelectorAll(".diff-split-row")).toHaveLength(0);
@@ -595,7 +603,7 @@ describe("theme-aware Shiki rendering", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Unified" })).toBeInTheDocument();
     });
 
     const rows = Array.from(document.querySelectorAll(".diff-split-row"));

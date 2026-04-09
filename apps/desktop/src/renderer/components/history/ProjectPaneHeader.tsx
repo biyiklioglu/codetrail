@@ -129,7 +129,7 @@ export function ProjectPaneHeader({
                 aria-label={
                   allVisibleFoldersExpanded ? "Collapse all folders" : "Expand all folders"
                 }
-                title={allVisibleFoldersExpanded ? "Collapse" : "Expand"}
+                title="Expand or collapse all visible folders"
               >
                 <ToolbarIcon name={allVisibleFoldersExpanded ? "collapseAll" : "expandAll"} />
               </button>
@@ -192,7 +192,7 @@ export function ProjectPaneHeader({
               {...paneFocus.getPreservePaneFocusProps("project")}
               onClick={onToggleViewMode}
               aria-label={viewMode === "list" ? "Switch to By Folder" : "Switch to List"}
-              title={viewMode === "list" ? "Switch to Folder view" : "Switch to List view"}
+              title="Switch between list and folder views"
             >
               {viewMode === "list" ? <ProjectPaneListIcon /> : <ProjectPaneFolderIcon />}
             </button>
@@ -340,10 +340,7 @@ export function ProjectPaneHeader({
           {...paneFocus.getPreservePaneFocusProps("project")}
           onClick={onToggleCollapsed}
           aria-label={collapsed ? "Expand Projects pane" : "Collapse Projects pane"}
-          title={formatTooltipLabel(
-            collapsed ? "Expand Projects" : "Collapse Projects",
-            shortcuts.actions.toggleProjectPane,
-          )}
+          title={formatTooltipLabel("Toggle Projects pane", shortcuts.actions.toggleProjectPane)}
         >
           <ToolbarIcon name="chevronLeft" />
         </button>

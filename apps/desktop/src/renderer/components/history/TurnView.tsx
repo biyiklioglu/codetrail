@@ -184,7 +184,7 @@ function CombinedChangesCard({
           }}
           aria-expanded={expanded}
           aria-label={expanded ? "Collapse combined changes" : "Expand combined changes"}
-          title={expanded ? "Collapse combined changes" : "Expand combined changes"}
+          title="Toggle combined changes details"
         >
           <svg className="msg-chevron" fill="none" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" />
@@ -204,7 +204,7 @@ function CombinedChangesCard({
                 paneFocus.focusHistoryPane("message");
               }}
               aria-label={allFilesExpanded ? "Collapse Diffs" : "Expand Diffs"}
-              title={allFilesExpanded ? "Collapse all diffs" : "Expand all diffs"}
+              title="Expand or collapse all diffs in combined changes"
             >
               {allFilesExpanded ? "Collapse Diffs" : "Expand Diffs"}
             </button>

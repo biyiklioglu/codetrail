@@ -216,7 +216,7 @@ function MessageCardComponent({
           }}
           aria-expanded={isExpanded}
           aria-label={isExpanded ? "Collapse message" : "Expand message"}
-          title={isExpanded ? "Collapse message" : "Expand message"}
+          title="Toggle message details"
         >
           <svg className="msg-chevron" fill="none" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" />
@@ -253,7 +253,7 @@ function MessageCardComponent({
               {...preserveMessagePaneFocusProps}
               onClick={handleToggleDiffsButtonClick}
               aria-label={allWriteDiffsExpanded ? "Collapse Diffs" : "Expand Diffs"}
-              title={allWriteDiffsExpanded ? "Collapse all diffs" : "Expand all diffs"}
+              title="Expand or collapse all diffs in this message"
             >
               {allWriteDiffsExpanded ? "Collapse Diffs" : "Expand Diffs"}
             </button>
@@ -327,7 +327,7 @@ function MessageCardComponent({
               aria-label={
                 isBookmarked ? "Remove bookmark from this message" : "Bookmark this message"
               }
-              title={isBookmarked ? "Remove bookmark" : "Bookmark message"}
+              title="Toggle bookmark for this message"
             >
               <BookmarkIcon filled={isBookmarked} />
             </button>

@@ -486,11 +486,11 @@ describe("TurnView", () => {
     expect(screen.getAllByText("src/controller.ts").length).toBeGreaterThan(0);
     expect(screen.queryByText("/workspace/project-one/src/controller.ts")).toBeNull();
     expect(screen.queryByText("PLAIN")).toBeNull();
-    expect(screen.getAllByRole("button", { name: "Unified" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Split" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Collapse diff for controller.ts" })).toHaveLength(
       1,
     );
-    expect(screen.getAllByText("No Wrap")).toHaveLength(1);
+    expect(screen.getAllByText("Wrap")).toHaveLength(1);
     expect(container.textContent).not.toContain("========= Edit 1");
     expect(screen.queryByRole("button", { name: "Combined" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Sequence" })).toBeNull();

@@ -230,10 +230,7 @@ export function SessionPane({
             {...paneFocus.getPreservePaneFocusProps("session")}
             onClick={onToggleCollapsed}
             aria-label={collapsed ? "Expand Sessions pane" : "Collapse Sessions pane"}
-            title={formatTooltipLabel(
-              collapsed ? "Expand Sessions" : "Collapse Sessions",
-              shortcuts.actions.toggleSessionPane,
-            )}
+            title={formatTooltipLabel("Toggle Sessions pane", shortcuts.actions.toggleSessionPane)}
           >
             <ToolbarIcon name="chevronLeft" />
           </button>

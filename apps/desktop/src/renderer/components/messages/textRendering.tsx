@@ -1165,6 +1165,7 @@ function ContentViewer({
   const isCollapsibleDiff = kind === "diff" && collapsible;
   const diffToggleLabelTarget = getPathBaseName(displayedMetaPath) ?? "diff";
   const diffToggleLabel = `${isExpanded ? "Collapse" : "Expand"} diff for ${diffToggleLabelTarget}`;
+  const diffToggleTooltip = `Toggle diff details for ${diffToggleLabelTarget}`;
   const handleDiffToggle = () => {
     setExpandedState((value) => !value);
   };
@@ -1298,7 +1299,7 @@ function ContentViewer({
               className="content-viewer-meta-toggle"
               aria-expanded={isExpanded}
               aria-label={diffToggleLabel}
-              title={diffToggleLabel}
+              title={diffToggleTooltip}
               onMouseDown={(event) => {
                 event.preventDefault();
               }}
@@ -1319,7 +1320,7 @@ function ContentViewer({
                 className="content-viewer-meta-click-target content-viewer-diff-counts"
                 aria-hidden="true"
                 tabIndex={-1}
-                title={diffToggleLabel}
+                title={diffToggleTooltip}
                 onMouseDown={(event) => {
                   event.preventDefault();
                 }}
@@ -1359,7 +1360,7 @@ function ContentViewer({
                 className="content-viewer-meta-click-target content-viewer-path"
                 aria-hidden="true"
                 tabIndex={-1}
-                title={diffToggleLabel}
+                title={diffToggleTooltip}
                 onClick={handleDiffToggle}
               >
                 <span className="content-viewer-path-text" title={metaPath ?? undefined}>
@@ -1422,22 +1423,20 @@ function ContentViewer({
           {kind === "diff" ? (
             <button
               type="button"
-              className={`content-viewer-action message-action-button${
-                diffMode === "split" ? " is-active" : ""
-              }`}
-              title={diffMode === "unified" ? "Unified diff" : "Split diff"}
+              className="content-viewer-action message-action-button"
+              title="Switch between unified and split diff views"
               onClick={() => setDiffMode((value) => (value === "unified" ? "split" : "unified"))}
             >
-              {diffMode === "unified" ? "Unified" : "Split"}
+              {diffMode === "unified" ? "Split" : "Unified"}
             </button>
           ) : null}
           <button
             type="button"
             className="content-viewer-action message-action-button"
-            title={wrap ? "Wrap lines" : "Do not wrap lines"}
+            title="Toggle line wrapping in the viewer"
             onClick={() => setWrap((value) => !value)}
           >
-            {wrap ? "Wrap" : "No Wrap"}
+            {wrap ? "No Wrap" : "Wrap"}
           </button>
           <button
             type="button"
@@ -1910,7 +1909,7 @@ function DiffViewerBody({
                 aria-label={`${
                   collapsedSequenceMarkers[row.text] ? "Expand" : "Collapse"
                 } ${row.text}`}
-                title={`${collapsedSequenceMarkers[row.text] ? "Expand" : "Collapse"} ${row.text}`}
+                title={`Toggle unchanged lines for ${row.text}`}
               >
                 <span className="diff-sequence-marker-icon" aria-hidden="true">
                   <svg aria-hidden="true" focusable="false" fill="none" viewBox="0 0 24 24">
@@ -2048,7 +2047,7 @@ function DiffViewerBody({
                 aria-label={`${
                   collapsedSequenceMarkers[row.text] ? "Expand" : "Collapse"
                 } ${row.text}`}
-                title={`${collapsedSequenceMarkers[row.text] ? "Expand" : "Collapse"} ${row.text}`}
+                title={`Toggle unchanged lines for ${row.text}`}
               >
                 <span className="diff-sequence-marker-icon" aria-hidden="true">
                   <svg aria-hidden="true" focusable="false" fill="none" viewBox="0 0 24 24">

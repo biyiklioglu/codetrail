@@ -364,7 +364,7 @@ export function ProjectPane({
                 handleToggleProjectExpansion(project.id);
               }}
               aria-label={isExpanded ? "Collapse project sessions" : "Expand project sessions"}
-              title={isExpanded ? "Collapse project sessions" : "Expand project sessions"}
+              title="Expand or collapse this project's sessions"
             >
               <ProjectPaneChevron open={isExpanded} />
             </button>

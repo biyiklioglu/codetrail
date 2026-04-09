@@ -132,7 +132,7 @@ export function SearchView({
                       setAdvancedSearchEnabled((value) => !value);
                       search.setSearchPage(0);
                     }}
-                    title={getAdvancedSearchToggleTitle(advancedSearchEnabled)}
+                    title={getAdvancedSearchToggleTitle()}
                   />
 
                   <div

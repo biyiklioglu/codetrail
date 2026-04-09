@@ -264,7 +264,7 @@ function RefreshStrategyDropdown({
         aria-haspopup="menu"
         aria-expanded={open}
         title={formatTooltipLabel(
-          `Auto-refresh: ${selectedLabel}`,
+          `Auto-refresh strategy: ${selectedLabel}`,
           shortcuts.actions.toggleAutoRefresh,
         )}
       >
@@ -663,11 +663,7 @@ export function TopBar({
           {...preserveHistoryFocusProps}
           onClick={onToggleSearchView}
           aria-label="Search"
-          title={
-            mainView === "search"
-              ? formatTooltipLabel("Return to History", "Esc")
-              : formatTooltipLabel("Open Search", shortcuts.actions.openGlobalSearch)
-          }
+          title={formatTooltipLabel("Toggle Search", shortcuts.actions.openGlobalSearch)}
         >
           <ToolbarIcon name="search" />
           Search
@@ -702,11 +698,7 @@ export function TopBar({
           onClick={onToggleFocus}
           disabled={focusDisabled}
           aria-label={focusMode ? "Exit focus mode" : "Enter focus mode"}
-          title={
-            focusMode
-              ? formatTooltipLabel("Exit Focus mode", shortcuts.actions.toggleFocusMode)
-              : formatTooltipLabel("Enter Focus mode", shortcuts.actions.toggleFocusMode)
-          }
+          title={formatTooltipLabel("Toggle Focus mode", shortcuts.actions.toggleFocusMode)}
         >
           <ToolbarIcon name={focusMode ? "closeFocus" : "focus"} />
           Focus
@@ -717,11 +709,7 @@ export function TopBar({
           {...preserveHistoryFocusProps}
           onClick={onToggleHelp}
           aria-label={mainView === "help" ? "Return to history view" : "Open help"}
-          title={
-            mainView === "help"
-              ? formatTooltipLabel("Return to History", "Esc")
-              : formatTooltipLabel("Open Help", "?")
-          }
+          title={formatTooltipLabel("Toggle Help", "?")}
         >
           <ToolbarIcon name="help" />
           Help
@@ -746,11 +734,7 @@ export function TopBar({
           {...preserveHistoryFocusProps}
           onClick={onToggleSettings}
           aria-label={mainView === "settings" ? "Return to history view" : "Open settings"}
-          title={
-            mainView === "settings"
-              ? formatTooltipLabel("Return to History", "Esc")
-              : formatTooltipLabel("Open Settings", shortcuts.actions.openSettings)
-          }
+          title={formatTooltipLabel("Toggle Settings", shortcuts.actions.openSettings)}
         >
           <ToolbarIcon name="settings" />
         </button>

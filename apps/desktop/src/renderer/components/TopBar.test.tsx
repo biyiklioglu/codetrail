@@ -53,15 +53,15 @@ describe("TopBar", () => {
     expect(container.querySelector(".app-title-suffix")).toBeNull();
     expect(screen.getByRole("button", { name: "Search" })).toHaveAttribute(
       "title",
-      "Open Search  ⌘⇧F",
+      "Toggle Search  ⌘⇧F",
     );
     expect(screen.getByRole("button", { name: "Enter focus mode" })).toHaveAttribute(
       "title",
-      "Enter Focus mode",
+      "Toggle Focus mode",
     );
     expect(screen.getByRole("button", { name: "Open settings" })).toHaveAttribute(
       "title",
-      "Open Settings  ⌘,",
+      "Toggle Settings  ⌘,",
     );
 
     await user.click(screen.getByRole("button", { name: "Search" }));
@@ -515,11 +515,11 @@ describe("TopBar", () => {
 
     expect(screen.getByRole("button", { name: "Search" })).toHaveAttribute(
       "title",
-      "Return to History  Esc",
+      "Toggle Search  ⌘⇧F",
     );
     expect(screen.getByRole("button", { name: "Exit focus mode" })).toHaveAttribute(
       "title",
-      "Exit Focus mode",
+      "Toggle Focus mode",
     );
     expect(screen.getByRole("button", { name: "Indexing in progress" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Exit focus mode" })).toBeDisabled();
@@ -527,7 +527,7 @@ describe("TopBar", () => {
     expect(screen.getByRole("button", { name: "Choose text viewer theme" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open settings" })).toHaveAttribute(
       "title",
-      "Open Settings  ⌘,",
+      "Toggle Settings  ⌘,",
     );
   });
 

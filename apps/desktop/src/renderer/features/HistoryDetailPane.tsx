@@ -73,13 +73,11 @@ function getHistoryCategoryAriaLabel(
 function getHistoryCategoryExpansionDefaultTooltip(
   history: HistoryController,
   category: MessageCategory,
-  expandedByDefault: boolean,
   formatTooltipLabel: ReturnType<typeof useTooltipFormatter>,
 ): string {
   const label = history.prettyCategory(category);
-  const nextAction = expandedByDefault ? "Collapse" : "Expand";
   return formatTooltipLabel(
-    `${nextAction} ${label} messages`,
+    `Toggle default expansion for ${label} messages`,
     history.historyCategoryExpandShortcutMap[category],
   );
 }
@@ -636,13 +634,11 @@ export function HistoryDetailPane({
               aria-label={getHistoryCategoryExpansionDefaultTooltip(
                 history,
                 category,
-                effectiveExpandedByDefaultCategories.includes(category),
                 formatTooltipLabel,
               )}
               title={getHistoryCategoryExpansionDefaultTooltip(
                 history,
                 category,
-                effectiveExpandedByDefaultCategories.includes(category),
                 formatTooltipLabel,
               )}
               onClick={() => {
@@ -704,7 +700,7 @@ export function HistoryDetailPane({
               setAdvancedSearchEnabled((value) => !value);
               history.setSessionPage(0);
             }}
-            title={getAdvancedSearchToggleTitle(advancedSearchEnabled)}
+            title={getAdvancedSearchToggleTitle()}
           />
         </div>
         {effectiveQueryError ? (
