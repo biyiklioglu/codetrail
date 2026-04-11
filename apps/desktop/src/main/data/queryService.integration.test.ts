@@ -280,7 +280,7 @@ describe("queryService", () => {
     cleanup();
   });
 
-  it("lists recent live session files by provider and mtime", () => {
+  it("lists recent live session files by provider, mtime, and offset", () => {
     const { dbPath, cleanup } = setupIndexedDb();
     const queryService = createQueryService(dbPath);
 
@@ -301,6 +301,23 @@ describe("queryService", () => {
     });
     expect(claudeOnly).toHaveLength(1);
     expect(claudeOnly[0]?.provider).toBe("claude");
+
+    const firstPage = queryService.listRecentLiveSessionFiles({
+      providers: ["codex", "claude"],
+      minFileMtimeMs: 0,
+      limit: 1,
+      offset: 0,
+    });
+    const secondPage = queryService.listRecentLiveSessionFiles({
+      providers: ["codex", "claude"],
+      minFileMtimeMs: 0,
+      limit: 1,
+      offset: 1,
+    });
+    expect(firstPage).toHaveLength(1);
+    expect(secondPage).toHaveLength(1);
+    expect(firstPage[0]?.filePath).not.toBe(secondPage[0]?.filePath);
+    expect(firstPage[0]?.fileMtimeMs).toBeGreaterThanOrEqual(secondPage[0]?.fileMtimeMs ?? 0);
 
     queryService.close();
     cleanup();

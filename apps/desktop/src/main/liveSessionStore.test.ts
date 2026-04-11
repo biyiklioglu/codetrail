@@ -513,6 +513,345 @@ describe("LiveSessionStore", () => {
     expect(getSingleSession(store).detailText).toBe("Recent large tail");
   });
 
+  it("backfills indexed-but-untracked Codex sessions after indexing completes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-backfill-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "04", "11", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-04-11T09:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", text: "Recovered after indexing" },
+      })}\n`,
+      "utf8",
+    );
+
+    const listRecentLiveSessionFiles = vi
+      .fn()
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([
+        {
+          filePath,
+          provider: "codex" as const,
+          fileMtimeMs: Date.parse("2026-04-11T09:00:02.000Z"),
+        },
+      ]);
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles,
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      now: () => Date.parse("2026-04-11T09:00:00.000Z"),
+    });
+
+    await store.start({ discoveryConfig: config });
+    expect(store.snapshot().sessions).toHaveLength(0);
+
+    const result = await store.backfillRecentSessionsAfterIndexing();
+
+    expect(result).toEqual({
+      ran: true,
+      recoveredSessionCount: 1,
+      consumedStructuralInvalidation: false,
+    });
+    expect(getSingleSession(store).provider).toBe("codex");
+    expect(getSingleSession(store).detailText).toBe("Recovered after indexing");
+  });
+
+  it("skips already tracked files during post-index backfill", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-backfill-skip-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "04", "11", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-04-11T09:00:00.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", text: "Already tracked" },
+      })}\n`,
+      "utf8",
+    );
+
+    const listRecentLiveSessionFiles = vi
+      .fn()
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([
+        {
+          filePath,
+          provider: "codex" as const,
+          fileMtimeMs: Date.parse("2026-04-11T09:00:01.000Z"),
+        },
+      ]);
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles,
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      now: () => Date.parse("2026-04-11T09:00:00.000Z"),
+    });
+
+    await store.start({ discoveryConfig: config });
+    await store.handleWatcherBatch(makeBatch(filePath));
+
+    const result = await store.backfillRecentSessionsAfterIndexing();
+
+    expect(result).toEqual({
+      ran: true,
+      recoveredSessionCount: 0,
+      consumedStructuralInvalidation: false,
+    });
+    expect(store.snapshot().sessions).toHaveLength(1);
+    expect(getSingleSession(store).detailText).toBe("Already tracked");
+  });
+
+  it("does not count missing indexed files as recovered during backfill", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-backfill-missing-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const missingPath = join(config.codexRoot, "2026", "04", "11", "missing-session.jsonl");
+
+    const listRecentLiveSessionFiles = vi
+      .fn()
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([
+        {
+          filePath: missingPath,
+          provider: "codex" as const,
+          fileMtimeMs: Date.parse("2026-04-11T09:00:01.000Z"),
+        },
+      ]);
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles,
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      now: () => Date.parse("2026-04-11T09:00:00.000Z"),
+    });
+
+    await store.start({ discoveryConfig: config });
+
+    const result = await store.backfillRecentSessionsAfterIndexing();
+
+    expect(result).toEqual({
+      ran: true,
+      recoveredSessionCount: 0,
+      consumedStructuralInvalidation: false,
+    });
+    expect(store.snapshot().sessions).toHaveLength(0);
+  });
+
+  it("backfill preserves existing live sessions and Claude hook precision", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-backfill-preserve-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const claudePath = join(config.claudeRoot, "project-a", "claude-session.jsonl");
+    const codexPath = join(config.codexRoot, "2026", "04", "11", "codex-session.jsonl");
+    createClaudeTranscript(claudePath);
+    createCodexTranscript(codexPath);
+    appendFileSync(
+      codexPath,
+      `${JSON.stringify({
+        timestamp: "2026-04-11T09:00:03.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", text: "Recovered Codex session" },
+      })}\n`,
+      "utf8",
+    );
+    const homeDir = join(dir, "home");
+    const userDataDir = join(dir, "user-data");
+    const settingsPath = join(homeDir, ".claude", "settings.json");
+    writeClaudeHookSettings(settingsPath);
+
+    const listRecentLiveSessionFiles = vi
+      .fn()
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([
+        {
+          filePath: codexPath,
+          provider: "codex" as const,
+          fileMtimeMs: Date.parse("2026-04-11T09:00:03.000Z"),
+        },
+      ]);
+    const { createFileWatcher, records } = createWatcherFactory();
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles,
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir,
+      homeDir,
+      createFileWatcher,
+      now: () => Date.parse("2026-04-11T09:00:00.000Z"),
+    });
+
+    await store.start({ discoveryConfig: config });
+    await store.handleWatcherBatch(makeBatch(claudePath));
+
+    const hookLogPath = join(userDataDir, "live-status", "claude-hooks.jsonl");
+    mkdirSync(dirname(hookLogPath), { recursive: true });
+    writeFileSync(
+      hookLogPath,
+      `${JSON.stringify({
+        timestamp: "2026-04-11T09:00:01.000Z",
+        hook_event_name: "Notification",
+        notification_type: "permission_prompt",
+        transcript_path: claudePath,
+        message: "Approve file edit",
+      })}\n`,
+      "utf8",
+    );
+    await records[0]!.callback(makeBatch(hookLogPath));
+
+    store.noteStructuralInvalidation();
+    const result = await store.backfillRecentSessionsAfterIndexing();
+
+    const sessions = store.snapshot().sessions;
+    expect(result).toEqual({
+      ran: true,
+      recoveredSessionCount: 1,
+      consumedStructuralInvalidation: true,
+    });
+    expect(records).toHaveLength(1);
+    expect(sessions).toHaveLength(2);
+    const claudeSession = sessions.find((session) => session.provider === "claude");
+    const codexSession = sessions.find((session) => session.provider === "codex");
+    expect(claudeSession?.sourcePrecision).toBe("hook");
+    expect(claudeSession?.detailText).toBe("Approve file edit");
+    expect(codexSession?.detailText).toBe("Recovered Codex session");
+  });
+
+  it("retains structural invalidation after a failed backfill and consumes it on the next success", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-backfill-retry-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "04", "11", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-04-11T09:00:02.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", text: "Recovered on retry" },
+      })}\n`,
+      "utf8",
+    );
+
+    const listRecentLiveSessionFiles = vi
+      .fn()
+      .mockReturnValueOnce([])
+      .mockImplementationOnce(() => {
+        throw new Error("transient db failure");
+      })
+      .mockReturnValueOnce([
+        {
+          filePath,
+          provider: "codex" as const,
+          fileMtimeMs: Date.parse("2026-04-11T09:00:02.000Z"),
+        },
+      ]);
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles,
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      now: () => Date.parse("2026-04-11T09:00:00.000Z"),
+    });
+
+    await store.start({ discoveryConfig: config });
+    store.noteStructuralInvalidation();
+
+    const firstAttempt = await store.backfillRecentSessionsAfterIndexing();
+    expect(firstAttempt).toEqual({
+      ran: false,
+      recoveredSessionCount: 0,
+      consumedStructuralInvalidation: false,
+    });
+    expect(
+      (store as unknown as { structuralInvalidationPending: boolean }).structuralInvalidationPending,
+    ).toBe(true);
+
+    const secondAttempt = await store.backfillRecentSessionsAfterIndexing();
+    expect(secondAttempt).toEqual({
+      ran: true,
+      recoveredSessionCount: 1,
+      consumedStructuralInvalidation: true,
+    });
+    expect(
+      (store as unknown as { structuralInvalidationPending: boolean }).structuralInvalidationPending,
+    ).toBe(false);
+    expect(getSingleSession(store).detailText).toBe("Recovered on retry");
+  });
+
+  it("continues updating a recovered session without restarting the store", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-backfill-no-restart-"));
+    tempDirs.push(dir);
+    const config = makeConfig(dir);
+    const filePath = join(config.codexRoot, "2026", "04", "11", "codex-session.jsonl");
+    createCodexTranscript(filePath);
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-04-11T09:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", text: "Recovered before append" },
+      })}\n`,
+      "utf8",
+    );
+
+    const listRecentLiveSessionFiles = vi
+      .fn()
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([
+        {
+          filePath,
+          provider: "codex" as const,
+          fileMtimeMs: Date.parse("2026-04-11T09:00:01.000Z"),
+        },
+      ]);
+    const store = new LiveSessionStore({
+      queryService: {
+        listRecentLiveSessionFiles,
+      } satisfies Pick<QueryService, "listRecentLiveSessionFiles">,
+      userDataDir: join(dir, "user-data"),
+      homeDir: join(dir, "home"),
+      now: () => Date.parse("2026-04-11T09:00:00.000Z"),
+    });
+
+    await store.start({ discoveryConfig: config });
+    await store.backfillRecentSessionsAfterIndexing();
+
+    const recoveredSession = getSingleSession(store);
+    expect(recoveredSession.detailText).toBe("Recovered before append");
+
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        timestamp: "2026-04-11T09:00:02.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          arguments: { cmd: "bun run typecheck" },
+        },
+      })}\n`,
+      "utf8",
+    );
+    await store.handleWatcherBatch(makeBatch(filePath));
+
+    const updatedSession = getSingleSession(store);
+    expect(updatedSession.sessionIdentity).toBe(recoveredSession.sessionIdentity);
+    expect(updatedSession.statusKind).toBe("running_tool");
+    expect(updatedSession.detailText).toBe("bun run typecheck");
+  });
+
   it("updates Claude sessions from the dedicated hook watcher", async () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-live-store-hooks-"));
     tempDirs.push(dir);

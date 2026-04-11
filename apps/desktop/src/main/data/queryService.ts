@@ -218,6 +218,7 @@ export type QueryService = {
     providers: Provider[];
     minFileMtimeMs: number;
     limit: number;
+    offset?: number;
   }) => Array<{
     filePath: string;
     provider: Provider;
@@ -295,6 +296,7 @@ function listRecentLiveSessionFilesWithDatabase(
     providers: Provider[];
     minFileMtimeMs: number;
     limit: number;
+    offset?: number;
   },
 ): Array<{
   filePath: string;
@@ -305,6 +307,7 @@ function listRecentLiveSessionFilesWithDatabase(
     return [];
   }
 
+  const offset = Math.max(0, input.offset ?? 0);
   const placeholders = input.providers.map(() => "?").join(", ");
   const rows = db
     .prepare(
@@ -313,9 +316,10 @@ function listRecentLiveSessionFilesWithDatabase(
        WHERE provider IN (${placeholders})
          AND file_mtime_ms >= ?
        ORDER BY file_mtime_ms DESC, file_path ASC
-       LIMIT ?`,
+       LIMIT ?
+       OFFSET ?`,
     )
-    .all(...input.providers, input.minFileMtimeMs, input.limit) as Array<{
+    .all(...input.providers, input.minFileMtimeMs, input.limit, offset) as Array<{
     file_path: string;
     provider: Provider;
     file_mtime_ms: number;

@@ -48,6 +48,9 @@ const {
   mockQueryServiceClose,
   mockFileWatcherService,
   mockFileWatcherInstances,
+  mockLiveSessionStore,
+  mockLiveSessionStoreInstances,
+  mockWorkerIndexingRunnerDependencyRef,
 } = vi.hoisted(() => {
   const fileWatcherInstances: Array<{
     roots: string[];
@@ -58,6 +61,30 @@ const {
     getWatchedRoots: ReturnType<typeof vi.fn>;
     getStatus: ReturnType<typeof vi.fn>;
   }> = [];
+  const liveSessionStoreInstances: Array<{
+    prepareClaudeHookLogForAppStart: ReturnType<typeof vi.fn>;
+    start: ReturnType<typeof vi.fn>;
+    stop: ReturnType<typeof vi.fn>;
+    handleWatcherBatch: ReturnType<typeof vi.fn>;
+    takeIndexingPrefetchedJsonlChunks: ReturnType<typeof vi.fn>;
+    noteStructuralInvalidation: ReturnType<typeof vi.fn>;
+    backfillRecentSessionsAfterIndexing: ReturnType<typeof vi.fn>;
+    snapshot: ReturnType<typeof vi.fn>;
+    installClaudeHooks: ReturnType<typeof vi.fn>;
+    removeClaudeHooks: ReturnType<typeof vi.fn>;
+  }> = [];
+  const workerIndexingRunnerDependencyRef: {
+    current:
+      | {
+          onJobSettled?: (event: {
+            source: string;
+            request: { kind: "incremental" | "changedFiles" | "maintenance" };
+            durationMs: number;
+            success: boolean;
+          }) => void | Promise<void>;
+        }
+      | null;
+  } = { current: null };
 
   return {
     mockGetPath: vi.fn((key: string) => {
@@ -168,6 +195,8 @@ const {
     })),
     mockQueryServiceClose: vi.fn(),
     mockFileWatcherInstances: fileWatcherInstances,
+    mockLiveSessionStoreInstances: liveSessionStoreInstances,
+    mockWorkerIndexingRunnerDependencyRef: workerIndexingRunnerDependencyRef,
     mockFileWatcherService: vi.fn(
       (
         roots: string[],
@@ -190,6 +219,64 @@ const {
         return instance;
       },
     ),
+    mockLiveSessionStore: vi.fn(() => {
+      const instance = {
+        prepareClaudeHookLogForAppStart: vi.fn(async () => undefined),
+        start: vi.fn(async () => undefined),
+        stop: vi.fn(async () => undefined),
+        handleWatcherBatch: vi.fn(async () => undefined),
+        takeIndexingPrefetchedJsonlChunks: vi.fn(() => []),
+        noteStructuralInvalidation: vi.fn(),
+        backfillRecentSessionsAfterIndexing: vi.fn(async () => ({
+          ran: true,
+          recoveredSessionCount: 0,
+          consumedStructuralInvalidation: false,
+        })),
+        snapshot: vi.fn(() => ({
+          enabled: true,
+          revision: 0,
+          updatedAt: "2026-04-11T10:00:00.000Z",
+          instrumentationEnabled: false,
+          providerCounts: {
+            claude: 0,
+            codex: 0,
+            gemini: 0,
+            cursor: 0,
+            copilot: 0,
+          },
+          sessions: [],
+          claudeHookState: {
+            settingsPath: "/Users/test/.claude/settings.json",
+            logPath: "/tmp/user-data/live-status/claude-hooks.jsonl",
+            installed: false,
+            managed: false,
+            managedEventNames: [],
+            missingEventNames: [],
+            lastError: null,
+          },
+        })),
+        installClaudeHooks: vi.fn(async () => ({
+          settingsPath: "/Users/test/.claude/settings.json",
+          logPath: "/tmp/user-data/live-status/claude-hooks.jsonl",
+          installed: true,
+          managed: true,
+          managedEventNames: [],
+          missingEventNames: [],
+          lastError: null,
+        })),
+        removeClaudeHooks: vi.fn(async () => ({
+          settingsPath: "/Users/test/.claude/settings.json",
+          logPath: "/tmp/user-data/live-status/claude-hooks.jsonl",
+          installed: false,
+          managed: false,
+          managedEventNames: [],
+          missingEventNames: [],
+          lastError: null,
+        })),
+      };
+      liveSessionStoreInstances.push(instance);
+      return instance;
+    }),
   };
 });
 
@@ -232,6 +319,10 @@ vi.mock("./ipc", () => ({
 
 vi.mock("./fileWatcherService", () => ({
   FileWatcherService: mockFileWatcherService,
+}));
+
+vi.mock("./liveSessionStore", () => ({
+  LiveSessionStore: mockLiveSessionStore,
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -300,6 +391,30 @@ function createWatcherInvokeEvent(senderId: number) {
       destroyedListener?.();
     },
   };
+}
+
+function getLastLiveSessionStore() {
+  const instance = mockLiveSessionStoreInstances.at(-1);
+  if (!instance) {
+    throw new Error("Expected LiveSessionStore instance");
+  }
+  return instance;
+}
+
+async function settleIndexingJob(event: {
+  source: string;
+  request: { kind: "incremental" | "changedFiles" | "maintenance" };
+  durationMs?: number;
+  success: boolean;
+}) {
+  const onJobSettled = mockWorkerIndexingRunnerDependencyRef.current?.onJobSettled;
+  if (!onJobSettled) {
+    throw new Error("Missing WorkerIndexingRunner onJobSettled dependency");
+  }
+  await onJobSettled({
+    durationMs: event.durationMs ?? 5,
+    ...event,
+  });
 }
 
 describe("bootstrapMainProcess", () => {
@@ -373,14 +488,26 @@ describe("bootstrapMainProcess", () => {
     setIndexingState = vi.fn();
     vi.clearAllMocks();
     mockFileWatcherInstances.length = 0;
+    mockLiveSessionStoreInstances.length = 0;
+    mockWorkerIndexingRunnerDependencyRef.current = null;
     void shutdownMainProcess();
 
-    mockWorkerIndexingRunner.mockImplementation(() => ({
-      enqueue: mockEnqueue,
-      purgeProviders: mockPurgeProviders,
-      enqueueChangedFiles: mockEnqueueChangedFiles,
-      getStatus: mockGetStatus,
-    }));
+    mockWorkerIndexingRunner.mockImplementation((_dbPath: string, dependencies?: unknown) => {
+      mockWorkerIndexingRunnerDependencyRef.current = (dependencies ?? null) as {
+        onJobSettled?: (event: {
+          source: string;
+          request: { kind: "incremental" | "changedFiles" | "maintenance" };
+          durationMs: number;
+          success: boolean;
+        }) => void | Promise<void>;
+      } | null;
+      return {
+        enqueue: mockEnqueue,
+        purgeProviders: mockPurgeProviders,
+        enqueueChangedFiles: mockEnqueueChangedFiles,
+        getStatus: mockGetStatus,
+      };
+    });
     mockCreateQueryService.mockImplementation(() => ({
       listProjects: mockListProjects,
       getProjectById: mockGetProjectById,
@@ -1421,6 +1548,108 @@ describe("bootstrapMainProcess", () => {
       { source: "watch_fallback_incremental" },
     );
     expect(mockEnqueueChangedFiles).not.toHaveBeenCalled();
+  });
+
+  it("marks structural invalidation for structure-only watcher batches and backfills after fallback indexing settles", async () => {
+    await bootstrapMainProcess({ runStartupIndexing: false });
+    await getRequiredHandler(handlers, "watcher:start")({ debounceMs: 5000 });
+    const liveSessionStore = getLastLiveSessionStore();
+    mockEnqueue.mockClear();
+    liveSessionStore.noteStructuralInvalidation.mockClear();
+    liveSessionStore.backfillRecentSessionsAfterIndexing.mockClear();
+
+    const firstWatcher = mockFileWatcherInstances[0];
+    if (!firstWatcher) {
+      throw new Error("Expected watcher instance");
+    }
+
+    await firstWatcher.onFilesChanged({
+      changedPaths: [],
+      requiresFullScan: true,
+    });
+
+    expect(liveSessionStore.noteStructuralInvalidation).toHaveBeenCalledTimes(1);
+    expect(mockEnqueue).toHaveBeenCalledWith(
+      { force: false },
+      { source: "watch_fallback_incremental" },
+    );
+
+    await settleIndexingJob({
+      source: "watch_fallback_incremental",
+      request: { kind: "incremental" },
+      success: true,
+    });
+
+    await vi.waitFor(() => {
+      expect(liveSessionStore.backfillRecentSessionsAfterIndexing).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("backfills live sessions after successful manual incremental refresh completion", async () => {
+    await bootstrapMainProcess({ runStartupIndexing: false });
+    await getRequiredHandler(handlers, "watcher:start")({ debounceMs: 5000 });
+    const liveSessionStore = getLastLiveSessionStore();
+    liveSessionStore.backfillRecentSessionsAfterIndexing.mockClear();
+
+    await settleIndexingJob({
+      source: "manual_incremental",
+      request: { kind: "incremental" },
+      success: true,
+    });
+
+    await vi.waitFor(() => {
+      expect(liveSessionStore.backfillRecentSessionsAfterIndexing).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("does not backfill live sessions after targeted watcher indexing completes", async () => {
+    await bootstrapMainProcess({ runStartupIndexing: false });
+    await getRequiredHandler(handlers, "watcher:start")({ debounceMs: 5000 });
+    const liveSessionStore = getLastLiveSessionStore();
+    liveSessionStore.backfillRecentSessionsAfterIndexing.mockClear();
+
+    await settleIndexingJob({
+      source: "watch_targeted",
+      request: { kind: "changedFiles" },
+      success: true,
+    });
+
+    expect(liveSessionStore.backfillRecentSessionsAfterIndexing).not.toHaveBeenCalled();
+  });
+
+  it("retains pending structural invalidation until the next successful qualifying indexing completion", async () => {
+    await bootstrapMainProcess({ runStartupIndexing: false });
+    await getRequiredHandler(handlers, "watcher:start")({ debounceMs: 5000 });
+    const liveSessionStore = getLastLiveSessionStore();
+    const firstWatcher = mockFileWatcherInstances[0];
+    if (!firstWatcher) {
+      throw new Error("Expected watcher instance");
+    }
+
+    liveSessionStore.noteStructuralInvalidation.mockClear();
+    liveSessionStore.backfillRecentSessionsAfterIndexing.mockClear();
+
+    await firstWatcher.onFilesChanged({
+      changedPaths: [],
+      requiresFullScan: true,
+    });
+    expect(liveSessionStore.noteStructuralInvalidation).toHaveBeenCalledTimes(1);
+
+    await settleIndexingJob({
+      source: "watch_fallback_incremental",
+      request: { kind: "incremental" },
+      success: false,
+    });
+    expect(liveSessionStore.backfillRecentSessionsAfterIndexing).not.toHaveBeenCalled();
+
+    await settleIndexingJob({
+      source: "manual_incremental",
+      request: { kind: "incremental" },
+      success: true,
+    });
+    await vi.waitFor(() => {
+      expect(liveSessionStore.backfillRecentSessionsAfterIndexing).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("handles zoom get/in/out/reset and explicit percent actions", async () => {

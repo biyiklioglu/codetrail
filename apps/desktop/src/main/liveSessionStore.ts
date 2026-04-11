@@ -44,6 +44,7 @@ import { buildLiveStatusSnapshot, pruneStaleSessionCursors } from "./live/liveSn
 
 const STARTUP_SEED_WINDOW_MS = 90_000;
 const STARTUP_SEED_LIMIT = 24;
+const BACKFILL_PAGE_SIZE = 100;
 const INITIAL_TAIL_BYTES = 32 * 1024;
 const MAX_READ_BYTES = 64 * 1024;
 const IDLE_TIMEOUT_MS = 120_000;
@@ -110,6 +111,8 @@ export class LiveSessionStore {
   private hookLogPreparedForAppStart = false;
   private readonly indexingPrefetchByFilePath = new Map<string, PrefetchedJsonlChunk>();
   private readonly liveTraceLogPath: string;
+  private liveWatchStartedAtMs: number | null = null;
+  private structuralInvalidationPending = false;
 
   constructor(options: LiveSessionStoreOptions) {
     this.queryService = options.queryService;
@@ -130,6 +133,8 @@ export class LiveSessionStore {
   async start(input: { discoveryConfig: DiscoveryConfig }): Promise<void> {
     this.enabled = true;
     this.discoveryConfig = input.discoveryConfig;
+    this.liveWatchStartedAtMs = this.now();
+    this.structuralInvalidationPending = false;
     this.sessionCursors.clear();
     this.resetHookCursor();
     this.invalidateSnapshotCache();
@@ -149,6 +154,8 @@ export class LiveSessionStore {
 
   async stop(): Promise<void> {
     this.enabled = false;
+    this.liveWatchStartedAtMs = null;
+    this.structuralInvalidationPending = false;
     this.sessionCursors.clear();
     this.indexingPrefetchByFilePath.clear();
     this.invalidateSnapshotCache();
@@ -166,6 +173,65 @@ export class LiveSessionStore {
       chunks.push(chunk);
     }
     return chunks;
+  }
+
+  noteStructuralInvalidation(): void {
+    if (!this.enabled || !this.discoveryConfig) {
+      return;
+    }
+    this.structuralInvalidationPending = true;
+  }
+
+  async backfillRecentSessionsAfterIndexing(): Promise<{
+    ran: boolean;
+    recoveredSessionCount: number;
+    consumedStructuralInvalidation: boolean;
+  }> {
+    if (!this.enabled || !this.discoveryConfig || this.liveWatchStartedAtMs === null) {
+      return {
+        ran: false,
+        recoveredSessionCount: 0,
+        consumedStructuralInvalidation: false,
+      };
+    }
+
+    const consumedStructuralInvalidation = this.structuralInvalidationPending;
+    const providers = this.getRecentLiveProviders();
+    let recoveredSessionCount = 0;
+    try {
+      for (let offset = 0; ; offset += BACKFILL_PAGE_SIZE) {
+        const candidates = this.queryService.listRecentLiveSessionFiles({
+          providers,
+          minFileMtimeMs: this.liveWatchStartedAtMs,
+          limit: BACKFILL_PAGE_SIZE,
+          offset,
+        }) as StartupSeedCandidate[];
+        recoveredSessionCount += await this.ingestRecentSessionCandidates(candidates, {
+          initialTailBytes: INITIAL_TAIL_BYTES,
+          skipTrackedFiles: true,
+        });
+        if (candidates.length < BACKFILL_PAGE_SIZE) {
+          break;
+        }
+      }
+      if (consumedStructuralInvalidation) {
+        this.structuralInvalidationPending = false;
+      }
+      return {
+        ran: true,
+        recoveredSessionCount,
+        consumedStructuralInvalidation,
+      };
+    } catch (error) {
+      this.reportBackgroundError("Failed backfilling recent live sessions after indexing", error, {
+        consumedStructuralInvalidation,
+      });
+      return {
+        ran: false,
+        recoveredSessionCount,
+        consumedStructuralInvalidation: false,
+      };
+    }
   }
 
   async handleWatcherBatch(batch: FileWatcherBatch): Promise<void> {
@@ -343,29 +409,68 @@ export class LiveSessionStore {
       return;
     }
 
-    const providers = this.discoveryConfig.enabledProviders?.filter(
-      (provider) => provider === "claude" || provider === "codex",
-    ) ?? ["claude", "codex"];
+    const providers = this.getRecentLiveProviders();
     const cutoffMs = this.now() - STARTUP_SEED_WINDOW_MS;
     const candidates = this.queryService.listRecentLiveSessionFiles({
       providers,
       minFileMtimeMs: cutoffMs,
       limit: STARTUP_SEED_LIMIT,
     }) as StartupSeedCandidate[];
+    await this.ingestRecentSessionCandidates(candidates, {
+      initialTailBytes: INITIAL_TAIL_BYTES,
+      skipTrackedFiles: false,
+    });
+  }
+
+  private getRecentLiveProviders(): Array<"claude" | "codex"> {
+    return (
+      this.discoveryConfig?.enabledProviders?.filter(
+        (provider): provider is "claude" | "codex" =>
+          provider === "claude" || provider === "codex",
+      ) ?? ["claude", "codex"]
+    );
+  }
+
+  private async ingestRecentSessionCandidates(
+    candidates: StartupSeedCandidate[],
+    options: {
+      initialTailBytes: number;
+      skipTrackedFiles: boolean;
+    },
+  ): Promise<number> {
+    const pendingCandidates = candidates.filter(
+      (candidate) => !options.skipTrackedFiles || !this.sessionCursors.has(candidate.filePath),
+    );
+    if (pendingCandidates.length === 0) {
+      return 0;
+    }
+
+    const trackedFilePathsBeforeIngestion = new Set(this.sessionCursors.keys());
     const results = await Promise.allSettled(
-      candidates.map((candidate) =>
+      pendingCandidates.map((candidate) =>
         this.processTranscriptPath(candidate.filePath, {
-          initialTailBytes: INITIAL_TAIL_BYTES,
+          initialTailBytes: options.initialTailBytes,
         }),
       ),
     );
+    let recoveredSessionCount = 0;
     results.forEach((result, index) => {
+      const candidate = pendingCandidates[index];
       if (result.status === "rejected") {
-        this.reportBackgroundError("Failed seeding startup live transcript", result.reason, {
-          filePath: candidates[index]?.filePath,
+        this.reportBackgroundError("Failed ingesting recent live transcript", result.reason, {
+          filePath: candidate?.filePath,
         });
+        return;
+      }
+      if (
+        candidate &&
+        !trackedFilePathsBeforeIngestion.has(candidate.filePath) &&
+        this.sessionCursors.has(candidate.filePath)
+      ) {
+        recoveredSessionCount += 1;
       }
     });
+    return recoveredSessionCount;
   }
 
   private async processTranscriptPath(

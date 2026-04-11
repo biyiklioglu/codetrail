@@ -44,6 +44,7 @@ import {
 } from "./fileWatcherService";
 import { exportHistoryMessages } from "./historyExport";
 import { WorkerIndexingRunner } from "./indexingRunner";
+import type { IndexingJobSource } from "./indexingJobSource";
 import { registerIpcHandlers } from "./ipc";
 import { appendLiveInstrumentationRecord, getLiveUiTraceLogPath } from "./live/liveInstrumentation";
 import { LiveSessionStore } from "./liveSessionStore";
@@ -69,6 +70,15 @@ export type BootstrapOptions = {
 export type BootstrapResult = {
   schemaVersion: number;
   tableCount: number;
+};
+
+type IndexingJobSettledEvent = {
+  source: IndexingJobSource;
+  request: {
+    kind: "incremental" | "changedFiles" | "maintenance";
+  };
+  durationMs: number;
+  success: boolean;
 };
 
 type MainProcessRuntimeState = {
@@ -137,6 +147,25 @@ function isPathWithinOptionalRoot(
   return typeof rootPath === "string" && rootPath.length > 0
     ? isPathWithinRoot(candidatePath, rootPath)
     : false;
+}
+
+function shouldBackfillAfterIndexingJob(event: IndexingJobSettledEvent): boolean {
+  if (!event.success || event.request.kind !== "incremental") {
+    return false;
+  }
+  switch (event.source) {
+    case "startup_incremental":
+    case "manual_incremental":
+    case "manual_force_reindex":
+    case "manual_project_force_reindex":
+    case "watch_initial_scan":
+    case "watch_fallback_incremental":
+      return true;
+    case "watch_targeted":
+      return false;
+    default:
+      return false;
+  }
 }
 
 async function disposeRuntimeState(state: MainProcessRuntimeState | null): Promise<void> {
@@ -208,7 +237,28 @@ export async function bootstrapMainProcess(
     getRemoveMissingSessionsDuringIncrementalIndexing,
     getSystemMessageRegexRules: () =>
       options.appStateStore?.getPaneState()?.systemMessageRegexRules,
-    onJobSettled: (event) => watchStatsStore.recordJobSettled(event),
+    onJobSettled: (event) => {
+      watchStatsStore.recordJobSettled(event);
+      if (!shouldBackfillAfterIndexingJob(event)) {
+        return;
+      }
+      void queueWatcherTransition(async () => {
+        await liveSessionStoreSync.catch(() => undefined);
+        if (!runtime.liveSessionStore || !runtime.fileWatcher || !isLiveWatchEnabled()) {
+          return;
+        }
+        await runtime.liveSessionStore.backfillRecentSessionsAfterIndexing();
+      }).catch((error: unknown) => {
+        if (options.onBackgroundError) {
+          options.onBackgroundError("post-index live backfill failed", error, {
+            source: event.source,
+            requestKind: event.request.kind,
+          });
+          return;
+        }
+        console.error("[codetrail] post-index live backfill failed", error);
+      });
+    },
     ...(options.onIndexingFileIssue ? { onFileIssue: options.onIndexingFileIssue } : {}),
     ...(options.onIndexingNotice ? { onNotice: options.onIndexingNotice } : {}),
   });
@@ -396,6 +446,9 @@ export async function bootstrapMainProcess(
         async (batch: FileWatcherBatch) => {
           invalidateAllowedRootsCache();
           const changedPaths = [...new Set(batch.changedPaths)];
+          if (batch.requiresFullScan) {
+            runtime.liveSessionStore?.noteStructuralInvalidation();
+          }
           const liveChangedPaths = filterPotentialLiveTranscriptPaths(
             changedPaths,
             getEffectiveDiscoveryConfig(),

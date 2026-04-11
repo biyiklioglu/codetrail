@@ -107,7 +107,7 @@ export type IndexingRunnerDependencies = {
     request: QueuedJobRequest;
     durationMs: number;
     success: boolean;
-  }) => void;
+  }) => void | Promise<void>;
 };
 
 type IndexingWorkerRuntimeOptions = {
@@ -147,7 +147,7 @@ export class WorkerIndexingRunner {
         request: QueuedJobRequest;
         durationMs: number;
         success: boolean;
-      }) => void)
+      }) => void | Promise<void>)
     | undefined;
   private pendingJobs = 0;
   private completedJobs = 0;
@@ -337,14 +337,14 @@ export class WorkerIndexingRunner {
         } finally {
           bookmarkStore.close();
         }
-        this.onJobSettled?.({
+        this.notifyJobSettled({
           source,
           request,
           durationMs: Date.now() - startedAt,
           success: true,
         });
       } catch (error) {
-        this.onJobSettled?.({
+        this.notifyJobSettled({
           source,
           request,
           durationMs: Date.now() - startedAt,
@@ -371,6 +371,22 @@ export class WorkerIndexingRunner {
       activeJobId: this.activeJobId,
       completedJobs: this.completedJobs,
     };
+  }
+
+  private notifyJobSettled(event: {
+    source: IndexingJobSource;
+    request: QueuedJobRequest;
+    durationMs: number;
+    success: boolean;
+  }): void {
+    if (!this.onJobSettled) {
+      return;
+    }
+    try {
+      void Promise.resolve(this.onJobSettled(event)).catch(() => undefined);
+    } catch {
+      // Job-settlement hooks are best-effort and must not block or fail the indexing queue.
+    }
   }
 }
 
