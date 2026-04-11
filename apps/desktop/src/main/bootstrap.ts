@@ -43,8 +43,8 @@ import {
   FileWatcherService,
 } from "./fileWatcherService";
 import { exportHistoryMessages } from "./historyExport";
-import { WorkerIndexingRunner } from "./indexingRunner";
 import type { IndexingJobSource } from "./indexingJobSource";
+import { WorkerIndexingRunner } from "./indexingRunner";
 import { registerIpcHandlers } from "./ipc";
 import { appendLiveInstrumentationRecord, getLiveUiTraceLogPath } from "./live/liveInstrumentation";
 import { LiveSessionStore } from "./liveSessionStore";

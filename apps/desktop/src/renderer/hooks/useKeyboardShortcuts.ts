@@ -136,10 +136,13 @@ export function useKeyboardShortcuts(args: {
         isHistoryArrowNavigation,
         lastEscapeAtRef,
       };
-      if (event.defaultPrevented) {
+      if (args.overlayOpen) {
         return;
       }
-      if (args.overlayOpen) {
+      if (handlePageNavigationShortcut(context)) {
+        return;
+      }
+      if (event.defaultPrevented) {
         return;
       }
       const handledExpandedCategory = handleHistoryCategoryShortcut({
@@ -611,12 +614,7 @@ function handleHistoryNavigationShortcut(context: ShortcutContext): boolean {
 }
 
 function handlePageNavigationShortcut(context: ShortcutContext): boolean {
-  if (
-    !context.command ||
-    context.shift ||
-    context.event.altKey ||
-    isEditableTarget(context.event.target)
-  ) {
+  if (!context.command || context.shift || context.event.altKey) {
     return false;
   }
   if (context.event.key === "ArrowLeft") {

@@ -700,6 +700,31 @@ describe("useKeyboardShortcuts", () => {
     expect(props.focusNextHistoryMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("routes Cmd+Left and Cmd+Right to history pagination even from a focused input", () => {
+    const props = createProps();
+
+    render(
+      <div>
+        <div className="msg-search">
+          <input id="query-input" className="search-input" />
+        </div>
+        <Harness {...props} />
+      </div>,
+    );
+
+    const input = document.getElementById("query-input");
+    input?.focus();
+    input?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, metaKey: true }),
+    );
+    input?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, metaKey: true }),
+    );
+
+    expect(props.goToPreviousHistoryPage).toHaveBeenCalledTimes(1);
+    expect(props.goToNextHistoryPage).toHaveBeenCalledTimes(1);
+  });
+
   it("cycles pane focus with Tab and routes plain Up/Down on focused project and session panes", () => {
     const props = createProps({ activeHistoryPane: "project", lastHistoryPane: "project" });
 

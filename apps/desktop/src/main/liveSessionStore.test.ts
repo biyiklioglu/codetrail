@@ -775,7 +775,8 @@ describe("LiveSessionStore", () => {
       consumedStructuralInvalidation: false,
     });
     expect(
-      (store as unknown as { structuralInvalidationPending: boolean }).structuralInvalidationPending,
+      (store as unknown as { structuralInvalidationPending: boolean })
+        .structuralInvalidationPending,
     ).toBe(true);
 
     const secondAttempt = await store.backfillRecentSessionsAfterIndexing();
@@ -785,7 +786,8 @@ describe("LiveSessionStore", () => {
       consumedStructuralInvalidation: true,
     });
     expect(
-      (store as unknown as { structuralInvalidationPending: boolean }).structuralInvalidationPending,
+      (store as unknown as { structuralInvalidationPending: boolean })
+        .structuralInvalidationPending,
     ).toBe(false);
     expect(getSingleSession(store).detailText).toBe("Recovered on retry");
   });

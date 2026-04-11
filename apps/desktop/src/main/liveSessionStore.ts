@@ -425,8 +425,7 @@ export class LiveSessionStore {
   private getRecentLiveProviders(): Array<"claude" | "codex"> {
     return (
       this.discoveryConfig?.enabledProviders?.filter(
-        (provider): provider is "claude" | "codex" =>
-          provider === "claude" || provider === "codex",
+        (provider): provider is "claude" | "codex" => provider === "claude" || provider === "codex",
       ) ?? ["claude", "codex"]
     );
   }

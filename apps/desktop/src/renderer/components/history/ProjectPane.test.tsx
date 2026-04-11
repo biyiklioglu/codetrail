@@ -1118,6 +1118,70 @@ describe("ProjectPane", () => {
     expect(projectRow).toHaveFocus();
   });
 
+  it("ignores modified ArrowLeft on a tree session row", async () => {
+    const user = userEvent.setup();
+
+    renderProjectPane({
+      data: {
+        viewMode: "tree",
+        historyMode: "project_all",
+        sortedProjects: [projects[0]!],
+        treeProjectSessionsByProjectId: {
+          project_1: [
+            createSessionSummary({
+              id: "session_1",
+              projectId: "project_1",
+              title: "Investigate markdown rendering",
+            }),
+          ],
+        },
+      },
+      actions: {
+        onEnsureTreeProjectSessionsLoaded: vi.fn(),
+      },
+    });
+
+    await user.dblClick(screen.getByRole("button", { name: /project one/i }));
+
+    const sessionRow = screen.getByRole("button", { name: /Investigate markdown rendering/i });
+    const projectRow = screen.getByRole("button", { name: /project one/i });
+
+    sessionRow.focus();
+    expect(sessionRow).toHaveFocus();
+    fireEvent.keyDown(sessionRow, { key: "ArrowLeft", metaKey: true });
+
+    expect(sessionRow).toHaveFocus();
+    expect(projectRow).not.toHaveFocus();
+  });
+
+  it("ignores modified ArrowRight on a collapsed tree project row", () => {
+    renderProjectPane({
+      data: {
+        viewMode: "tree",
+        historyMode: "project_all",
+        sortedProjects: [projects[0]!],
+        treeProjectSessionsByProjectId: {
+          project_1: [
+            createSessionSummary({
+              id: "session_1",
+              projectId: "project_1",
+              title: "Investigate markdown rendering",
+            }),
+          ],
+        },
+      },
+      actions: {
+        onEnsureTreeProjectSessionsLoaded: vi.fn(),
+      },
+    });
+
+    const projectRow = screen.getByRole("button", { name: /project one/i });
+
+    fireEvent.keyDown(projectRow, { key: "ArrowRight", metaKey: true });
+
+    expect(screen.queryByRole("button", { name: /Investigate markdown rendering/i })).toBeNull();
+  });
+
   it("hides empty roots in tree mode when the visible project set is filtered", () => {
     renderProjectPane({
       data: {

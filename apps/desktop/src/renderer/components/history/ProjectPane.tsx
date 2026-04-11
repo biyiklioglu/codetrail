@@ -23,6 +23,10 @@ function isTreeRowActionTarget(target: EventTarget | null): boolean {
   );
 }
 
+function isUnmodifiedArrowEvent(event: React.KeyboardEvent<HTMLElement>): boolean {
+  return !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+}
+
 function OverflowAwareLabel({
   text,
   className,
@@ -276,7 +280,7 @@ export function ProjectPane({
           });
         }}
         onKeyDown={(event) => {
-          if (event.key !== "ArrowLeft") {
+          if (event.key !== "ArrowLeft" || !isUnmodifiedArrowEvent(event)) {
             return;
           }
           event.preventDefault();
@@ -401,12 +405,22 @@ export function ProjectPane({
                 }
                 return;
               }
-              if (event.key === "ArrowRight" && hasSessions && !isExpanded) {
+              if (
+                isUnmodifiedArrowEvent(event) &&
+                event.key === "ArrowRight" &&
+                hasSessions &&
+                !isExpanded
+              ) {
                 event.preventDefault();
                 handleToggleProjectExpansion(project.id);
                 return;
               }
-              if (event.key === "ArrowLeft" && hasSessions && isExpanded) {
+              if (
+                isUnmodifiedArrowEvent(event) &&
+                event.key === "ArrowLeft" &&
+                hasSessions &&
+                isExpanded
+              ) {
                 event.preventDefault();
                 handleToggleProjectExpansion(project.id);
               }
@@ -592,12 +606,20 @@ export function ProjectPane({
                         handleToggleFolder(group.id);
                         return;
                       }
-                      if (event.key === "ArrowRight" && !isExpanded) {
+                      if (
+                        isUnmodifiedArrowEvent(event) &&
+                        event.key === "ArrowRight" &&
+                        !isExpanded
+                      ) {
                         event.preventDefault();
                         handleToggleFolder(group.id);
                         return;
                       }
-                      if (event.key === "ArrowLeft" && isExpanded) {
+                      if (
+                        isUnmodifiedArrowEvent(event) &&
+                        event.key === "ArrowLeft" &&
+                        isExpanded
+                      ) {
                         event.preventDefault();
                         handleToggleFolder(group.id);
                       }

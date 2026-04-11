@@ -74,16 +74,14 @@ const {
     removeClaudeHooks: ReturnType<typeof vi.fn>;
   }> = [];
   const workerIndexingRunnerDependencyRef: {
-    current:
-      | {
-          onJobSettled?: (event: {
-            source: string;
-            request: { kind: "incremental" | "changedFiles" | "maintenance" };
-            durationMs: number;
-            success: boolean;
-          }) => void | Promise<void>;
-        }
-      | null;
+    current: {
+      onJobSettled?: (event: {
+        source: string;
+        request: { kind: "incremental" | "changedFiles" | "maintenance" };
+        durationMs: number;
+        success: boolean;
+      }) => void | Promise<void>;
+    } | null;
   } = { current: null };
 
   return {
