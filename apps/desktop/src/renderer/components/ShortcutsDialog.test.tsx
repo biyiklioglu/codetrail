@@ -32,6 +32,26 @@ describe("ShortcutsDialog", () => {
     expect(screen.getByText("Match either term")).toBeInTheDocument();
     expect(screen.getByText("Advanced")).toBeInTheDocument();
     expect(screen.getByText("Focus (solo)")).toBeInTheDocument();
+
+    const turnsViewRow = screen.getByText("Turns view").closest(".help-shortcut-row");
+    expect(turnsViewRow?.textContent).toContain("⌘");
+    expect(turnsViewRow?.textContent).toContain("⇧");
+    expect(turnsViewRow?.textContent).toContain("T");
+
+    const toggleTurnsRow = screen
+      .getByText("Toggle flat / turns view")
+      .closest(".help-shortcut-row");
+    expect(toggleTurnsRow?.textContent).toContain("⌘");
+    expect(toggleTurnsRow?.textContent).toContain("T");
+    expect(toggleTurnsRow?.textContent).not.toContain("⇧");
+
+    const diffRow = screen
+      .getByText("Expand / collapse combined diffs")
+      .closest(".help-shortcut-row");
+    expect(diffRow?.textContent).toContain("⌘");
+    expect(diffRow?.textContent).toContain("D");
+    expect(diffRow?.textContent).toContain("⇧");
+    expect(diffRow?.textContent).toContain("or");
   });
 
   it("renders platform-specific shortcuts from the live registry", () => {

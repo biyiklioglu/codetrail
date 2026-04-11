@@ -144,6 +144,10 @@ export function ShortcutsDialog({
     },
     {
       label: "Turns view",
+      shortcuts: [shortcuts.actions.showTurnsView],
+    },
+    {
+      label: "Toggle flat / turns view",
       shortcuts: [shortcuts.actions.cycleMessagesTurnsView],
     },
     {
@@ -161,6 +165,10 @@ export function ShortcutsDialog({
     {
       label: "Expand / collapse / restore",
       shortcuts: [shortcuts.actions.toggleAllMessagesExpanded],
+    },
+    {
+      label: "Expand / collapse combined diffs",
+      shortcuts: splitShortcutAlternatives(shortcuts.actions.toggleCombinedChangesDiffsExpanded),
     },
   ];
   const refreshRows: ShortcutSectionRow[] = [
@@ -473,6 +481,13 @@ function sortPageTraversalShortcuts(shortcuts: string[]): string[] {
   return [...shortcuts].sort(
     (left, right) => getPageTraversalRank(left) - getPageTraversalRank(right),
   );
+}
+
+function splitShortcutAlternatives(shortcut: string): string[] {
+  return shortcut
+    .split(/\s+\/\s+/u)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
 }
 
 function getPageTraversalRank(shortcut: string): number {
