@@ -738,6 +738,7 @@ function parseCopilotCliEvent(args: ParseProviderEventArgs): ParseProviderEventR
   }
 
   if (eventType === "tool.execution_complete") {
+    const toolCallId = readString(data?.toolCallId);
     const result = asRecord(data?.result);
     const contentString = result ? readString(result.content) : null;
     const resultContent =
@@ -745,7 +746,7 @@ function parseCopilotCliEvent(args: ParseProviderEventArgs): ParseProviderEventR
       (result && Object.keys(result).some((k) => k !== "content") ? serializeUnknown(result) : null);
     if (resultContent && resultContent.length > 0) {
       output.push({
-        id: readString(data?.toolCallId) ?? `${sessionId}:tool_result:${sequence}`,
+        id: toolCallId ? `${toolCallId}:result` : `${sessionId}:tool_result:${sequence}`,
         createdAt,
         category: "tool_result",
         content: resultContent,

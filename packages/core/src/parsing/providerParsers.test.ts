@@ -387,7 +387,34 @@ describe("parseCopilotCliEvent", () => {
     expect(messages).toHaveLength(2);
     expect(messages[0]?.category).toBe("assistant");
     expect(messages[1]?.id).toBe("tool-001");
+    expect(messages[1]?.content).toContain('"id":"tool-001"');
     expect(messages[1]?.content).toContain("read_file");
+  });
+
+  it("uses a distinct tool_result id when a tool call completes", () => {
+    const messages = parse([
+      {
+        type: "assistant.message",
+        data: {
+          messageId: "msg-001",
+          content: "Let me check that file.",
+          toolRequests: [
+            { toolCallId: "tool-001", name: "read_file", arguments: { path: "src/index.ts" } },
+          ],
+        },
+        timestamp: "2024-01-15T10:00:10.000Z",
+      },
+      {
+        type: "tool.execution_complete",
+        data: { toolCallId: "tool-001", result: { content: "File contents here." } },
+        timestamp: "2024-01-15T10:00:11.000Z",
+      },
+    ]);
+
+    expect(messages).toHaveLength(3);
+    expect(messages[1]?.id).toBe("tool-001");
+    expect(messages[2]?.id).toBe("tool-001:result");
+    expect(messages[1]?.id).not.toBe(messages[2]?.id);
   });
 
   it("uses fallback id for assistant.message when messageId is absent", () => {
@@ -413,7 +440,7 @@ describe("parseCopilotCliEvent", () => {
 
     expect(messages).toHaveLength(1);
     expect(messages[0]?.category).toBe("tool_result");
-    expect(messages[0]?.id).toBe("tool-001");
+    expect(messages[0]?.id).toBe("tool-001:result");
     expect(messages[0]?.content).toBe("File contents here.");
   });
 
