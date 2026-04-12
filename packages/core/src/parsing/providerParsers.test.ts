@@ -428,6 +428,41 @@ describe("parseCopilotCliEvent", () => {
     expect(messages).toHaveLength(0);
   });
 
+  it("skips tool.execution_complete when result is an empty object (no spurious '{}' row)", () => {
+    const messages = parse([
+      {
+        type: "tool.execution_complete",
+        data: { toolCallId: "tool-001", result: {} },
+        timestamp: "2024-01-15T10:00:11.000Z",
+      },
+    ]);
+    expect(messages).toHaveLength(0);
+  });
+
+  it("skips tool.execution_complete when result has only an empty content field", () => {
+    const messages = parse([
+      {
+        type: "tool.execution_complete",
+        data: { toolCallId: "tool-001", result: { content: "" } },
+        timestamp: "2024-01-15T10:00:11.000Z",
+      },
+    ]);
+    expect(messages).toHaveLength(0);
+  });
+
+  it("serializes non-content result fields as JSON for tool.execution_complete", () => {
+    const messages = parse([
+      {
+        type: "tool.execution_complete",
+        data: { toolCallId: "tool-001", result: { exitCode: 0 } },
+        timestamp: "2024-01-15T10:00:11.000Z",
+      },
+    ]);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.category).toBe("tool_result");
+    expect(messages[0]?.content).toBe('{"exitCode":0}');
+  });
+
   it("uses fallback id for tool.execution_complete when toolCallId is absent", () => {
     const messages = parse([
       {

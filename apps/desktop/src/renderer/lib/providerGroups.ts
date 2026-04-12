@@ -7,8 +7,9 @@ export const PROVIDER_GROUP_PARENT: Partial<Record<Provider, Provider>> = {
 };
 
 /**
- * Returns all providers in a group (the display parent + its children),
- * filtered to only those present in the given available provider list.
+ * Returns all members of a provider group (the given provider and any of its
+ * children) that are present in the given available provider list.
+ * The given provider itself is included only when it appears in allProviders.
  */
 export function getProviderWithChildren(provider: Provider, allProviders: Provider[]): Provider[] {
   return [provider, ...PROVIDER_VALUES.filter((p) => PROVIDER_GROUP_PARENT[p] === provider)].filter(

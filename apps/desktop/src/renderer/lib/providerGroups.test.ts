@@ -44,7 +44,7 @@ describe("getProviderWithChildren", () => {
     expect(result).toEqual(["claude"]);
   });
 
-  it("returns empty array when provider itself is not available", () => {
+  it("returns only available children when provider itself is not in allProviders", () => {
     const result = getProviderWithChildren("copilot", ["claude", "copilot_cli"]);
     expect(result).toEqual(["copilot_cli"]);
   });
