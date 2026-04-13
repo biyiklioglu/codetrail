@@ -22,7 +22,7 @@ const statsFixture: DashboardStatsResponse = {
     totalDurationMs: 420_000,
     averageMessagesPerSession: 21.3,
     averageSessionDurationMs: 70_000,
-    activeProviderCount: 3,
+    activeProviderCount: 4,
   },
   categoryCounts: {
     user: 20,
@@ -37,6 +37,7 @@ const statsFixture: DashboardStatsResponse = {
     claude: 44,
     codex: 62,
     gemini: 22,
+    opencode: 14,
     cursor: 0,
     copilot: 0,
   },
@@ -70,6 +71,16 @@ const statsFixture: DashboardStatsResponse = {
       tokenInputTotal: 224,
       tokenOutputTotal: 136,
       lastActivity: "2026-03-14T10:05:03.000Z",
+    },
+    {
+      provider: "opencode",
+      projectCount: 1,
+      sessionCount: 1,
+      messageCount: 14,
+      toolCallCount: 3,
+      tokenInputTotal: 192,
+      tokenOutputTotal: 140,
+      lastActivity: "2026-03-16T08:05:03.000Z",
     },
     {
       provider: "cursor",
@@ -187,6 +198,14 @@ const statsFixture: DashboardStatsResponse = {
         writeSessionCount: 0,
       },
       {
+        provider: "opencode",
+        writeEventCount: 1,
+        fileChangeCount: 1,
+        linesAdded: 6,
+        linesDeleted: 0,
+        writeSessionCount: 1,
+      },
+      {
         provider: "cursor",
         writeEventCount: 0,
         fileChangeCount: 0,
@@ -277,6 +296,7 @@ describe("DashboardView", () => {
     expect(screen.getByText("Where the action is")).toBeInTheDocument();
     expect(screen.getByText("Most-used model signatures")).toBeInTheDocument();
     expect(screen.getByText("Code Trail")).toBeInTheDocument();
+    expect(screen.getAllByText("OpenCode").length).toBeGreaterThan(0);
     expect(screen.getByText("src/dashboard.tsx")).toBeInTheDocument();
     expect(screen.getByText(".ts")).toBeInTheDocument();
     expect(screen.getAllByText("codex-gpt-5")).toHaveLength(2);

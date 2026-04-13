@@ -17,6 +17,8 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { buildOpenCodeSessionSourceKey } from "./providers/opencode";
+import { createOpenCodeFixtureDatabase } from "../testing/opencodeFixture";
 import { discoverSingleFile } from "./discoverSessionFiles";
 import type { DiscoveryConfig } from "./types";
 
@@ -29,6 +31,7 @@ function makeConfig(dir: string): DiscoveryConfig {
     geminiProjectsPath: join(dir, ".gemini", "projects.json"),
     cursorRoot: join(dir, ".cursor", "projects"),
     copilotRoot: join(dir, "copilot-workspace"),
+    opencodeRoot: join(dir, ".local", "share", "opencode"),
     includeClaudeSubagents: false,
   };
 }
@@ -126,6 +129,39 @@ describe("discoverSingleFile", () => {
     const discovered = expectDefined(result, "Expected fallback Claude session result");
     expect(discovered.provider).toBe("claude");
     expect(discovered.projectPath).toBe("workspace/myapp");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("discovers an OpenCode session from its synthetic source key", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-single-opencode-"));
+    const config = makeConfig(dir);
+    const { dbPath } = createOpenCodeFixtureDatabase({
+      rootDir: config.opencodeRoot ?? join(dir, ".local", "share", "opencode"),
+      sessions: [
+        {
+          id: "ses-opencode-1",
+          directory: "/workspace/opencode-app",
+          title: "Implement feature",
+          version: "1.4.2",
+          timeCreated: 1_775_765_274_774,
+          timeUpdated: 1_775_766_558_747,
+          messages: [],
+        },
+      ],
+    });
+
+    const sourceKey = buildOpenCodeSessionSourceKey(dbPath, "ses-opencode-1");
+    const result = discoverSingleFile(sourceKey, config);
+
+    const discovered = expectDefined(result, "Expected OpenCode session result");
+    expect(discovered.provider).toBe("opencode");
+    expect(discovered.filePath).toBe(sourceKey);
+    expect(discovered.backingFilePath).toBe(dbPath);
+    expect(discovered.sourceSessionId).toBe("ses-opencode-1");
+    expect(discovered.projectPath).toBe("/workspace/opencode-app");
+    expect(discovered.metadata.providerClient).toBe("OpenCode");
+    expect(discovered.metadata.providerClientVersion).toBe("1.4.2");
 
     rmSync(dir, { recursive: true, force: true });
   });

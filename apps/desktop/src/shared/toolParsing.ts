@@ -91,19 +91,24 @@ export function parseToolEditPayload(text: string): ParsedToolEditPayload | null
   const args = asObject(parsed.args);
   const payload = input ?? args ?? parsed;
   const filePath =
+    asNonEmptyString(payload.filePath) ??
     asNonEmptyString(payload.file_path) ??
     asNonEmptyString(payload.path) ??
     asNonEmptyString(payload.file) ??
+    asNonEmptyString(parsed.filePath) ??
     asNonEmptyString(parsed.file_path) ??
     asNonEmptyString(parsed.path) ??
     null;
   const oldText =
+    asString(payload.oldString) ??
     asString(payload.old_string) ??
     asString(payload.oldText) ??
     asString(payload.before) ??
+    asString(parsed.oldString) ??
     asString(parsed.old_string) ??
     null;
   const newText =
+    asString(payload.newString) ??
     asString(payload.new_string) ??
     asString(payload.newText) ??
     asString(payload.after) ??
@@ -111,6 +116,7 @@ export function parseToolEditPayload(text: string): ParsedToolEditPayload | null
     asString(payload.text) ??
     asString(payload.write_content) ??
     asString(payload.new_content) ??
+    asString(parsed.newString) ??
     asString(parsed.new_string) ??
     null;
   const diff =

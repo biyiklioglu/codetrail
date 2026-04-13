@@ -19,6 +19,7 @@ export type DiscoveredSessionFile = {
   sessionIdentity: string;
   sourceSessionId: string;
   filePath: string;
+  backingFilePath?: string | null;
   fileSize: number;
   fileMtimeMs: number;
   metadata: {
@@ -54,6 +55,7 @@ export type DiscoveryConfig = {
   geminiProjectsPath?: string;
   cursorRoot: string;
   copilotRoot: string;
+  opencodeRoot: string;
   includeClaudeSubagents: boolean;
   enabledProviders?: Provider[];
 };

@@ -228,6 +228,112 @@ describe("parseProviderPayload (Copilot)", () => {
   });
 });
 
+describe("parseProviderPayload (OpenCode)", () => {
+  it("maps text, reasoning, tool usage, edits, and results into canonical categories", () => {
+    const diagnostics: ParserDiagnostic[] = [];
+
+    const messages = parseProviderPayload({
+      provider: "opencode",
+      sessionId: "opencode-test",
+      diagnostics,
+      payload: {
+        session: { id: "ses-1", directory: "/workspace/opencode" },
+        project: { id: "project-1", worktree: "/workspace/opencode" },
+        messages: [
+          {
+            id: "msg-user-1",
+            timeCreated: 1_775_765_274_798,
+            timeUpdated: 1_775_765_274_798,
+            data: {
+              role: "user",
+              time: { created: 1_775_765_274_798 },
+            },
+            parts: [{ id: "p1", data: { type: "text", text: "Build the feature" } }],
+          },
+          {
+            id: "msg-assistant-1",
+            timeCreated: 1_775_765_274_808,
+            timeUpdated: 1_775_765_279_366,
+            data: {
+              role: "assistant",
+              modelID: "glm-5.1:cloud",
+              tokens: { input: 42, output: 11 },
+              time: { created: 1_775_765_274_808, completed: 1_775_765_279_366 },
+            },
+            parts: [
+              {
+                id: "p2",
+                data: {
+                  type: "reasoning",
+                  text: "I should inspect the files first.",
+                  time: { start: 1_775_765_274_809, end: 1_775_765_274_900 },
+                },
+              },
+              {
+                id: "p3",
+                data: {
+                  type: "tool",
+                  tool: "read",
+                  callID: "call-read-1",
+                  state: {
+                    status: "completed",
+                    input: { filePath: "/workspace/opencode/README.md" },
+                    output: "README contents",
+                    time: { start: 1_775_765_274_901, end: 1_775_765_275_000 },
+                  },
+                },
+              },
+              {
+                id: "p4",
+                data: {
+                  type: "tool",
+                  tool: "write",
+                  callID: "call-write-1",
+                  state: {
+                    status: "completed",
+                    input: {
+                      filePath: "/workspace/opencode/src/app.ts",
+                      content: "console.log('hello')",
+                    },
+                    output: "Wrote file successfully.",
+                    time: { start: 1_775_765_275_001, end: 1_775_765_275_100 },
+                  },
+                },
+              },
+              {
+                id: "p5",
+                data: {
+                  type: "text",
+                  text: "Implemented the change.",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(messages.map((message) => message.category)).toEqual([
+      "user",
+      "thinking",
+      "tool_use",
+      "tool_result",
+      "tool_edit",
+      "tool_result",
+      "assistant",
+    ]);
+    expect(messages[0]?.content).toBe("Build the feature");
+    expect(messages[2]?.content).toContain("\"name\":\"read\"");
+    expect(messages[4]?.content).toContain("\"name\":\"write\"");
+    expect(messages[4]?.content).toContain("\"filePath\":\"/workspace/opencode/src/app.ts\"");
+    expect(messages[6]?.content).toBe("Implemented the change.");
+    expect(messages[1]?.operationDurationSource).toBe("native");
+    expect(messages[6]?.tokenInput).toBeNull();
+    expect(messages[1]?.tokenInput).toBe(42);
+    expect(messages[1]?.tokenOutput).toBe(11);
+  });
+});
+
 describe("parseProviderPayload (Codex tool classification)", () => {
   it("keeps write_stdin as tool_use", () => {
     const diagnostics: ParserDiagnostic[] = [];

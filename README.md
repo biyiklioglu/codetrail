@@ -181,6 +181,7 @@ Code Trail reads session files from the default provider directories:
 | Gemini CLI | `~/.gemini/tmp/` and `~/.gemini/history/` |
 | Cursor | `~/.cursor/projects/` |
 | VS Code Copilot | `.../Code/User/workspaceStorage/*/chatSessions/` |
+| OpenCode | `~/.local/share/opencode/opencode.db` |
 
 Each session file is parsed into a canonical message format, indexed into a local SQLite database with FTS5 for full-text search, and made available through the UI. The database and settings are stored in the Electron `userData` directory, typically `~/Library/Application Support/Code Trail/` on macOS or `%APPDATA%\Code Trail\` on Windows.
 

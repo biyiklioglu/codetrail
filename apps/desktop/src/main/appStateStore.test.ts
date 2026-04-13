@@ -104,6 +104,7 @@ describe("AppStateStore", () => {
         gemini: [],
         cursor: [],
         copilot: [],
+        opencode: [],
       },
     });
     store.setIndexingState({
@@ -160,10 +161,11 @@ describe("AppStateStore", () => {
         gemini: [],
         cursor: [],
         copilot: [],
+        opencode: [],
       },
     });
     expect(reloaded.getIndexingState()).toEqual({
-      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot", "opencode"],
       removeMissingSessionsDuringIncrementalIndexing: true,
     });
     expect(reloaded.getWindowState()).toEqual({
@@ -297,6 +299,40 @@ describe("AppStateStore", () => {
 
     expect(store.getPaneState()).toBeNull();
     expect(store.getWindowState()).toBeNull();
+  });
+
+  it("heals the legacy default provider selection to include opencode", () => {
+    const filePath = "/tmp/codetrail-legacy-enabled-providers-ui-state.json";
+    const fs = createMemoryFs({
+      [filePath]: JSON.stringify({
+        indexing: {
+          enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+        },
+      }),
+    });
+
+    const store = new AppStateStore(filePath, { fs });
+
+    expect(store.getIndexingState()).toEqual({
+      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot", "opencode"],
+    });
+  });
+
+  it("preserves intentional custom enabled-provider selections", () => {
+    const filePath = "/tmp/codetrail-custom-enabled-providers-ui-state.json";
+    const fs = createMemoryFs({
+      [filePath]: JSON.stringify({
+        indexing: {
+          enabledProviders: ["claude", "cursor"],
+        },
+      }),
+    });
+
+    const store = new AppStateStore(filePath, { fs });
+
+    expect(store.getIndexingState()).toEqual({
+      enabledProviders: ["claude", "cursor"],
+    });
   });
 
   it("does not infer indexing config from pane data when indexing is absent", () => {

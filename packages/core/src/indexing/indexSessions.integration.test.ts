@@ -13,8 +13,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { openDatabase } from "../db/bootstrap";
 import type { DiscoveredSessionFile, DiscoveryConfig } from "../discovery";
+import { createOpenCodeFixtureDatabase } from "../testing/opencodeFixture";
 import { makeSessionId } from "./ids";
-import { runIncrementalIndexing } from "./indexSessions";
+import { indexChangedFiles, runIncrementalIndexing } from "./indexSessions";
 
 function createDiscoveryConfig(dir: string): DiscoveryConfig {
   return {
@@ -25,6 +26,7 @@ function createDiscoveryConfig(dir: string): DiscoveryConfig {
     geminiProjectsPath: join(dir, ".gemini", "projects.json"),
     cursorRoot: join(dir, ".cursor", "projects"),
     copilotRoot: join(dir, ".copilot-workspace"),
+    opencodeRoot: join(dir, ".local", "share", "opencode"),
     includeClaudeSubagents: false,
   };
 }
@@ -45,6 +47,7 @@ function makeDiscoveredSessionFile(
     sessionIdentity: overrides.sessionIdentity ?? `${overrides.provider}:session:test`,
     sourceSessionId: overrides.sourceSessionId ?? "session",
     filePath: overrides.filePath,
+    backingFilePath: overrides.backingFilePath ?? overrides.filePath,
     fileSize: overrides.fileSize ?? 1,
     fileMtimeMs: overrides.fileMtimeMs ?? Date.now(),
     metadata: {
@@ -169,6 +172,206 @@ function tombstoneSession(dbPath: string, filePath: string): void {
   db.close();
 }
 
+describe("OpenCode indexing", () => {
+  it("indexes OpenCode sessions, tool calls, and editable file changes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-opencode-index-"));
+    const config = createDiscoveryConfig(dir);
+    const { dbPath: sourceDbPath } = createOpenCodeFixtureDatabase({
+      rootDir: config.opencodeRoot ?? join(dir, ".local", "share", "opencode"),
+      sessions: [
+        {
+          id: "ses-open-1",
+          directory: "/workspace/opencode-app",
+          title: "Implement OpenCode provider",
+          version: "1.4.2",
+          timeCreated: 1_775_765_274_774,
+          timeUpdated: 1_775_766_558_747,
+          messages: [
+            {
+              id: "msg-user-1",
+              timeCreated: 1_775_765_274_798,
+              data: {
+                role: "user",
+                time: { created: 1_775_765_274_798 },
+                model: { providerID: "ollama", modelID: "glm-5.1:cloud" },
+              },
+              parts: [{ type: "text", text: "Build the provider." }],
+            },
+            {
+              id: "msg-assistant-1",
+              timeCreated: 1_775_765_274_808,
+              timeUpdated: 1_775_765_279_366,
+              data: {
+                role: "assistant",
+                providerID: "ollama",
+                modelID: "glm-5.1:cloud",
+                path: { cwd: "/workspace/opencode-app", root: "/" },
+                tokens: { input: 21, output: 13 },
+                time: { created: 1_775_765_274_808, completed: 1_775_765_279_366 },
+              },
+              parts: [
+                { type: "reasoning", text: "I should inspect and then write the file." },
+                {
+                  type: "tool",
+                  tool: "read",
+                  callID: "call-read-1",
+                  state: {
+                    status: "completed",
+                    input: { filePath: "/workspace/opencode-app/README.md" },
+                    output: "README",
+                    time: { start: 1_775_765_274_900, end: 1_775_765_275_000 },
+                  },
+                },
+                {
+                  type: "tool",
+                  tool: "write",
+                  callID: "call-write-1",
+                  state: {
+                    status: "completed",
+                    input: {
+                      filePath: "/workspace/opencode-app/src/index.ts",
+                      content: "console.log('hello')\n",
+                    },
+                    output: "Wrote file successfully.",
+                    time: { start: 1_775_765_275_001, end: 1_775_765_275_050 },
+                  },
+                },
+                { type: "text", text: "Finished the change." },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(sourceDbPath.endsWith("opencode.db")).toBe(true);
+
+    const projectionDbPath = join(dir, "codetrail.sqlite");
+    const result = runIncrementalIndexing({
+      dbPath: projectionDbPath,
+      discoveryConfig: config,
+      enabledProviders: ["opencode"],
+    });
+
+    expect(result.indexedFiles).toBe(1);
+    const db = openDatabase(projectionDbPath);
+    const session = db
+      .prepare(
+        "SELECT provider, title, provider_client, provider_client_version, cwd FROM sessions LIMIT 1",
+      )
+      .get() as
+      | {
+          provider: string;
+          title: string;
+          provider_client: string | null;
+          provider_client_version: string | null;
+          cwd: string | null;
+        }
+      | undefined;
+    const categories = db
+      .prepare("SELECT category, COUNT(*) as count FROM messages GROUP BY category ORDER BY category")
+      .all() as Array<{ category: string; count: number }>;
+    const toolCalls = db
+      .prepare("SELECT tool_name, args_json, result_json FROM tool_calls ORDER BY id")
+      .all() as Array<{ tool_name: string; args_json: string; result_json: string | null }>;
+    const editFiles = db
+      .prepare(
+        "SELECT file_path, change_type, added_line_count, exactness FROM message_tool_edit_files",
+      )
+      .all() as Array<{
+        file_path: string;
+        change_type: string;
+        added_line_count: number;
+        exactness: string;
+      }>;
+    db.close();
+
+    expect(session).toMatchObject({
+      provider: "opencode",
+      provider_client: "OpenCode",
+      provider_client_version: "1.4.2",
+      cwd: "/workspace/opencode-app",
+    });
+    expect(categories.map((row) => row.category)).toEqual([
+      "assistant",
+      "thinking",
+      "tool_edit",
+      "tool_result",
+      "tool_use",
+      "user",
+    ]);
+    expect(toolCalls.some((row) => row.tool_name === "read")).toBe(true);
+    expect(toolCalls.some((row) => row.tool_name === "write")).toBe(true);
+    expect(editFiles).toEqual([
+      expect.objectContaining({
+        file_path: "/workspace/opencode-app/src/index.ts",
+        change_type: "add",
+      }),
+    ]);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("removes deleted OpenCode sessions during changed-db indexing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-opencode-remove-"));
+    const config = createDiscoveryConfig(dir);
+    const { dbPath: sourceDbPath } = createOpenCodeFixtureDatabase({
+      rootDir: config.opencodeRoot ?? join(dir, ".local", "share", "opencode"),
+      sessions: [
+        {
+          id: "ses-open-keep",
+          directory: "/workspace/keep",
+          title: "Keep",
+          timeCreated: 10,
+          timeUpdated: 20,
+          messages: [],
+        },
+        {
+          id: "ses-open-delete",
+          directory: "/workspace/delete",
+          title: "Delete",
+          timeCreated: 30,
+          timeUpdated: 40,
+          messages: [],
+        },
+      ],
+    });
+
+    const projectionDbPath = join(dir, "codetrail.sqlite");
+    runIncrementalIndexing({
+      dbPath: projectionDbPath,
+      discoveryConfig: config,
+      enabledProviders: ["opencode"],
+    });
+
+    const sourceDb = openDatabase(sourceDbPath);
+    sourceDb.prepare("DELETE FROM part WHERE session_id = ?").run("ses-open-delete");
+    sourceDb.prepare("DELETE FROM message WHERE session_id = ?").run("ses-open-delete");
+    sourceDb.prepare("DELETE FROM session WHERE id = ?").run("ses-open-delete");
+    sourceDb.close();
+
+    const changed = indexChangedFiles(
+      {
+        dbPath: projectionDbPath,
+        discoveryConfig: config,
+        enabledProviders: ["opencode"],
+        removeMissingSessionsDuringIncrementalIndexing: true,
+      },
+      [sourceDbPath],
+    );
+    expect(changed.discoveredFiles).toBe(1);
+
+    const db = openDatabase(projectionDbPath);
+    const remainingSessions = db
+      .prepare("SELECT provider_session_id FROM sessions ORDER BY provider_session_id")
+      .all() as Array<{ provider_session_id: string }>;
+    db.close();
+
+    expect(remainingSessions).toEqual([{ provider_session_id: "ses-open-keep" }]);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe("runIncrementalIndexing", () => {
   it("purges disabled providers during incremental indexing", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-enabled-providers-"));
@@ -222,6 +425,7 @@ describe("runIncrementalIndexing", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     };
 
@@ -288,6 +492,7 @@ describe("runIncrementalIndexing", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     };
 
@@ -340,6 +545,7 @@ describe("runIncrementalIndexing", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     };
 
@@ -489,6 +695,7 @@ describe("runIncrementalIndexing", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     };
 
@@ -1809,6 +2016,7 @@ describe("runIncrementalIndexing", () => {
           geminiProjectsPath: join(dir, ".gemini", "projects.json"),
           cursorRoot: join(dir, ".cursor", "projects"),
           copilotRoot: join(dir, ".copilot-workspace"),
+          opencodeRoot: join(dir, ".local", "share", "opencode"),
           includeClaudeSubagents: false,
         },
       },
@@ -2254,6 +2462,7 @@ describe("runIncrementalIndexing", () => {
         geminiProjectsPath: join(dir, ".gemini", "projects.json"),
         cursorRoot: join(dir, ".cursor", "projects"),
         copilotRoot: join(dir, ".copilot-workspace"),
+        opencodeRoot: join(dir, ".local", "share", "opencode"),
         includeClaudeSubagents: false,
       },
     });
@@ -2328,6 +2537,7 @@ describe("runIncrementalIndexing", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     };
 
@@ -2353,6 +2563,9 @@ describe("runIncrementalIndexing", () => {
         claude: [],
         codex: [],
         gemini: [],
+        cursor: [],
+        copilot: [],
+        opencode: [],
       },
     });
 
@@ -2443,6 +2656,7 @@ describe("runIncrementalIndexing", () => {
         geminiProjectsPath: join(dir, ".gemini", "projects.json"),
         cursorRoot,
         copilotRoot: join(dir, ".copilot-workspace"),
+        opencodeRoot: join(dir, ".local", "share", "opencode"),
         includeClaudeSubagents: false,
       },
     });
@@ -2545,6 +2759,7 @@ describe("runIncrementalIndexing", () => {
         geminiProjectsPath: join(dir, ".gemini", "projects.json"),
         cursorRoot,
         copilotRoot: join(dir, ".copilot-workspace"),
+        opencodeRoot: join(dir, ".local", "share", "opencode"),
         includeClaudeSubagents: false,
       },
     });

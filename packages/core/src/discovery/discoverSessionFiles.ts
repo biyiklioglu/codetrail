@@ -138,6 +138,38 @@ export function discoverSingleFile(
   return null;
 }
 
+export function discoverChangedFiles(
+  filePath: string,
+  config: DiscoveryConfig,
+  dependencies: DiscoveryDependencies = {},
+): DiscoveredSessionFile[] {
+  const resolvedDependencies = resolveDiscoveryDependencies(dependencies);
+  const resolvedConfig = resolveDiscoveryConfig(config);
+  const discovered: DiscoveredSessionFile[] = [];
+
+  for (const provider of PROVIDER_ADAPTER_LIST) {
+    if (!resolvedConfig.enabledProviders.includes(provider.id)) {
+      continue;
+    }
+
+    if (provider.discoverChanged) {
+      discovered.push(...provider.discoverChanged(filePath, resolvedConfig, resolvedDependencies));
+      continue;
+    }
+
+    const single = provider.discoverOne(filePath, resolvedConfig, resolvedDependencies);
+    if (single) {
+      discovered.push(single);
+    }
+  }
+
+  const deduped = new Map<string, DiscoveredSessionFile>();
+  for (const item of discovered) {
+    deduped.set(item.filePath, item);
+  }
+  return [...deduped.values()];
+}
+
 export function listDiscoverySettingsPaths(
   config: DiscoveryConfig = DEFAULT_DISCOVERY_CONFIG,
 ): DiscoverySettingsPath[] {

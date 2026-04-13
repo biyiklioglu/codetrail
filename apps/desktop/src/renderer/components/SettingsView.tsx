@@ -172,6 +172,7 @@ const PROVIDER_ICONS: Record<Provider, string> = {
   gemini: "G",
   cursor: "U",
   copilot: "P",
+  opencode: "O",
 };
 
 export function SettingsView({

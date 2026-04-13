@@ -527,6 +527,7 @@ describe("App shell", () => {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            opencode: 0,
           },
           sessions: [
             {
@@ -601,6 +602,7 @@ describe("App shell", () => {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            opencode: 0,
           },
           sessions: [
             {
@@ -665,6 +667,7 @@ describe("App shell", () => {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            opencode: 0,
           },
           sessions: [
             {
@@ -1391,6 +1394,7 @@ describe("App shell", () => {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            opencode: 0,
           },
           sessions: [
             {
@@ -3095,6 +3099,7 @@ describe("App shell", () => {
               gemini: 0,
               cursor: 0,
               copilot: 0,
+              opencode: 0,
             },
             sessions: [],
             claudeHookState: createClaudeHookStateFixture(),
@@ -3109,6 +3114,7 @@ describe("App shell", () => {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            opencode: 0,
           },
           sessions: [
             {
@@ -3210,6 +3216,7 @@ describe("App shell", () => {
               gemini: 0,
               cursor: 0,
               copilot: 0,
+              opencode: 0,
             },
             sessions: [],
             claudeHookState: createClaudeHookStateFixture(),
@@ -3224,6 +3231,7 @@ describe("App shell", () => {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            opencode: 0,
           },
           sessions: [
             {

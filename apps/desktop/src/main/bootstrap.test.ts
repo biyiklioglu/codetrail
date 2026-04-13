@@ -104,6 +104,9 @@ const {
           claude: ["^<command-name>"],
           codex: ["^<environment_context>"],
           gemini: [],
+          cursor: [],
+          copilot: [],
+          opencode: [],
         }
       );
     }),
@@ -241,6 +244,7 @@ const {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            opencode: 0,
           },
           sessions: [],
           claudeHookState: {
@@ -291,6 +295,7 @@ vi.mock("@codetrail/core", async () => {
       geminiProjectsPath: null,
       cursorRoot: "/cursor/root",
       copilotRoot: "/copilot/root",
+      opencodeRoot: "/opencode/root",
       includeClaudeSubagents: false,
     },
     initializeDatabase: mockInitializeDatabase,
@@ -475,6 +480,7 @@ describe("bootstrapMainProcess", () => {
       gemini: [],
       cursor: [],
       copilot: [],
+      opencode: [],
     },
   };
 
@@ -939,6 +945,7 @@ describe("bootstrapMainProcess", () => {
         gemini: [],
         cursor: [],
         copilot: [],
+        opencode: [],
       },
     });
     expect(getRequiredHandler(handlers, "indexer:getConfig")({})).toEqual({

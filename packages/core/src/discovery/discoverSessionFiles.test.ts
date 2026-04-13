@@ -4,7 +4,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { discoverSessionFiles } from "./discoverSessionFiles";
+import { createOpenCodeFixtureDatabase } from "../testing/opencodeFixture";
+import { discoverChangedFiles, discoverSessionFiles } from "./discoverSessionFiles";
 
 describe("discoverSessionFiles", () => {
   it("discovers provider session files with configured parity rules", () => {
@@ -114,6 +115,7 @@ describe("discoverSessionFiles", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: true,
     });
 
@@ -144,6 +146,7 @@ describe("discoverSessionFiles", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });
 
@@ -152,6 +155,56 @@ describe("discoverSessionFiles", () => {
         (file) => file.provider === "claude" && file.metadata.isSubagent,
       ),
     ).toBe(false);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("expands OpenCode database changes into session sources", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-discovery-opencode-"));
+    const opencodeRoot = join(dir, ".local", "share", "opencode");
+    const { dbPath } = createOpenCodeFixtureDatabase({
+      rootDir: opencodeRoot,
+      sessions: [
+        {
+          id: "ses-open-1",
+          directory: "/workspace/opencode-one",
+          title: "Session One",
+          version: "1.4.2",
+          timeCreated: 1_775_765_274_774,
+          timeUpdated: 1_775_766_558_747,
+          messages: [],
+        },
+        {
+          id: "ses-open-2",
+          directory: "/workspace/opencode-two",
+          title: "Session Two",
+          version: "1.4.2",
+          timeCreated: 1_775_765_274_775,
+          timeUpdated: 1_775_766_558_748,
+          messages: [],
+        },
+      ],
+    });
+
+    const discovered = discoverChangedFiles(dbPath, {
+      claudeRoot: join(dir, ".claude", "projects"),
+      codexRoot: join(dir, ".codex", "sessions"),
+      geminiRoot: join(dir, ".gemini", "tmp"),
+      geminiHistoryRoot: join(dir, ".gemini", "history"),
+      geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+      cursorRoot: join(dir, ".cursor", "projects"),
+      copilotRoot: join(dir, ".copilot-workspace"),
+      opencodeRoot,
+      includeClaudeSubagents: false,
+    });
+
+    expect(discovered).toHaveLength(2);
+    expect(discovered.every((file) => file.provider === "opencode")).toBe(true);
+    expect(discovered.map((file) => file.backingFilePath)).toEqual([dbPath, dbPath]);
+    expect(discovered.map((file) => file.sourceSessionId).sort()).toEqual([
+      "ses-open-1",
+      "ses-open-2",
+    ]);
 
     rmSync(dir, { recursive: true, force: true });
   });
@@ -210,6 +263,7 @@ describe("discoverSessionFiles", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot,
       copilotRoot: join(dir, ".copilot-workspace"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });
 
@@ -284,6 +338,7 @@ describe("discoverSessionFiles", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot,
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });
 
@@ -315,6 +370,7 @@ describe("discoverSessionFiles", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, "nonexistent-copilot-root"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });
 
@@ -341,6 +397,7 @@ describe("discoverSessionFiles", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot,
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });
 
@@ -420,6 +477,7 @@ describe("discoverSessionFiles", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, "workspaceStorage"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });
 

@@ -24,6 +24,7 @@ const EMPTY_PROVIDER_COUNTS = {
   gemini: 0,
   cursor: 0,
   copilot: 0,
+  opencode: 0,
 } as const;
 
 function cloneValue<T>(value: T): T {
@@ -131,6 +132,7 @@ function createRendererClient(handlers: Record<string, ChannelHandler>) {
           gemini: 0,
           cursor: 0,
           copilot: 0,
+          opencode: 0,
         },
         providerStats: [
           {

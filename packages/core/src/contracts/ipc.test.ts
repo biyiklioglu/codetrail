@@ -117,6 +117,7 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
         gemini: 0,
         cursor: 0,
         copilot: 0,
+        opencode: 0,
       },
       providerStats: [],
       recentActivity: [],
@@ -347,6 +348,7 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
         gemini: 0,
         cursor: 0,
         copilot: 0,
+        opencode: 0,
       },
       results: [],
     },
@@ -526,6 +528,7 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
         gemini: [],
         cursor: [],
         copilot: [],
+        opencode: [],
       },
     },
     response: { ok: true },
@@ -596,6 +599,7 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
         gemini: 0,
         cursor: 0,
         copilot: 0,
+        opencode: 0,
       },
       sessions: [
         {

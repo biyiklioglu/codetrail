@@ -25,6 +25,7 @@ const EMPTY_PROVIDER_COUNTS = {
   gemini: 0,
   cursor: 0,
   copilot: 0,
+  opencode: 0,
 } as const;
 
 export function resolveLiveStatusPollMs(input: {
