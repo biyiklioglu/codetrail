@@ -39,6 +39,17 @@ export function getDefaultCopilotRoot(
   return join(homeDir, ".config", "Code", "User", "workspaceStorage");
 }
 
+export function getDefaultOpenCodeRoot(
+  platform: DiscoveryPlatform,
+  environment: DiscoveryPlatformEnvironment = {},
+): string {
+  const homeDir = environment.homeDir ?? homedir();
+  if (platform === "win32") {
+    return join(environment.appDataDir ?? join(homeDir, "AppData", "Local"), "opencode");
+  }
+  return join(homeDir, ".local", "share", "opencode");
+}
+
 export function createDefaultDiscoveryConfig(
   platform: DiscoveryPlatform,
   environment: DiscoveryPlatformEnvironment = {},
@@ -52,6 +63,7 @@ export function createDefaultDiscoveryConfig(
     geminiProjectsPath: join(homeDir, ".gemini", "projects.json"),
     cursorRoot: join(homeDir, ".cursor", "projects"),
     copilotRoot: getDefaultCopilotRoot(platform, environment),
+    opencodeRoot: getDefaultOpenCodeRoot(platform, environment),
     includeClaudeSubagents: false,
     enabledProviders: [...PROVIDER_VALUES],
   };

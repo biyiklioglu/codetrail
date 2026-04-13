@@ -17,7 +17,7 @@ export function aggregateTurnCombinedFiles(messages: TurnCombinedMessage[]): Tur
   const grouped = groupEditsByFile(
     [
       ...collectClaudeTurnEdits(messages),
-      ...collectRawTurnEdits(messages, { providers: ["codex", "gemini", "cursor"] }),
+      ...collectRawTurnEdits(messages, { providers: ["codex", "gemini", "cursor", "opencode"] }),
       ...collectRawTurnEdits(messages, {
         providers: ["copilot"],
         allowTouchedFileFallback: true,

@@ -5,6 +5,7 @@ import { codexAdapter } from "./adapters/codex";
 import { copilotAdapter } from "./adapters/copilot";
 import { cursorAdapter } from "./adapters/cursor";
 import { geminiAdapter } from "./adapters/gemini";
+import { opencodeAdapter } from "./adapters/opencode";
 import type { ProviderAdapter } from "./types";
 
 export const PROVIDER_ADAPTERS: Record<Provider, ProviderAdapter> = {
@@ -13,6 +14,7 @@ export const PROVIDER_ADAPTERS: Record<Provider, ProviderAdapter> = {
   gemini: geminiAdapter,
   cursor: cursorAdapter,
   copilot: copilotAdapter,
+  opencode: opencodeAdapter,
 };
 
 export const PROVIDER_ADAPTER_LIST: ProviderAdapter[] = PROVIDER_VALUES.map(

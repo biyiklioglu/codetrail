@@ -162,7 +162,8 @@ function providerCountsEqual(
     left.codex === right.codex &&
     left.copilot === right.copilot &&
     left.cursor === right.cursor &&
-    left.gemini === right.gemini
+    left.gemini === right.gemini &&
+    left.opencode === right.opencode
   );
 }
 

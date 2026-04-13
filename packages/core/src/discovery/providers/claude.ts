@@ -111,6 +111,7 @@ export function discoverClaudeFiles(
         sessionIdentity,
         sourceSessionId: sessionIdentity,
         filePath,
+        backingFilePath: filePath,
         fileSize: fileStat.size,
         fileMtimeMs: Math.trunc(fileStat.mtimeMs),
         metadata: {
@@ -185,6 +186,7 @@ export function discoverClaudeFiles(
           sessionIdentity,
           sourceSessionId: parentSessionId,
           filePath,
+          backingFilePath: filePath,
           fileSize: fileStat.size,
           fileMtimeMs: Math.trunc(fileStat.mtimeMs),
           metadata: {
@@ -269,6 +271,7 @@ export function discoverSingleClaudeFile(
     sessionIdentity,
     sourceSessionId: sessionIdentity,
     filePath,
+    backingFilePath: filePath,
     fileSize: fileStat.size,
     fileMtimeMs: Math.trunc(fileStat.mtimeMs),
     metadata: {

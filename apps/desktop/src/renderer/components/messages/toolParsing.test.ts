@@ -62,6 +62,36 @@ describe("toolParsing", () => {
     });
   });
 
+  it("parses OpenCode-native write and edit fields", () => {
+    const payload = parseToolEditPayload(
+      JSON.stringify({
+        name: "write",
+        input: {
+          filePath: "src/opencode.ts",
+          oldString: "const before = 1;\n",
+          newString: "const after = 2;\n",
+        },
+      }),
+    );
+
+    expect(payload).toEqual({
+      filePath: "src/opencode.ts",
+      oldText: "const before = 1;\n",
+      newText: "const after = 2;\n",
+      diff: null,
+      files: [
+        {
+          filePath: "src/opencode.ts",
+          previousFilePath: null,
+          changeType: "update",
+          oldText: "const before = 1;\n",
+          newText: "const after = 2;\n",
+          diff: null,
+        },
+      ],
+    });
+  });
+
   it("converts apply_patch payloads into unified diff and extracts file path", () => {
     const patch = [
       "*** Begin Patch",

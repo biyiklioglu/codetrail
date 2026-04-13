@@ -66,6 +66,11 @@ type CommonProviderAdapter = ProviderMetadata & {
     config: ResolvedDiscoveryConfig,
     dependencies: ResolvedDiscoveryDependencies,
   ) => DiscoveredSessionFile | null;
+  discoverChanged?: (
+    filePath: string,
+    config: ResolvedDiscoveryConfig,
+    dependencies: ResolvedDiscoveryDependencies,
+  ) => DiscoveredSessionFile[];
   sanitizeOversizedJsonlEvent?: (
     event: unknown,
     context: ProviderOversizedJsonlEventContext,
@@ -89,7 +94,10 @@ export type JsonlStreamProviderAdapter = CommonProviderAdapter & {
 
 export type MaterializedJsonProviderAdapter = CommonProviderAdapter & {
   sourceFormat: "materialized_json";
-  readSource: (filePath: string, readFileText: ReadFileText) => ProviderReadSourceResult | null;
+  readSource: (
+    discovered: DiscoveredSessionFile,
+    readFileText: ReadFileText,
+  ) => ProviderReadSourceResult | null;
 };
 
 export type ProviderAdapter = JsonlStreamProviderAdapter | MaterializedJsonProviderAdapter;

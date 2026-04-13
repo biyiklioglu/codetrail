@@ -116,6 +116,13 @@ const AUTO_REFRESH_STRATEGY_VALUES = [
   "scan-5min",
 ] as const;
 const CURRENT_AUTO_REFRESH_STRATEGY_VALUES = ["off", ...AUTO_REFRESH_STRATEGY_VALUES] as const;
+const LEGACY_PRE_OPENCODE_PROVIDER_VALUES = [
+  "claude",
+  "codex",
+  "gemini",
+  "cursor",
+  "copilot",
+] as const satisfies readonly Provider[];
 const DEFAULT_FILE_SYSTEM: AppStateStoreFileSystem = {
   existsSync: (path) => existsSync(path),
   mkdirSync: (path, options) => mkdirSync(path, options),
@@ -502,7 +509,9 @@ function sanitizeIndexingState(value: unknown): IndexingConfigState | null {
   }
 
   const record = value as Record<string, unknown>;
-  const enabledProviders = sanitizeStringArray(record.enabledProviders, PROVIDER_VALUES);
+  const enabledProviders = healLegacyEnabledProviders(
+    sanitizeStringArray(record.enabledProviders, PROVIDER_VALUES),
+  );
   const removeMissingSessionsDuringIncrementalIndexing = sanitizeOptionalBoolean(
     record.removeMissingSessionsDuringIncrementalIndexing,
   );
@@ -516,6 +525,23 @@ function sanitizeIndexingState(value: unknown): IndexingConfigState | null {
       ? {}
       : { removeMissingSessionsDuringIncrementalIndexing }),
   };
+}
+
+function healLegacyEnabledProviders(providers: Provider[] | null): Provider[] | null {
+  if (providers === null) {
+    return null;
+  }
+  if (!matchesLegacyDefaultProviderSelection(providers)) {
+    return providers;
+  }
+  return addMissingProviders(providers);
+}
+
+function matchesLegacyDefaultProviderSelection(providers: readonly Provider[]): boolean {
+  if (providers.length !== LEGACY_PRE_OPENCODE_PROVIDER_VALUES.length) {
+    return false;
+  }
+  return LEGACY_PRE_OPENCODE_PROVIDER_VALUES.every((provider) => providers.includes(provider));
 }
 
 function sanitizeWindowState(value: unknown): WindowState | null {

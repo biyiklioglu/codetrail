@@ -135,6 +135,7 @@ function createBaseProps(): Omit<
         gemini: 0,
         cursor: 0,
         copilot: 0,
+        opencode: 0,
       },
       sessions: [
         {
@@ -308,6 +309,7 @@ function createBaseProps(): Omit<
         gemini: [],
         cursor: [],
         copilot: [],
+        opencode: [],
       },
       onAddSystemMessageRegexRule: vi.fn(),
       onUpdateSystemMessageRegexRule: vi.fn(),
@@ -353,6 +355,9 @@ describe("SettingsView", () => {
     expect(screen.getByText("Storage")).toBeInTheDocument();
     expect(screen.getByText("Discovery Roots")).toBeInTheDocument();
     expect(screen.getByText("System Message Rules")).toBeInTheDocument();
+    expect(screen.getAllByText("OpenCode").length).toBeGreaterThan(0);
+    expect(screen.getByText("OpenCode data root")).toBeInTheDocument();
+    expect(screen.getByTitle("/Users/test/.local/share/opencode")).toBeInTheDocument();
 
     const selects = screen.getAllByRole("combobox");
     expect(selects.length).toBeGreaterThanOrEqual(8);

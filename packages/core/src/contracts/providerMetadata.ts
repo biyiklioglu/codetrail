@@ -9,7 +9,8 @@ export type ProviderDiscoveryPathKey =
   | "geminiHistoryRoot"
   | "geminiProjectsPath"
   | "cursorRoot"
-  | "copilotRoot";
+  | "copilotRoot"
+  | "opencodeRoot";
 
 export type ProviderDiscoveryPathDefinition = {
   key: ProviderDiscoveryPathKey;
@@ -70,6 +71,13 @@ export const PROVIDER_METADATA: Record<Provider, ProviderMetadata> = {
     label: "Copilot",
     sourceFormat: "materialized_json",
     discoveryPaths: [{ key: "copilotRoot", label: "Copilot root", watch: true }],
+    defaultSystemMessageRegexRules: [],
+  },
+  opencode: {
+    id: "opencode",
+    label: "OpenCode",
+    sourceFormat: "materialized_json",
+    discoveryPaths: [{ key: "opencodeRoot", label: "OpenCode data root", watch: true }],
     defaultSystemMessageRegexRules: [],
   },
 };

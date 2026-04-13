@@ -1782,6 +1782,12 @@ body.platform-macos .titlebar-left {
   color: var(--accent-teal);
 }
 
+.tag-opencode,
+.provider-chip.provider-opencode {
+  background: var(--accent-red-dim);
+  color: var(--accent-red);
+}
+
 .tag-codex.active,
 .provider-chip.active.provider-codex {
   background: var(--accent-blue);
@@ -1810,6 +1816,12 @@ body.platform-macos .titlebar-left {
 .tag-copilot.active,
 .provider-chip.active.provider-copilot {
   background: var(--accent-teal);
+  color: #ffffff;
+}
+
+.tag-opencode.active,
+.provider-chip.active.provider-opencode {
+  background: var(--accent-red);
   color: #ffffff;
 }
 
@@ -2369,6 +2381,11 @@ body.platform-macos .titlebar-left {
 .meta-tag.copilot {
   background: var(--accent-teal-dim);
   color: var(--accent-teal);
+}
+
+.meta-tag.opencode {
+  background: var(--accent-red-dim);
+  color: var(--accent-red);
 }
 
 .sessions-count {
@@ -3246,6 +3263,10 @@ button svg *,
 
 .provider-label.provider-copilot {
   color: var(--accent-teal);
+}
+
+.provider-label.provider-opencode {
+  color: var(--accent-red);
 }
 
 .message-header-actions {
@@ -4826,6 +4847,12 @@ mark {
   background: color-mix(in srgb, var(--accent-teal-dim) 56%, var(--bg-elevated));
 }
 
+.search-filter-chip-provider-opencode {
+  color: color-mix(in srgb, var(--accent-red) 88%, var(--text-secondary));
+  border-color: color-mix(in srgb, var(--accent-red) 20%, var(--border));
+  background: color-mix(in srgb, var(--accent-red-dim) 56%, var(--bg-elevated));
+}
+
 .search-filter-chip-provider.is-active {
   color: var(--text-primary);
 }
@@ -4853,6 +4880,11 @@ mark {
 .search-filter-chip-provider-copilot.is-active {
   background: color-mix(in srgb, var(--accent-teal) 18%, var(--bg-surface));
   border-color: color-mix(in srgb, var(--accent-teal) 36%, transparent);
+}
+
+.search-filter-chip-provider-opencode.is-active {
+  background: color-mix(in srgb, var(--accent-red) 18%, var(--bg-surface));
+  border-color: color-mix(in srgb, var(--accent-red) 36%, transparent);
 }
 
 .search-filter-chip-category.is-active.search-filter-chip-category-user {
@@ -4985,6 +5017,10 @@ mark {
   background: var(--accent-teal);
 }
 
+.search-result-card-opencode .search-result-accent {
+  background: var(--accent-red);
+}
+
 .search-result-content {
   flex: 1;
   min-width: 0;
@@ -5034,6 +5070,11 @@ mark {
 .search-result-provider-copilot {
   background: color-mix(in srgb, var(--accent-teal-dim) 82%, transparent);
   color: var(--accent-teal);
+}
+
+.search-result-provider-opencode {
+  background: color-mix(in srgb, var(--accent-red-dim) 82%, transparent);
+  color: var(--accent-red);
 }
 
 .search-result-category-user {
@@ -6007,6 +6048,11 @@ mark {
   --switch-accent-dim: var(--accent-teal-dim);
 }
 
+.settings-switch-opencode {
+  --switch-accent: var(--accent-red);
+  --switch-accent-dim: var(--accent-red-dim);
+}
+
 .settings-switch input {
   position: absolute;
   inset: 0;
@@ -6132,6 +6178,12 @@ mark {
 .settings-provider-row-copilot {
   --provider-accent: var(--accent-teal);
   --provider-accent-dim: var(--accent-teal-dim);
+}
+
+.settings-provider-dot-opencode,
+.settings-provider-row-opencode {
+  --provider-accent: var(--accent-red);
+  --provider-accent-dim: var(--accent-red-dim);
 }
 
 .settings-provider-dot.is-active {
@@ -6362,6 +6414,11 @@ mark {
 .settings-provider-copilot {
   background: var(--accent-teal-dim);
   color: var(--accent-teal);
+}
+
+.settings-provider-opencode {
+  background: var(--accent-red-dim);
+  color: var(--accent-red);
 }
 
 .settings-rule-count {

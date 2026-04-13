@@ -118,6 +118,7 @@ function toDiscoveredCursorFile(
     sessionIdentity,
     sourceSessionId: uuid,
     filePath,
+    backingFilePath: filePath,
     fileSize: fileStat.size,
     fileMtimeMs: Math.trunc(fileStat.mtimeMs),
     metadata: {

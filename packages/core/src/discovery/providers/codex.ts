@@ -42,6 +42,7 @@ function toDiscoveredCodexFile(
     sessionIdentity,
     sourceSessionId,
     filePath,
+    backingFilePath: filePath,
     fileSize: fileStat.size,
     fileMtimeMs: Math.trunc(fileStat.mtimeMs),
     metadata: {
