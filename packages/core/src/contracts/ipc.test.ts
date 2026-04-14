@@ -117,6 +117,7 @@ const channelExamples: Record<IpcChannel, ChannelExample> = {
         gemini: 0,
         cursor: 0,
         copilot: 0,
+        copilot_cli: 0,
       },
       providerStats: [],
       recentActivity: [],

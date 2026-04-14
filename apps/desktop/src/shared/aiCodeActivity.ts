@@ -1,7 +1,7 @@
 import {
+  type ParsedToolEditFile,
   buildUnifiedDiffFromTextPair,
   parseToolEditPayload,
-  type ParsedToolEditFile,
 } from "./toolParsing";
 
 export type ToolEditActivityFile = {

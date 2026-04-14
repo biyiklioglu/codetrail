@@ -19,13 +19,13 @@ import {
   searchMessages,
 } from "@codetrail/core";
 
+import { summarizeStoredToolEditActivity } from "../../shared/aiCodeActivity";
 import {
   type BookmarkStore,
   type StoredBookmark,
   createBookmarkStore,
   resolveBookmarksDbPath,
 } from "./bookmarkStore";
-import { summarizeStoredToolEditActivity } from "../../shared/aiCodeActivity";
 
 type DatabaseHandle = ReturnType<typeof openDatabase>;
 type OpenDatabase = typeof openDatabase;
@@ -475,7 +475,10 @@ function getDashboardStatsWithDatabase(
       }
     );
   });
-  const aiCodeStats = collectDashboardAiCodeStats(db, recentActivity.map((point) => point.date));
+  const aiCodeStats = collectDashboardAiCodeStats(
+    db,
+    recentActivity.map((point) => point.date),
+  );
 
   const topProjectRows = db
     .prepare(

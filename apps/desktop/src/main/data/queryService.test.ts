@@ -481,14 +481,15 @@ describe("queryService in-memory", () => {
       delete: 0,
       move: 0,
     });
-    expect(stats.aiCodeStats.providerStats.find((provider) => provider.provider === "codex"))
-      .toMatchObject({
-        writeEventCount: 1,
-        fileChangeCount: 1,
-        linesAdded: 1,
-        linesDeleted: 0,
-        writeSessionCount: 1,
-      });
+    expect(
+      stats.aiCodeStats.providerStats.find((provider) => provider.provider === "codex"),
+    ).toMatchObject({
+      writeEventCount: 1,
+      fileChangeCount: 1,
+      linesAdded: 1,
+      linesDeleted: 0,
+      writeSessionCount: 1,
+    });
     expect(stats.aiCodeStats.topFiles[0]).toMatchObject({
       filePath: "src/dashboard.tsx",
       writeEventCount: 1,
@@ -743,89 +744,97 @@ describe("queryService in-memory", () => {
       ownsBookmarkStore: false,
     });
 
-    const stats = service.getDashboardStats();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-14T12:00:00.000Z"));
+      const stats = service.getDashboardStats();
 
-    expect(stats.aiCodeStats.summary).toMatchObject({
-      writeEventCount: 5,
-      measurableWriteEventCount: 4,
-      writeSessionCount: 2,
-      fileChangeCount: 6,
-      distinctFilesTouchedCount: 6,
-      linesAdded: 9,
-      linesDeleted: 3,
-      netLines: 6,
-      multiFileWriteCount: 2,
-      averageFilesPerWrite: 1.5,
-    });
-    expect(stats.aiCodeStats.changeTypeCounts).toEqual({
-      add: 2,
-      update: 2,
-      delete: 1,
-      move: 1,
-    });
-    expect(stats.aiCodeStats.providerStats.find((provider) => provider.provider === "codex"))
-      .toMatchObject({
+      expect(stats.aiCodeStats.summary).toMatchObject({
+        writeEventCount: 5,
+        measurableWriteEventCount: 4,
+        writeSessionCount: 2,
+        fileChangeCount: 6,
+        distinctFilesTouchedCount: 6,
+        linesAdded: 9,
+        linesDeleted: 3,
+        netLines: 6,
+        multiFileWriteCount: 2,
+        averageFilesPerWrite: 1.5,
+      });
+      expect(stats.aiCodeStats.changeTypeCounts).toEqual({
+        add: 2,
+        update: 2,
+        delete: 1,
+        move: 1,
+      });
+      expect(
+        stats.aiCodeStats.providerStats.find((provider) => provider.provider === "codex"),
+      ).toMatchObject({
         writeEventCount: 4,
         fileChangeCount: 5,
         linesAdded: 8,
         linesDeleted: 3,
         writeSessionCount: 1,
       });
-    expect(stats.aiCodeStats.providerStats.find((provider) => provider.provider === "claude"))
-      .toMatchObject({
+      expect(
+        stats.aiCodeStats.providerStats.find((provider) => provider.provider === "claude"),
+      ).toMatchObject({
         writeEventCount: 1,
         fileChangeCount: 1,
         linesAdded: 1,
         linesDeleted: 0,
         writeSessionCount: 1,
       });
-    expect(stats.aiCodeStats.topFiles).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          filePath: "src/new.ts",
-          writeEventCount: 1,
-          linesAdded: 2,
+      expect(stats.aiCodeStats.topFiles).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            filePath: "src/new.ts",
+            writeEventCount: 1,
+            linesAdded: 2,
+            linesDeleted: 0,
+          }),
+          expect.objectContaining({
+            filePath: "src/new-name.ts",
+            linesAdded: 1,
+            linesDeleted: 1,
+          }),
+        ]),
+      );
+      expect(stats.aiCodeStats.topFileTypes).toEqual([
+        {
+          label: ".ts",
+          fileChangeCount: 5,
+          linesAdded: 6,
+          linesDeleted: 3,
+        },
+        {
+          label: ".tsx",
+          fileChangeCount: 1,
+          linesAdded: 3,
           linesDeleted: 0,
-        }),
-        expect.objectContaining({
-          filePath: "src/new-name.ts",
-          linesAdded: 1,
-          linesDeleted: 1,
-        }),
-      ]),
-    );
-    expect(stats.aiCodeStats.topFileTypes).toEqual([
-      {
-        label: ".ts",
-        fileChangeCount: 5,
-        linesAdded: 6,
-        linesDeleted: 3,
-      },
-      {
-        label: ".tsx",
-        fileChangeCount: 1,
-        linesAdded: 3,
-        linesDeleted: 0,
-      },
-    ]);
-    expect(stats.aiCodeStats.recentActivity).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          date: "2026-04-02",
-          writeEventCount: 1,
-          fileChangeCount: 2,
-          linesAdded: 4,
-          linesDeleted: 1,
-        }),
-        expect.objectContaining({
-          date: "2026-04-05",
-          writeEventCount: 1,
-          fileChangeCount: 0,
-          linesAdded: 0,
-          linesDeleted: 0,
-        }),
-      ]),
-    );
+        },
+      ]);
+      expect(stats.aiCodeStats.recentActivity).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            date: "2026-04-02",
+            writeEventCount: 1,
+            fileChangeCount: 2,
+            linesAdded: 4,
+            linesDeleted: 1,
+          }),
+          expect.objectContaining({
+            date: "2026-04-05",
+            writeEventCount: 1,
+            fileChangeCount: 0,
+            linesAdded: 0,
+            linesDeleted: 0,
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("serves list/detail/bookmark flows using createQueryServiceFromDb", () => {

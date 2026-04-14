@@ -6207,8 +6207,11 @@ mark {
 }
 
 .settings-provider-row.settings-provider-row-child {
-  padding-left: 32px;
   background: color-mix(in srgb, var(--surface-1) 60%, transparent);
+}
+
+.settings-provider-row.settings-provider-row-child .settings-provider-row-main {
+  margin-left: 12px;
 }
 
 .settings-provider-row.settings-provider-row-child .settings-provider-avatar {
@@ -7975,26 +7978,10 @@ mark {
   --dashboard-redesign-orange: var(--accent-orange);
   --dashboard-redesign-silver: var(--text-secondary);
   --dashboard-redesign-bg: color-mix(in srgb, var(--bg-base) 80%, var(--bg-surface) 20%);
-  --dashboard-redesign-surface: color-mix(
-    in srgb,
-    var(--bg-surface) 84%,
-    var(--bg-elevated) 16%
-  );
-  --dashboard-redesign-card: color-mix(
-    in srgb,
-    var(--bg-surface) 88%,
-    var(--bg-elevated) 12%
-  );
-  --dashboard-redesign-card-hover: color-mix(
-    in srgb,
-    var(--bg-hover) 68%,
-    var(--bg-surface) 32%
-  );
-  --dashboard-redesign-elevated: color-mix(
-    in srgb,
-    var(--bg-elevated) 74%,
-    var(--bg-surface) 26%
-  );
+  --dashboard-redesign-surface: color-mix(in srgb, var(--bg-surface) 84%, var(--bg-elevated) 16%);
+  --dashboard-redesign-card: color-mix(in srgb, var(--bg-surface) 88%, var(--bg-elevated) 12%);
+  --dashboard-redesign-card-hover: color-mix(in srgb, var(--bg-hover) 68%, var(--bg-surface) 32%);
+  --dashboard-redesign-elevated: color-mix(in srgb, var(--bg-elevated) 74%, var(--bg-surface) 26%);
   --dashboard-redesign-border: var(--border);
   --dashboard-redesign-border-strong: var(--border-active);
   --dashboard-redesign-border-accent: color-mix(
@@ -8009,8 +7996,7 @@ mark {
   padding: 20px 24px 40px;
   overflow: auto;
   color: var(--dashboard-redesign-text);
-  background:
-    radial-gradient(
+  background: radial-gradient(
       circle at top left,
       color-mix(in srgb, var(--dashboard-redesign-gold) 8%, transparent),
       transparent 30%
@@ -8076,13 +8062,11 @@ mark {
   overflow: hidden;
   border: 1px solid var(--dashboard-redesign-border);
   border-radius: 18px;
-  background:
-    linear-gradient(
+  background: linear-gradient(
       180deg,
       color-mix(in srgb, var(--dashboard-redesign-card) 94%, var(--bg-surface) 6%),
       color-mix(in srgb, var(--dashboard-redesign-surface) 96%, var(--bg-base) 4%)
-    ),
-    var(--dashboard-redesign-card);
+    ), var(--dashboard-redesign-card);
   box-shadow: 0 18px 40px color-mix(in srgb, var(--text-primary) 10%, transparent);
 }
 
@@ -8094,8 +8078,7 @@ mark {
   gap: 16px;
   padding: 14px 20px;
   border-bottom-color: var(--dashboard-redesign-border-strong);
-  background:
-    radial-gradient(
+  background: radial-gradient(
       circle at top right,
       color-mix(in srgb, var(--dashboard-redesign-gold) 10%, transparent),
       transparent 28%
@@ -8104,20 +8087,8 @@ mark {
       180deg,
       color-mix(in srgb, var(--dashboard-redesign-elevated) 34%, transparent),
       color-mix(in srgb, var(--dashboard-redesign-card) 96%, transparent)
-    ),
-    var(--dashboard-redesign-card);
+    ), var(--dashboard-redesign-card);
   overflow: visible;
-}
-
-.dashboard-redesign-hero::after,
-.dashboard-redesign-stat-card::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto auto 0;
-  width: 100%;
-  height: 1px;
-  background: linear-gradient(90deg, var(--dashboard-redesign-gold), transparent 62%);
-  opacity: 0.5;
 }
 
 .dashboard-redesign-hero-main {
@@ -8220,11 +8191,8 @@ mark {
   background: transparent;
   color: var(--dashboard-redesign-text-secondary);
   cursor: pointer;
-  transition:
-    border-color 0.2s ease,
-    color 0.2s ease,
-    background-color 0.2s ease,
-    transform 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease, transform 0.2s
+    ease;
 }
 
 .dashboard-redesign-refresh:hover {
@@ -8281,13 +8249,11 @@ mark {
   padding: 14px 18px;
   border-radius: 18px;
   border: 1px solid var(--dashboard-redesign-border);
-  background:
-    linear-gradient(
+  background: linear-gradient(
       180deg,
       color-mix(in srgb, var(--dashboard-redesign-card) 96%, var(--bg-surface) 4%),
       color-mix(in srgb, var(--dashboard-redesign-surface) 98%, var(--bg-base) 2%)
-    ),
-    var(--dashboard-redesign-card);
+    ), var(--dashboard-redesign-card);
   transition: border-color 0.25s ease, transform 0.25s ease;
 }
 
@@ -8307,8 +8273,7 @@ mark {
 }
 
 .dashboard-redesign-stat-card-spotlight {
-  background:
-    radial-gradient(
+  background: radial-gradient(
       circle at top right,
       color-mix(in srgb, var(--dashboard-redesign-gold) 12%, transparent),
       transparent 30%
@@ -8317,8 +8282,7 @@ mark {
       180deg,
       color-mix(in srgb, var(--dashboard-redesign-card) 92%, var(--dashboard-redesign-gold) 8%),
       color-mix(in srgb, var(--dashboard-redesign-surface) 96%, var(--bg-base) 4%)
-    ),
-    var(--dashboard-redesign-card);
+    ), var(--dashboard-redesign-card);
 }
 
 .dashboard-redesign-stat-value,
@@ -8613,7 +8577,11 @@ mark {
   margin-top: 8px;
   overflow: hidden;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--dashboard-redesign-bg) 62%, var(--dashboard-redesign-elevated));
+  background: color-mix(
+    in srgb,
+    var(--dashboard-redesign-bg) 62%,
+    var(--dashboard-redesign-elevated)
+  );
 }
 
 .dashboard-redesign-provider-bar-fill {
@@ -8668,9 +8636,8 @@ mark {
   border-radius: 999px;
   display: grid;
   place-items: center;
-  box-shadow:
-    0 0 30px color-mix(in srgb, var(--dashboard-redesign-blue) 8%, transparent),
-    inset 0 0 0 1px var(--dashboard-redesign-border);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--dashboard-redesign-blue) 8%, transparent), inset 0 0
+    0 1px var(--dashboard-redesign-border);
 }
 
 .dashboard-redesign-donut-center {
@@ -8757,7 +8724,11 @@ mark {
   width: 100%;
   min-height: 10px;
   border-radius: 4px 4px 0 0;
-  background: linear-gradient(180deg, var(--dashboard-redesign-cyan), var(--dashboard-redesign-blue));
+  background: linear-gradient(
+    180deg,
+    var(--dashboard-redesign-cyan),
+    var(--dashboard-redesign-blue)
+  );
   transition: height 0.8s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
