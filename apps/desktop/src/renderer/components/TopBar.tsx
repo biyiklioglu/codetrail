@@ -683,29 +683,33 @@ export function TopBar({
           <ToolbarIcon name="search" />
           Search
         </button>
-        <button
-          type="button"
-          className="tb-btn"
-          {...preserveHistoryFocusProps}
-          onClick={onIncrementalRefresh}
-          disabled={indexing}
-          aria-label={indexing ? "Indexing in progress" : "Incremental refresh"}
-          title={
-            indexing
-              ? "Indexing in progress"
-              : formatTooltipLabel("Refresh now", shortcuts.actions.refreshNow)
-          }
-        >
-          <ToolbarIcon name="refresh" />
-          {indexing ? "Indexing..." : "Refresh"}
-        </button>
-        <RefreshStrategyDropdown
-          value={refreshStrategy}
-          onChange={onRefreshStrategyChange}
-          statusLabel={autoRefreshStatusLabel}
-          statusTone={autoRefreshStatusTone}
-          statusTooltip={autoRefreshStatusTooltip}
-        />
+        {mainView !== "dashboard" ? (
+          <>
+            <button
+              type="button"
+              className="tb-btn"
+              {...preserveHistoryFocusProps}
+              onClick={onIncrementalRefresh}
+              disabled={indexing}
+              aria-label={indexing ? "Indexing in progress" : "Incremental refresh"}
+              title={
+                indexing
+                  ? "Indexing in progress"
+                  : formatTooltipLabel("Refresh now", shortcuts.actions.refreshNow)
+              }
+            >
+              <ToolbarIcon name="refresh" />
+              {indexing ? "Indexing..." : "Refresh"}
+            </button>
+            <RefreshStrategyDropdown
+              value={refreshStrategy}
+              onChange={onRefreshStrategyChange}
+              statusLabel={autoRefreshStatusLabel}
+              statusTone={autoRefreshStatusTone}
+              statusTooltip={autoRefreshStatusTooltip}
+            />
+          </>
+        ) : null}
         <button
           type="button"
           className="tb-btn"

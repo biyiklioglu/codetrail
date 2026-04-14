@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 
 import type { DashboardStatsResponse } from "../app/types";
-import { ToolbarIcon } from "../components/ToolbarIcon";
 import { formatCompactInteger, formatInteger } from "../lib/numberFormatting";
 import { compactPath, formatDate, prettyProvider } from "../lib/viewUtils";
 
@@ -127,14 +126,10 @@ function EmptyListState({ copy }: { copy: string }) {
 
 export function DashboardView({
   stats,
-  loading,
   error,
-  onRefresh,
 }: {
   stats: DashboardStatsResponse;
-  loading: boolean;
   error: string | null;
-  onRefresh: () => void;
 }) {
   const messageCategories = useMemo(() => {
     return Object.entries(stats.categoryCounts)
@@ -291,17 +286,6 @@ export function DashboardView({
               {formatInteger(stats.summary.sessionCount)} sessions
             </span>
           </div>
-
-          <button
-            type="button"
-            className="dashboard-redesign-refresh"
-            onClick={onRefresh}
-            aria-label={loading ? "Refreshing dashboard" : "Refresh dashboard"}
-            title={loading ? "Refreshing dashboard" : "Refresh dashboard"}
-          >
-            <ToolbarIcon name="refresh" />
-            {loading ? "Refreshing..." : "Refresh"}
-          </button>
         </div>
       </header>
 
@@ -381,11 +365,15 @@ export function DashboardView({
             </div>
             <div>
               <span>Messages</span>
-              <strong>{runnerUpModel ? formatCompactInteger(runnerUpModel.messageCount) : "0"}</strong>
+              <strong>
+                {runnerUpModel ? formatCompactInteger(runnerUpModel.messageCount) : "0"}
+              </strong>
             </div>
             <div>
               <span>Sessions</span>
-              <strong>{runnerUpModel ? formatCompactInteger(runnerUpModel.sessionCount) : "0"}</strong>
+              <strong>
+                {runnerUpModel ? formatCompactInteger(runnerUpModel.sessionCount) : "0"}
+              </strong>
             </div>
           </div>
         </article>
@@ -443,7 +431,9 @@ export function DashboardView({
                   <p className="dashboard-redesign-panel-kicker">Recent AI edits</p>
                   <h2 className="dashboard-redesign-panel-title">Write Velocity</h2>
                 </div>
-                <span className="dashboard-redesign-badge">Last {stats.activityWindowDays} days</span>
+                <span className="dashboard-redesign-badge">
+                  Last {stats.activityWindowDays} days
+                </span>
               </div>
               <div className="dashboard-redesign-bar-chart">
                 {stats.aiCodeStats.recentActivity.map((point) => {
@@ -491,7 +481,10 @@ export function DashboardView({
                   <span
                     key={item.label}
                     className="dashboard-redesign-inline-segment"
-                    style={{ width: `${Math.max(item.percentage, item.count > 0 ? 3 : 0)}%`, background: item.accent }}
+                    style={{
+                      width: `${Math.max(item.percentage, item.count > 0 ? 3 : 0)}%`,
+                      background: item.accent,
+                    }}
                   />
                 ))}
               </div>
@@ -499,7 +492,9 @@ export function DashboardView({
               <div className="dashboard-redesign-change-grid">
                 {aiChangeProfile.map((item) => (
                   <div key={item.label} className="dashboard-redesign-change-item">
-                    <strong style={{ color: item.accent }}>{formatCompactInteger(item.count)}</strong>
+                    <strong style={{ color: item.accent }}>
+                      {formatCompactInteger(item.count)}
+                    </strong>
                     <span>{item.label}</span>
                     <em>{formatPercentage(item.percentage)}</em>
                   </div>
@@ -524,13 +519,17 @@ export function DashboardView({
                 ) : (
                   aiProviderStats.map((provider) => {
                     const accent =
-                      PROVIDER_ACCENT_BY_ID[provider.provider as keyof typeof PROVIDER_ACCENT_BY_ID] ??
-                      "var(--dashboard-redesign-silver)";
+                      PROVIDER_ACCENT_BY_ID[
+                        provider.provider as keyof typeof PROVIDER_ACCENT_BY_ID
+                      ] ?? "var(--dashboard-redesign-silver)";
                     const width = `${Math.max(8, (provider.fileChangeCount / aiProviderMax) * 100)}%`;
                     return (
                       <div key={provider.provider} className="dashboard-redesign-throughput-card">
                         <div>
-                          <strong className="dashboard-redesign-provider-name" style={{ color: accent }}>
+                          <strong
+                            className="dashboard-redesign-provider-name"
+                            style={{ color: accent }}
+                          >
                             {prettyProvider(provider.provider)}
                           </strong>
                           <p className="dashboard-redesign-muted-copy">
@@ -616,7 +615,6 @@ export function DashboardView({
               </div>
             </article>
           </section>
-
         </>
       )}
 
@@ -646,7 +644,10 @@ export function DashboardView({
                 return (
                   <div key={provider.provider} className="dashboard-redesign-provider-item">
                     <div className="dashboard-redesign-provider-main">
-                      <strong className="dashboard-redesign-provider-name" style={{ color: accent }}>
+                      <strong
+                        className="dashboard-redesign-provider-name"
+                        style={{ color: accent }}
+                      >
                         {prettyProvider(provider.provider)}
                       </strong>
                       <p className="dashboard-redesign-muted-copy">
@@ -657,7 +658,11 @@ export function DashboardView({
                       <div className="dashboard-redesign-provider-bar">
                         <span
                           className="dashboard-redesign-provider-bar-fill"
-                          style={{ width, background: accent, minWidth: provider.messageCount > 0 ? "3px" : undefined }}
+                          style={{
+                            width,
+                            background: accent,
+                            minWidth: provider.messageCount > 0 ? "3px" : undefined,
+                          }}
                         />
                       </div>
                     </div>

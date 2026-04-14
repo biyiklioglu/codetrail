@@ -410,20 +410,12 @@ export function App({
       });
       const shouldReloadSearch =
         source === "manual" || (mainView === "search" && search.hasActiveSearchQuery);
-      const shouldReloadDashboard = mainView === "dashboard";
       await Promise.all([
         historyRefreshPromise,
         shouldReloadSearch ? search.reloadSearch() : Promise.resolve(),
-        shouldReloadDashboard ? dashboard.reloadStats() : Promise.resolve(),
       ]);
     },
-    [
-      dashboard.reloadStats,
-      history.handleRefreshAllData,
-      mainView,
-      search.hasActiveSearchQuery,
-      search.reloadSearch,
-    ],
+    [history.handleRefreshAllData, mainView, search.hasActiveSearchQuery, search.reloadSearch],
   );
   useEffect(() => {
     reloadIndexedDataRef.current = reloadIndexedData;
@@ -1391,12 +1383,7 @@ export function App({
               )
             ) : mainView === "dashboard" ? (
               <section className="pane content-pane" ref={dashboardViewRef} tabIndex={-1}>
-                <DashboardView
-                  stats={dashboard.stats}
-                  loading={dashboard.loading}
-                  error={dashboard.error}
-                  onRefresh={() => void dashboard.reloadStats()}
-                />
+                <DashboardView stats={dashboard.stats} error={dashboard.error} />
               </section>
             ) : mainView === "search" ? (
               <SearchView

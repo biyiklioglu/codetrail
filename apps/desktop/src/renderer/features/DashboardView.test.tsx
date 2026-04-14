@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 
 import { screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { DashboardStatsResponse } from "../app/types";
 import { renderWithPaneFocus } from "../test/renderWithPaneFocus";
@@ -204,20 +203,104 @@ const statsFixture: DashboardStatsResponse = {
       },
     ],
     recentActivity: [
-      { date: "2026-03-03", writeEventCount: 0, fileChangeCount: 0, linesAdded: 0, linesDeleted: 0 },
-      { date: "2026-03-04", writeEventCount: 1, fileChangeCount: 1, linesAdded: 4, linesDeleted: 0 },
-      { date: "2026-03-05", writeEventCount: 0, fileChangeCount: 0, linesAdded: 0, linesDeleted: 0 },
-      { date: "2026-03-06", writeEventCount: 0, fileChangeCount: 0, linesAdded: 0, linesDeleted: 0 },
-      { date: "2026-03-07", writeEventCount: 1, fileChangeCount: 2, linesAdded: 7, linesDeleted: 2 },
-      { date: "2026-03-08", writeEventCount: 0, fileChangeCount: 0, linesAdded: 0, linesDeleted: 0 },
-      { date: "2026-03-09", writeEventCount: 0, fileChangeCount: 0, linesAdded: 0, linesDeleted: 0 },
-      { date: "2026-03-10", writeEventCount: 0, fileChangeCount: 0, linesAdded: 0, linesDeleted: 0 },
-      { date: "2026-03-11", writeEventCount: 1, fileChangeCount: 1, linesAdded: 8, linesDeleted: 3 },
-      { date: "2026-03-12", writeEventCount: 0, fileChangeCount: 0, linesAdded: 0, linesDeleted: 0 },
-      { date: "2026-03-13", writeEventCount: 1, fileChangeCount: 1, linesAdded: 5, linesDeleted: 1 },
-      { date: "2026-03-14", writeEventCount: 0, fileChangeCount: 0, linesAdded: 0, linesDeleted: 0 },
-      { date: "2026-03-15", writeEventCount: 0, fileChangeCount: 0, linesAdded: 0, linesDeleted: 0 },
-      { date: "2026-03-16", writeEventCount: 1, fileChangeCount: 1, linesAdded: 8, linesDeleted: 5 },
+      {
+        date: "2026-03-03",
+        writeEventCount: 0,
+        fileChangeCount: 0,
+        linesAdded: 0,
+        linesDeleted: 0,
+      },
+      {
+        date: "2026-03-04",
+        writeEventCount: 1,
+        fileChangeCount: 1,
+        linesAdded: 4,
+        linesDeleted: 0,
+      },
+      {
+        date: "2026-03-05",
+        writeEventCount: 0,
+        fileChangeCount: 0,
+        linesAdded: 0,
+        linesDeleted: 0,
+      },
+      {
+        date: "2026-03-06",
+        writeEventCount: 0,
+        fileChangeCount: 0,
+        linesAdded: 0,
+        linesDeleted: 0,
+      },
+      {
+        date: "2026-03-07",
+        writeEventCount: 1,
+        fileChangeCount: 2,
+        linesAdded: 7,
+        linesDeleted: 2,
+      },
+      {
+        date: "2026-03-08",
+        writeEventCount: 0,
+        fileChangeCount: 0,
+        linesAdded: 0,
+        linesDeleted: 0,
+      },
+      {
+        date: "2026-03-09",
+        writeEventCount: 0,
+        fileChangeCount: 0,
+        linesAdded: 0,
+        linesDeleted: 0,
+      },
+      {
+        date: "2026-03-10",
+        writeEventCount: 0,
+        fileChangeCount: 0,
+        linesAdded: 0,
+        linesDeleted: 0,
+      },
+      {
+        date: "2026-03-11",
+        writeEventCount: 1,
+        fileChangeCount: 1,
+        linesAdded: 8,
+        linesDeleted: 3,
+      },
+      {
+        date: "2026-03-12",
+        writeEventCount: 0,
+        fileChangeCount: 0,
+        linesAdded: 0,
+        linesDeleted: 0,
+      },
+      {
+        date: "2026-03-13",
+        writeEventCount: 1,
+        fileChangeCount: 1,
+        linesAdded: 5,
+        linesDeleted: 1,
+      },
+      {
+        date: "2026-03-14",
+        writeEventCount: 0,
+        fileChangeCount: 0,
+        linesAdded: 0,
+        linesDeleted: 0,
+      },
+      {
+        date: "2026-03-15",
+        writeEventCount: 0,
+        fileChangeCount: 0,
+        linesAdded: 0,
+        linesDeleted: 0,
+      },
+      {
+        date: "2026-03-16",
+        writeEventCount: 1,
+        fileChangeCount: 1,
+        linesAdded: 8,
+        linesDeleted: 5,
+      },
     ],
     topFiles: [
       {
@@ -255,9 +338,7 @@ const statsFixture: DashboardStatsResponse = {
 
 describe("DashboardView", () => {
   it("renders the main dashboard sections and aggregated values", () => {
-    renderWithPaneFocus(
-      <DashboardView stats={statsFixture} loading={false} error={null} onRefresh={vi.fn()} />,
-    );
+    renderWithPaneFocus(<DashboardView stats={statsFixture} error={null} />);
 
     expect(screen.getByRole("heading", { name: "Activity Dashboard" })).toBeInTheDocument();
     expect(screen.getByText("Workspace telemetry")).toBeInTheDocument();
@@ -280,24 +361,10 @@ describe("DashboardView", () => {
     expect(screen.getByText("Tool Result")).toBeInTheDocument();
   });
 
-  it("forwards refresh clicks and shows dashboard errors", async () => {
-    const user = userEvent.setup();
-    const onRefresh = vi.fn();
-
-    renderWithPaneFocus(
-      <DashboardView
-        stats={statsFixture}
-        loading={false}
-        error="Dashboard failed to load"
-        onRefresh={onRefresh}
-      />,
-    );
+  it("shows dashboard errors", () => {
+    renderWithPaneFocus(<DashboardView stats={statsFixture} error="Dashboard failed to load" />);
 
     expect(screen.getByText("Dashboard failed to load")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Refresh dashboard" }));
-
-    expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
   it("shows an empty state when no ai write activity has been indexed", () => {
@@ -345,9 +412,7 @@ describe("DashboardView", () => {
             },
           },
         }}
-        loading={false}
         error={null}
-        onRefresh={vi.fn()}
       />,
     );
 
