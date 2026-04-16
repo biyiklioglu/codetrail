@@ -387,6 +387,31 @@ describe("AppStateStore", () => {
     });
   });
 
+  it("heals reordered legacy default provider selections", () => {
+    const filePath = "/tmp/codetrail-legacy-indexing-state-reordered.json";
+    const fs = createMemoryFs({
+      [filePath]: JSON.stringify({
+        indexing: {
+          enabledProviders: ["copilot_cli", "claude", "cursor", "codex", "copilot", "gemini"],
+        },
+      }),
+    });
+
+    const store = new AppStateStore(filePath, { fs });
+
+    expect(store.getIndexingState()).toEqual({
+      enabledProviders: [
+        "copilot_cli",
+        "claude",
+        "cursor",
+        "codex",
+        "copilot",
+        "gemini",
+        "opencode",
+      ],
+    });
+  });
+
   it("preserves intentional custom provider subsets", () => {
     const filePath = "/tmp/codetrail-custom-indexing-state.json";
     const fs = createMemoryFs({

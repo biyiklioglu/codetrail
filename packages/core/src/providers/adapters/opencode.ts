@@ -30,13 +30,11 @@ export const opencodeAdapter: ProviderAdapter = {
     for (const entry of asArray(root?.messages)) {
       const record = asRecord(entry);
       const data = asRecord(record?.data);
-      const path = asRecord(data?.path);
       const nestedModel = asRecord(data?.model);
       const model = readString(data?.modelID) ?? readString(nestedModel?.modelID);
       if (model) {
         models.add(model);
       }
-      cwd ??= readString(path?.cwd);
     }
 
     return {

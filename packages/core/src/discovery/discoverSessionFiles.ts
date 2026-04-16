@@ -21,6 +21,7 @@ export type { DiscoveryDependencies, DiscoveryFileSystem } from "./shared";
 export const DEFAULT_DISCOVERY_CONFIG: DiscoveryConfig = {
   ...createDefaultDiscoveryConfig(getCurrentDiscoveryPlatform(), {
     appDataDir: process.env.APPDATA ?? null,
+    localAppDataDir: process.env.LOCALAPPDATA ?? null,
   }),
 };
 

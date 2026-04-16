@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { normalizeOpenCodeDatabasePath } from "./providers/opencode";
 import { createOpenCodeFixtureDatabase } from "../testing/opencodeFixture";
 import { discoverChangedFiles, discoverSessionFiles } from "./discoverSessionFiles";
 
@@ -466,6 +467,7 @@ describe("discoverSessionFiles", () => {
     const opencodeRoot = join(dir, ".local", "share", "opencode");
     const { dbPath } = createOpenCodeFixtureDatabase({
       rootDir: opencodeRoot,
+      projectWorktree: "/workspace/opencode-app",
       sessions: [
         {
           id: "opencode-1",
@@ -478,7 +480,7 @@ describe("discoverSessionFiles", () => {
         {
           id: "opencode-2",
           parentId: "opencode-1",
-          directory: "/workspace/opencode-app",
+          directory: "/workspace/opencode-app/packages/core",
           title: "Forked Session",
           timeCreated: 1_711_000_001_000,
           timeUpdated: 1_711_000_001_500,
@@ -503,6 +505,12 @@ describe("discoverSessionFiles", () => {
     expect(discovered).toHaveLength(2);
     expect(discovered[0]?.backingFilePath).toBe(dbPath);
     expect(discovered[0]?.filePath).toContain(`opencode:${dbPath}:`);
+    expect(
+      discovered.find((file) => file.sourceSessionId === "opencode-2")?.projectPath,
+    ).toBe("/workspace/opencode-app");
+    expect(
+      discovered.find((file) => file.sourceSessionId === "opencode-2")?.metadata.cwd,
+    ).toBe("/workspace/opencode-app/packages/core");
     expect(
       discovered.find((file) => file.sourceSessionId === "opencode-2")?.metadata.sessionKind,
     ).toBe("forked");
@@ -548,5 +556,14 @@ describe("discoverSessionFiles", () => {
     expect(discovered[0]?.backingFilePath).toBe(dbPath);
 
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("matches OpenCode database sidecars case-insensitively on Windows-style paths", () => {
+    expect(
+      normalizeOpenCodeDatabasePath(
+        "c:\\Users\\Test\\AppData\\Local\\opencode\\OPENCODE.DB-WAL",
+        "C:\\Users\\test\\AppData\\Local\\opencode",
+      ),
+    ).toBe("C:\\Users\\test\\AppData\\Local\\opencode/opencode.db");
   });
 });

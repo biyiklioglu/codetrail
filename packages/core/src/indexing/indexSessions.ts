@@ -745,7 +745,7 @@ export function indexChangedFiles(
     // on. This mirrors the full incremental path, just scoped to the changed file set.
     const discoveredPathSet = new Set(discoveredFiles.map((f) => f.filePath));
     const enabledProviderSet = new Set(discoveryConfig.enabledProviders);
-    removeMissingOpenCodeSessionsForChangedPaths({
+    removedFiles += removeMissingOpenCodeSessionsForChangedPaths({
       changedFilePaths,
       discoveredFiles,
       discoveryConfig,
@@ -835,12 +835,13 @@ function removeMissingOpenCodeSessionsForChangedPaths(args: {
   enabledProviderSet: Set<Provider>;
   removeMissingSessionsDuringIncrementalIndexing: boolean;
   projectScope?: ProjectIndexingScope;
-}): void {
+}): number {
   const opencodeRoot = args.discoveryConfig.opencodeRoot;
   if (!opencodeRoot) {
-    return;
+    return 0;
   }
 
+  let removedFiles = 0;
   const discoveredPathSet = new Set(args.discoveredFiles.map((file) => file.filePath));
   for (const changedPath of args.changedFilePaths) {
     const dbPath = normalizeOpenCodeDatabasePath(changedPath, opencodeRoot);
@@ -874,8 +875,10 @@ function removeMissingOpenCodeSessionsForChangedPaths(args: {
       deleteSessionDataForFilePath(args.statements, indexedRow.file_path);
       args.statements.deleteIndexedFileByFilePath.run(indexedRow.file_path);
       args.statements.deleteCheckpointByFilePath.run(indexedRow.file_path);
+      removedFiles += 1;
     }
   }
+  return removedFiles;
 }
 
 function filterDiscoveredFilesByProjectScope(
@@ -1610,6 +1613,7 @@ function indexMaterializedSessionFile(args: {
     args.sessionDbId,
   );
   const modelNames = sourceMeta.models.join(",");
+  const discoveredSessionTitle = readString(args.discovered.metadata.sessionMetadata?.title);
 
   persistMaterializedMessages({
     db: args.db,
@@ -1619,7 +1623,7 @@ function indexMaterializedSessionFile(args: {
     statements: args.statements,
     onNotice: args.onNotice,
     projectId,
-    sessionTitle: preparedMessages.sessionTitle || modelNames,
+    sessionTitle: discoveredSessionTitle || preparedMessages.sessionTitle || modelNames,
     modelNames,
     gitBranch: sourceMeta.gitBranch ?? args.discovered.metadata.gitBranch,
     cwd: sourceMeta.cwd ?? args.discovered.metadata.cwd,

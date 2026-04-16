@@ -8,6 +8,7 @@ export type DiscoveryPlatform = "darwin" | "win32" | "linux";
 export type DiscoveryPlatformEnvironment = {
   homeDir?: string;
   appDataDir?: string | null;
+  localAppDataDir?: string | null;
 };
 
 export function getCurrentDiscoveryPlatform(): DiscoveryPlatform {
@@ -55,7 +56,7 @@ export function createDefaultDiscoveryConfig(
     copilotCliRoot: join(homeDir, ".copilot", "session-state"),
     opencodeRoot:
       platform === "win32"
-        ? join(environment.appDataDir ?? join(homeDir, "AppData", "Local"), "opencode")
+        ? join(environment.localAppDataDir ?? join(homeDir, "AppData", "Local"), "opencode")
         : join(homeDir, ".local", "share", "opencode"),
     includeClaudeSubagents: false,
     enabledProviders: [...PROVIDER_VALUES],

@@ -3897,10 +3897,11 @@ describe("runIncrementalIndexing", () => {
     const db = openDatabase(dbPath);
     try {
       const sessionRow = db
-        .prepare("SELECT provider, file_path, cwd, provider_client FROM sessions")
+        .prepare("SELECT provider, file_path, title, cwd, provider_client FROM sessions")
         .get() as {
         provider: string;
         file_path: string;
+        title: string;
         cwd: string | null;
         provider_client: string | null;
       };
@@ -3923,6 +3924,7 @@ describe("runIncrementalIndexing", () => {
 
       expect(sessionRow.provider).toBe("opencode");
       expect(sessionRow.file_path).toContain("opencode:");
+      expect(sessionRow.title).toBe("OpenCode Session");
       expect(sessionRow.cwd).toBe("/workspace/opencode-app");
       expect(sessionRow.provider_client).toBe("OpenCode");
       expect(toolCallRow.tool_name).toBe("edit");

@@ -1,8 +1,9 @@
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 import Database from "better-sqlite3";
 
 import { compactMetadata } from "../../metadata";
+import { normalizePathForComparison } from "../../pathMatching";
 import { asRecord, readString } from "../../parsing/helpers";
 import type { ProviderReadSourceResult, ProviderSource, ReadFileText } from "../../providers/types";
 import {
@@ -26,6 +27,7 @@ type OpenCodeDiscoveryRow = {
   time_created: number;
   time_updated: number;
   project_name: string | null;
+  project_worktree: string | null;
   payload_bytes: number | null;
 };
 
@@ -109,10 +111,14 @@ export function normalizeOpenCodeDatabasePath(
   opencodeRoot: string,
 ): string | null {
   const dbPath = buildOpenCodeDatabasePath(opencodeRoot);
+  const normalizedChangedPath = normalizePathForComparison(changedPath);
+  if (!normalizedChangedPath) {
+    return null;
+  }
   if (
-    changedPath === dbPath ||
-    changedPath === `${dbPath}-wal` ||
-    changedPath === `${dbPath}-shm`
+    normalizedChangedPath === normalizePathForComparison(dbPath) ||
+    normalizedChangedPath === normalizePathForComparison(`${dbPath}-wal`) ||
+    normalizedChangedPath === normalizePathForComparison(`${dbPath}-shm`)
   ) {
     return dbPath;
   }
@@ -139,6 +145,7 @@ function readDiscoveryRows(
            s.time_created AS time_created,
            s.time_updated AS time_updated,
            p.name AS project_name,
+           p.worktree AS project_worktree,
            COALESCE((SELECT SUM(LENGTH(m.data)) FROM message m WHERE m.session_id = s.id), 0) +
            COALESCE((SELECT SUM(LENGTH(prt.data)) FROM part prt WHERE prt.session_id = s.id), 0) AS payload_bytes
          FROM session s
@@ -156,7 +163,7 @@ function readDiscoveryRows(
 }
 
 function toDiscoveredSession(row: OpenCodeDiscoveryRow, dbPath: string): DiscoveredSessionFile {
-  const projectPath = row.directory || "";
+  const projectPath = row.project_worktree || row.directory || "";
   const unresolvedProject = projectPath.length === 0;
   const filePath = buildOpenCodeSessionSourceKey(dbPath, row.session_id);
 
@@ -164,9 +171,7 @@ function toDiscoveredSession(row: OpenCodeDiscoveryRow, dbPath: string): Discove
     provider: "opencode",
     projectPath,
     canonicalProjectPath: projectPath,
-    projectName: unresolvedProject
-      ? row.project_name || basename(row.directory) || "Unknown"
-      : projectNameFromPath(projectPath),
+    projectName: unresolvedProject ? row.project_name || "Unknown" : projectNameFromPath(projectPath),
     sessionIdentity: providerSessionIdentity("opencode", row.session_id, filePath),
     sourceSessionId: row.session_id,
     filePath,
@@ -192,7 +197,11 @@ function toDiscoveredSession(row: OpenCodeDiscoveryRow, dbPath: string): Discove
       providerSource: null,
       providerClientVersion: row.version || null,
       lineageParentId: row.parent_id,
-      resolutionSource: row.directory ? "session_directory" : "unresolved",
+      resolutionSource: row.project_worktree
+        ? "project_worktree"
+        : row.directory
+          ? "session_directory"
+          : "unresolved",
       projectMetadata: null,
       sessionMetadata: compactMetadata({ title: row.title || undefined }),
     },
@@ -228,11 +237,15 @@ export function discoverSingleOpenCodeFile(
   const parsed = parseOpenCodeSessionSourceKey(filePath);
   const root = getDiscoveryPath(config, "opencode", "opencodeRoot");
   const configuredDbPath = root ? buildOpenCodeDatabasePath(root) : null;
-  if (!parsed || !configuredDbPath || parsed.dbPath !== configuredDbPath) {
+  if (
+    !parsed ||
+    !configuredDbPath ||
+    normalizePathForComparison(parsed.dbPath) !== normalizePathForComparison(configuredDbPath)
+  ) {
     return null;
   }
 
-  return discoverSessionsFromDb(parsed.dbPath, dependencies, parsed.sessionId)[0] ?? null;
+  return discoverSessionsFromDb(configuredDbPath, dependencies, parsed.sessionId)[0] ?? null;
 }
 
 export function discoverChangedOpenCodeFiles(
@@ -240,14 +253,17 @@ export function discoverChangedOpenCodeFiles(
   config: ResolvedDiscoveryConfig,
   dependencies: ResolvedDiscoveryDependencies,
 ): DiscoveredSessionFile[] {
-  const parsed = parseOpenCodeSessionSourceKey(filePath);
-  if (parsed) {
-    return discoverSessionsFromDb(parsed.dbPath, dependencies, parsed.sessionId);
-  }
-
   const root = getDiscoveryPath(config, "opencode", "opencodeRoot");
   if (!root) {
     return [];
+  }
+
+  const parsed = parseOpenCodeSessionSourceKey(filePath);
+  if (parsed) {
+    const configuredDbPath = buildOpenCodeDatabasePath(root);
+    return normalizePathForComparison(parsed.dbPath) === normalizePathForComparison(configuredDbPath)
+      ? discoverSessionsFromDb(configuredDbPath, dependencies, parsed.sessionId)
+      : [];
   }
 
   const dbPath = normalizeOpenCodeDatabasePath(filePath, root);

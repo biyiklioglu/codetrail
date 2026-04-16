@@ -27,6 +27,7 @@ export function createOpenCodeFixtureDatabase(input: {
   rootDir: string;
   projectId?: string;
   projectName?: string | null;
+  projectWorktree?: string;
   sessions: OpenCodeFixtureSession[];
 }): { dbPath: string } {
   mkdirSync(input.rootDir, { recursive: true });
@@ -95,7 +96,7 @@ export function createOpenCodeFixtureDatabase(input: {
     ) VALUES (?, ?, NULL, ?, NULL, NULL, ?, ?, NULL, '[]', NULL)`,
   ).run(
     projectId,
-    input.sessions[0]?.directory ?? "/workspace",
+    input.projectWorktree ?? input.sessions[0]?.directory ?? "/workspace",
     input.projectName ?? null,
     createdAt,
     updatedAt,

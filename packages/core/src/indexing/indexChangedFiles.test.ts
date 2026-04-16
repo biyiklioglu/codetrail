@@ -2,9 +2,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
 
 import { openDatabase } from "../db/bootstrap";
+import { createOpenCodeFixtureDatabase } from "../testing/opencodeFixture";
 import { indexChangedFiles } from "./indexSessions";
 import { runIncrementalIndexing } from "./indexSessions";
 
@@ -478,6 +480,64 @@ describe("indexChangedFiles", () => {
       (dbAfter.prepare("SELECT COUNT(*) as c FROM indexed_files").get() as { c: number }).c,
     ).toBe(1);
     dbAfter.close();
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reports removed OpenCode sessions when pruning a changed database", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-changed-opencode-prune-"));
+    const dbPath = join(dir, "index.db");
+    const opencodeRoot = join(dir, ".local", "share", "opencode");
+    const { dbPath: sourceDbPath } = createOpenCodeFixtureDatabase({
+      rootDir: opencodeRoot,
+      sessions: [
+        {
+          id: "opencode-1",
+          directory: "/workspace/opencode-app",
+          title: "OpenCode Session",
+          timeCreated: 1_711_000_000_000,
+          timeUpdated: 1_711_000_000_500,
+          messages: [],
+        },
+      ],
+    });
+
+    const discoveryConfig = {
+      claudeRoot: join(dir, ".claude", "projects"),
+      codexRoot: join(dir, ".codex", "sessions"),
+      geminiRoot: join(dir, ".gemini", "tmp"),
+      geminiHistoryRoot: join(dir, ".gemini", "history"),
+      geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+      cursorRoot: join(dir, ".cursor", "projects"),
+      copilotRoot: join(dir, ".copilot-workspace"),
+      copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot,
+      includeClaudeSubagents: false,
+    };
+
+    runIncrementalIndexing({ dbPath, discoveryConfig });
+
+    const sourceDb = new Database(sourceDbPath);
+    sourceDb.prepare("DELETE FROM session WHERE id = ?").run("opencode-1");
+    sourceDb.close();
+
+    const result = indexChangedFiles(
+      {
+        dbPath,
+        discoveryConfig,
+        removeMissingSessionsDuringIncrementalIndexing: true,
+      },
+      [join(opencodeRoot, "opencode.db")],
+    );
+    expect(result.removedFiles).toBe(1);
+
+    const indexedDb = openDatabase(dbPath);
+    expect(
+      (indexedDb.prepare("SELECT COUNT(*) as c FROM sessions WHERE provider = 'opencode'").get() as {
+        c: number;
+      }).c,
+    ).toBe(0);
+    indexedDb.close();
 
     rmSync(dir, { recursive: true, force: true });
   });

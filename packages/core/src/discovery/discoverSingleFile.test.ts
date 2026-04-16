@@ -247,10 +247,11 @@ describe("discoverSingleFile", () => {
     const rootDir = config.opencodeRoot;
     const { dbPath } = createOpenCodeFixtureDatabase({
       rootDir,
+      projectWorktree: "/workspace/opencode-app",
       sessions: [
         {
           id: "opencode-1",
-          directory: "/workspace/opencode-app",
+          directory: "/workspace/opencode-app/packages/core",
           title: "OpenCode Session",
           timeCreated: 1_711_000_000_000,
           timeUpdated: 1_711_000_000_500,
@@ -267,6 +268,7 @@ describe("discoverSingleFile", () => {
     expect(discovered.backingFilePath).toBe(dbPath);
     expect(discovered.sourceSessionId).toBe("opencode-1");
     expect(discovered.projectPath).toBe("/workspace/opencode-app");
+    expect(discovered.metadata.cwd).toBe("/workspace/opencode-app/packages/core");
     expect(discovered.metadata.providerClient).toBe("OpenCode");
 
     rmSync(dir, { recursive: true, force: true });
