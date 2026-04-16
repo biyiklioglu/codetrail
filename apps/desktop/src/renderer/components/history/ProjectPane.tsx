@@ -165,7 +165,6 @@ export function ProjectPane({
   const activeProviderCount = projectProviders.filter((provider) =>
     providers.includes(provider),
   ).length;
-  const providerSummary = `${formatInteger(activeProviderCount)} of ${formatInteger(providers.length)}`;
   const visibleProviderDots = providers
     .filter((provider) => projectProviders.includes(provider))
     .slice(0, 4);
@@ -585,24 +584,29 @@ export function ProjectPane({
             onClick={() => setProviderFilterOpen((value) => !value)}
             {...paneFocus.getPreservePaneFocusProps("project")}
           >
-            <span className="project-provider-filter-trigger-main">
-              <span className="project-provider-filter-trigger-label">Providers</span>
-              <span className="project-provider-filter-trigger-count">
-                {formatInteger(activeProviderCount)}
-              </span>
-            </span>
-            <span className="project-provider-filter-stack" aria-hidden>
-              {visibleProviderDots.map((provider) => (
-                <span
-                  key={provider}
-                  className={`project-provider-filter-stack-dot project-provider-filter-stack-dot-${provider}`}
-                />
-              ))}
-              {hiddenProviderDotCount > 0 ? (
-                <span className="project-provider-filter-stack-overflow">
-                  +{hiddenProviderDotCount}
+            <span className="project-provider-filter-trigger-left">
+              <span className="project-provider-filter-trigger-main">
+                <span className="project-provider-filter-trigger-label">Providers</span>
+                <span className="project-provider-filter-trigger-separator" aria-hidden>
+                  •
                 </span>
-              ) : null}
+                <span className="project-provider-filter-trigger-summary">
+                  {formatInteger(activeProviderCount)} of {formatInteger(providers.length)}
+                </span>
+              </span>
+              <span className="project-provider-filter-stack" aria-hidden>
+                {visibleProviderDots.map((provider) => (
+                  <span
+                    key={provider}
+                    className={`project-provider-filter-stack-dot project-provider-filter-stack-dot-${provider}`}
+                  />
+                ))}
+                {hiddenProviderDotCount > 0 ? (
+                  <span className="project-provider-filter-stack-overflow">
+                    +{hiddenProviderDotCount}
+                  </span>
+                ) : null}
+              </span>
             </span>
             <span className="project-provider-filter-trigger-caret" aria-hidden>
               <ToolbarIcon name="chevronDown" />
@@ -676,9 +680,6 @@ export function ProjectPane({
               </button>
             </div>
           </div>
-        </div>
-        <div className="project-provider-filter-summary" aria-live="polite">
-          {providerSummary}
         </div>
       </div>
       <div

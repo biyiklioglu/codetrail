@@ -1736,20 +1736,22 @@ body.platform-macos .titlebar-left {
 .project-provider-filter {
   position: relative;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-start;
   flex-wrap: nowrap;
 }
 
 .project-provider-filter-shell {
   position: relative;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  width: 100%;
 }
 
 .project-provider-filter-trigger {
   display: inline-flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
+  width: 100%;
   min-height: 30px;
   padding: 4px 10px 4px 12px;
   border: 1px solid var(--border);
@@ -1759,6 +1761,13 @@ body.platform-macos .titlebar-left {
   box-shadow: var(--shadow-sm);
   transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, color 0.15s
     ease;
+}
+
+.project-provider-filter-trigger-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .project-provider-filter-trigger:hover,
@@ -1783,17 +1792,19 @@ body.platform-macos .titlebar-left {
   letter-spacing: 0.01em;
 }
 
-.project-provider-filter-trigger-count {
-  min-width: 20px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: var(--history-turn-accent);
-  color: #ffffff;
+.project-provider-filter-trigger-separator,
+.project-provider-filter-trigger-summary {
+  color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.2;
-  text-align: center;
+  font-size: 11px;
+}
+
+.project-provider-filter-trigger-separator {
+  line-height: 1;
+}
+
+.project-provider-filter-trigger-summary {
+  font-weight: 500;
 }
 
 .project-provider-filter-stack {
@@ -1956,14 +1967,6 @@ body.platform-macos .titlebar-left {
   color: var(--text-primary);
 }
 
-.project-provider-filter-summary {
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-align: right;
-  white-space: nowrap;
-}
-
 .project-provider-filter-item-claude {
   --provider-accent: var(--accent-orange);
   --provider-accent-dim: var(--accent-orange-dim);
@@ -2037,11 +2040,6 @@ body.platform-macos .titlebar-left {
 @media (max-width: 760px) {
   .project-provider-filter {
     flex-wrap: wrap;
-  }
-
-  .project-provider-filter-summary {
-    width: 100%;
-    text-align: left;
   }
 }
 
