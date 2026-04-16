@@ -7,6 +7,7 @@ export const providerSchema = z.enum([
   "cursor",
   "copilot",
   "copilot_cli",
+  "opencode",
 ]);
 export type Provider = z.infer<typeof providerSchema>;
 export const PROVIDER_VALUES = providerSchema.options;

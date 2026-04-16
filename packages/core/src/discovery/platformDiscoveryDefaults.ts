@@ -53,6 +53,10 @@ export function createDefaultDiscoveryConfig(
     cursorRoot: join(homeDir, ".cursor", "projects"),
     copilotRoot: getDefaultCopilotRoot(platform, environment),
     copilotCliRoot: join(homeDir, ".copilot", "session-state"),
+    opencodeRoot:
+      platform === "win32"
+        ? join(environment.appDataDir ?? join(homeDir, "AppData", "Local"), "opencode")
+        : join(homeDir, ".local", "share", "opencode"),
     includeClaudeSubagents: false,
     enabledProviders: [...PROVIDER_VALUES],
   };

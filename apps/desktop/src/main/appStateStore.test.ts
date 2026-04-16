@@ -105,10 +105,11 @@ describe("AppStateStore", () => {
         cursor: [],
         copilot: [],
         copilot_cli: [],
+        opencode: [],
       },
     });
     store.setIndexingState({
-      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot", "opencode"],
       removeMissingSessionsDuringIncrementalIndexing: true,
     });
     store.setWindowState({ width: 1440, height: 920, x: 48, y: 72, isMaximized: false });
@@ -162,10 +163,11 @@ describe("AppStateStore", () => {
         cursor: [],
         copilot: [],
         copilot_cli: [],
+        opencode: [],
       },
     });
     expect(reloaded.getIndexingState()).toEqual({
-      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot", "opencode"],
       removeMissingSessionsDuringIncrementalIndexing: true,
     });
     expect(reloaded.getWindowState()).toEqual({
@@ -357,6 +359,48 @@ describe("AppStateStore", () => {
     });
     expect(store.getIndexingState()).toEqual({
       enabledProviders: ["claude"],
+    });
+  });
+
+  it("heals the legacy default provider selection to include OpenCode", () => {
+    const filePath = "/tmp/codetrail-legacy-indexing-state.json";
+    const fs = createMemoryFs({
+      [filePath]: JSON.stringify({
+        indexing: {
+          enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot", "copilot_cli"],
+        },
+      }),
+    });
+
+    const store = new AppStateStore(filePath, { fs });
+
+    expect(store.getIndexingState()).toEqual({
+      enabledProviders: [
+        "claude",
+        "codex",
+        "gemini",
+        "cursor",
+        "copilot",
+        "copilot_cli",
+        "opencode",
+      ],
+    });
+  });
+
+  it("preserves intentional custom provider subsets", () => {
+    const filePath = "/tmp/codetrail-custom-indexing-state.json";
+    const fs = createMemoryFs({
+      [filePath]: JSON.stringify({
+        indexing: {
+          enabledProviders: ["claude", "cursor"],
+        },
+      }),
+    });
+
+    const store = new AppStateStore(filePath, { fs });
+
+    expect(store.getIndexingState()).toEqual({
+      enabledProviders: ["claude", "cursor"],
     });
   });
 

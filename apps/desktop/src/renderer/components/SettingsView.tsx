@@ -174,6 +174,7 @@ const PROVIDER_ICONS: Record<Provider, string> = {
   cursor: "U",
   copilot: "P",
   copilot_cli: ">_",
+  opencode: "O",
 };
 
 export function SettingsView({

@@ -1,3 +1,4 @@
+import type { DiscoveredSessionFile } from "../../discovery/types";
 import type {
   ProviderJsonObject,
   ProviderReadSourceResult,
@@ -7,11 +8,13 @@ import type {
 } from "../types";
 
 export function readMaterializedJsonSource(
-  filePath: string,
+  discovered: DiscoveredSessionFile,
   readFileText: ReadFileText,
 ): ProviderReadSourceResult | null {
   try {
-    const parsed = JSON.parse(readFileText(filePath)) as ProviderJsonObject;
+    const parsed = JSON.parse(
+      readFileText(discovered.backingFilePath ?? discovered.filePath),
+    ) as ProviderJsonObject;
     return {
       payload: parsed,
     };

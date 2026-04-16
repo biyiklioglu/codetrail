@@ -335,6 +335,11 @@ export function getDiscoveryPath(
 ): string | null;
 export function getDiscoveryPath(
   config: ResolvedDiscoveryConfig,
+  provider: "opencode",
+  key: Extract<ProviderDiscoveryPathKey, "opencodeRoot">,
+): string | null;
+export function getDiscoveryPath(
+  config: ResolvedDiscoveryConfig,
   provider: Provider,
   key: ProviderDiscoveryPathKey,
 ): string | null;

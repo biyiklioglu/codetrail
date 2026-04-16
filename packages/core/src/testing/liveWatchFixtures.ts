@@ -37,6 +37,7 @@ export function createLiveStatusFixture(
       cursor: 0,
       copilot: 0,
       copilot_cli: 0,
+      opencode: 0,
     },
     sessions: input.sessions ?? [],
     claudeHookState: input.claudeHookState ?? createClaudeHookStateFixture(),

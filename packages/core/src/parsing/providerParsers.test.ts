@@ -228,6 +228,91 @@ describe("parseProviderPayload (Copilot)", () => {
   });
 });
 
+describe("parseProviderPayload (OpenCode)", () => {
+  it("parses text, reasoning, tool use, tool edits, and tool results", () => {
+    const diagnostics: ParserDiagnostic[] = [];
+
+    const messages = parseProviderPayload({
+      provider: "opencode",
+      sessionId: "opencode-test",
+      payload: {
+        messages: [
+          {
+            id: "msg-user",
+            data: {
+              role: "user",
+              time: { created: 1_711_000_000 },
+            },
+            parts: [{ data: { type: "text", text: "Please update the file." } }],
+          },
+          {
+            id: "msg-assistant",
+            data: {
+              role: "assistant",
+              modelID: "gpt-4.1",
+              inputTokens: 11,
+              outputTokens: 29,
+              time: { created: 1_711_000_001, completed: 1_711_000_004 },
+            },
+            parts: [
+              { data: { type: "reasoning", text: "I should inspect the file first." } },
+              { data: { type: "text", text: "I found the relevant section." } },
+              {
+                data: {
+                  type: "tool",
+                  tool: "read",
+                  callID: "call-read",
+                  state: {
+                    input: { filePath: "src/index.ts" },
+                    output: "const before = 1;",
+                    time: { start: 1_711_000_001.5, end: 1_711_000_002 },
+                  },
+                },
+              },
+              {
+                data: {
+                  type: "tool",
+                  tool: "edit",
+                  callID: "call-edit",
+                  state: {
+                    input: {
+                      filePath: "src/index.ts",
+                      oldString: "const before = 1;",
+                      newString: "const after = 2;",
+                    },
+                    output: "updated",
+                    time: { start: 1_711_000_002, end: 1_711_000_003 },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      diagnostics,
+    });
+
+    expect(messages.map((message) => message.category)).toEqual([
+      "user",
+      "thinking",
+      "assistant",
+      "tool_use",
+      "tool_result",
+      "tool_edit",
+      "tool_result",
+    ]);
+    expect(messages[3]?.content).toContain('"name":"read"');
+    expect(messages[5]?.content).toContain('"name":"edit"');
+    expect(messages[5]?.content).toContain('"filePath":"src/index.ts"');
+    expect(messages[5]?.content).toContain('"oldString":"const before = 1;"');
+    expect(messages[5]?.content).toContain('"newString":"const after = 2;"');
+    expect(messages[5]?.operationDurationMs).toBe(1000);
+    expect(messages[2]?.operationDurationMs).toBe(3000);
+    expect(messages[1]?.tokenInput).toBe(11);
+    expect(messages[1]?.tokenOutput).toBe(29);
+  });
+});
+
 describe("parseProviderPayload (Codex tool classification)", () => {
   it("keeps write_stdin as tool_use", () => {
     const diagnostics: ParserDiagnostic[] = [];

@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { openDatabase } from "../db/bootstrap";
 import type { DiscoveredSessionFile, DiscoveryConfig } from "../discovery";
+import { createOpenCodeFixtureDatabase } from "../testing/opencodeFixture";
 import { makeSessionId } from "./ids";
 import { runIncrementalIndexing } from "./indexSessions";
 
@@ -26,6 +27,7 @@ function createDiscoveryConfig(dir: string): DiscoveryConfig {
     cursorRoot: join(dir, ".cursor", "projects"),
     copilotRoot: join(dir, ".copilot-workspace"),
     copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+    opencodeRoot: join(dir, ".local", "share", "opencode"),
     includeClaudeSubagents: false,
   };
 }
@@ -224,6 +226,7 @@ describe("runIncrementalIndexing", () => {
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
       copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     };
 
@@ -291,6 +294,7 @@ describe("runIncrementalIndexing", () => {
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
       copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     };
 
@@ -344,6 +348,7 @@ describe("runIncrementalIndexing", () => {
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
       copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     };
 
@@ -494,6 +499,7 @@ describe("runIncrementalIndexing", () => {
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
       copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     };
 
@@ -1815,6 +1821,7 @@ describe("runIncrementalIndexing", () => {
           cursorRoot: join(dir, ".cursor", "projects"),
           copilotRoot: join(dir, ".copilot-workspace"),
           copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+          opencodeRoot: join(dir, ".local", "share", "opencode"),
           includeClaudeSubagents: false,
         },
       },
@@ -2261,6 +2268,7 @@ describe("runIncrementalIndexing", () => {
         cursorRoot: join(dir, ".cursor", "projects"),
         copilotRoot: join(dir, ".copilot-workspace"),
         copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+        opencodeRoot: join(dir, ".local", "share", "opencode"),
         includeClaudeSubagents: false,
       },
     });
@@ -2336,6 +2344,7 @@ describe("runIncrementalIndexing", () => {
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
       copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     };
 
@@ -2452,6 +2461,7 @@ describe("runIncrementalIndexing", () => {
         cursorRoot,
         copilotRoot: join(dir, ".copilot-workspace"),
         copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+        opencodeRoot: join(dir, ".local", "share", "opencode"),
         includeClaudeSubagents: false,
       },
     });
@@ -2555,6 +2565,7 @@ describe("runIncrementalIndexing", () => {
         cursorRoot,
         copilotRoot: join(dir, ".copilot-workspace"),
         copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+        opencodeRoot: join(dir, ".local", "share", "opencode"),
         includeClaudeSubagents: false,
       },
     });
@@ -3827,6 +3838,102 @@ describe("runIncrementalIndexing", () => {
       expect(rows[1]?.unified_diff).not.toContain("@@ -1,1 +1,1 @@");
       expect(rows[0]?.exactness).toBe("best_effort");
       expect(rows[1]?.exactness).toBe("best_effort");
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("indexes OpenCode sessions and best-effort tool edit files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-opencode-"));
+    const dbPath = join(dir, "index.db");
+
+    createOpenCodeFixtureDatabase({
+      rootDir: join(dir, ".local", "share", "opencode"),
+      sessions: [
+        {
+          id: "opencode-1",
+          directory: "/workspace/opencode-app",
+          title: "OpenCode Session",
+          timeCreated: 1_711_000_000_000,
+          timeUpdated: 1_711_000_001_000,
+          messages: [
+            {
+              id: "msg-1",
+              timeCreated: 1_711_000_000_000,
+              data: {
+                role: "assistant",
+                modelID: "gpt-4.1",
+                time: { created: 1_711_000_000, completed: 1_711_000_001 },
+              },
+              parts: [
+                {
+                  type: "tool",
+                  tool: "edit",
+                  callID: "call-edit-1",
+                  state: {
+                    input: {
+                      filePath: "/workspace/opencode-app/src/index.ts",
+                      oldString: "const before = 1;\n",
+                      newString: "const after = 2;\n",
+                    },
+                    output: "updated",
+                    time: { start: 1_711_000_000, end: 1_711_000_001 },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig: createDiscoveryConfig(dir),
+    });
+
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    try {
+      const sessionRow = db
+        .prepare("SELECT provider, file_path, cwd, provider_client FROM sessions")
+        .get() as {
+        provider: string;
+        file_path: string;
+        cwd: string | null;
+        provider_client: string | null;
+      };
+      const toolCallRow = db.prepare("SELECT tool_name, args_json FROM tool_calls").get() as {
+        tool_name: string;
+        args_json: string;
+      };
+      const editRow = db
+        .prepare(
+          `SELECT file_path, change_type, exactness, added_line_count, removed_line_count
+           FROM message_tool_edit_files`,
+        )
+        .get() as {
+        file_path: string;
+        change_type: string;
+        exactness: string;
+        added_line_count: number;
+        removed_line_count: number;
+      };
+
+      expect(sessionRow.provider).toBe("opencode");
+      expect(sessionRow.file_path).toContain("opencode:");
+      expect(sessionRow.cwd).toBe("/workspace/opencode-app");
+      expect(sessionRow.provider_client).toBe("OpenCode");
+      expect(toolCallRow.tool_name).toBe("edit");
+      expect(toolCallRow.args_json).toContain('"filePath":"/workspace/opencode-app/src/index.ts"');
+      expect(editRow).toEqual({
+        file_path: "/workspace/opencode-app/src/index.ts",
+        change_type: "update",
+        exactness: "best_effort",
+        added_line_count: 1,
+        removed_line_count: 1,
+      });
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });

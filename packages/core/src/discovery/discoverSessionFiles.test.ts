@@ -4,7 +4,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { discoverSessionFiles } from "./discoverSessionFiles";
+import { createOpenCodeFixtureDatabase } from "../testing/opencodeFixture";
+import { discoverChangedFiles, discoverSessionFiles } from "./discoverSessionFiles";
 
 describe("discoverSessionFiles", () => {
   it("discovers provider session files with configured parity rules", () => {
@@ -115,6 +116,7 @@ describe("discoverSessionFiles", () => {
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
       copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: true,
     });
 
@@ -146,6 +148,7 @@ describe("discoverSessionFiles", () => {
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, ".copilot-workspace"),
       copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });
 
@@ -213,6 +216,7 @@ describe("discoverSessionFiles", () => {
       cursorRoot,
       copilotRoot: join(dir, ".copilot-workspace"),
       copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });
 
@@ -287,6 +291,8 @@ describe("discoverSessionFiles", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot,
+      copilotCliRoot: join(dir, ".copilot", "session-state"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });
 
@@ -319,6 +325,7 @@ describe("discoverSessionFiles", () => {
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, "nonexistent-copilot-root"),
       copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });
 
@@ -345,6 +352,8 @@ describe("discoverSessionFiles", () => {
       geminiProjectsPath: join(dir, ".gemini", "projects.json"),
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot,
+      copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });
 
@@ -425,6 +434,7 @@ describe("discoverSessionFiles", () => {
       cursorRoot: join(dir, ".cursor", "projects"),
       copilotRoot: join(dir, "workspaceStorage"),
       copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot: join(dir, ".local", "share", "opencode"),
       includeClaudeSubagents: false,
     });
 
@@ -447,6 +457,95 @@ describe("discoverSessionFiles", () => {
         (file) => file.provider === "copilot" && file.metadata.providerSessionId === "copilot-1",
       ),
     ).toBe(true);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("discovers OpenCode sessions from opencode.db", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-discovery-opencode-"));
+    const opencodeRoot = join(dir, ".local", "share", "opencode");
+    const { dbPath } = createOpenCodeFixtureDatabase({
+      rootDir: opencodeRoot,
+      sessions: [
+        {
+          id: "opencode-1",
+          directory: "/workspace/opencode-app",
+          title: "OpenCode Session",
+          timeCreated: 1_711_000_000_000,
+          timeUpdated: 1_711_000_000_500,
+          messages: [],
+        },
+        {
+          id: "opencode-2",
+          parentId: "opencode-1",
+          directory: "/workspace/opencode-app",
+          title: "Forked Session",
+          timeCreated: 1_711_000_001_000,
+          timeUpdated: 1_711_000_001_500,
+          messages: [],
+        },
+      ],
+    });
+
+    const discovered = discoverSessionFiles({
+      claudeRoot: join(dir, ".claude", "projects"),
+      codexRoot: join(dir, ".codex", "sessions"),
+      geminiRoot: join(dir, ".gemini", "tmp"),
+      geminiHistoryRoot: join(dir, ".gemini", "history"),
+      geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+      cursorRoot: join(dir, ".cursor", "projects"),
+      copilotRoot: join(dir, ".copilot-workspace"),
+      copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot,
+      includeClaudeSubagents: false,
+    }).filter((file) => file.provider === "opencode");
+
+    expect(discovered).toHaveLength(2);
+    expect(discovered[0]?.backingFilePath).toBe(dbPath);
+    expect(discovered[0]?.filePath).toContain(`opencode:${dbPath}:`);
+    expect(
+      discovered.find((file) => file.sourceSessionId === "opencode-2")?.metadata.sessionKind,
+    ).toBe("forked");
+    expect(
+      discovered.find((file) => file.sourceSessionId === "opencode-2")?.metadata.lineageParentId,
+    ).toBe("opencode-1");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("expands an OpenCode database change into logical session sources", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-discovery-opencode-changed-"));
+    const opencodeRoot = join(dir, ".local", "share", "opencode");
+    const { dbPath } = createOpenCodeFixtureDatabase({
+      rootDir: opencodeRoot,
+      sessions: [
+        {
+          id: "opencode-1",
+          directory: "/workspace/opencode-app",
+          title: "Changed Session",
+          timeCreated: 1_711_000_000_000,
+          timeUpdated: 1_711_000_000_500,
+          messages: [],
+        },
+      ],
+    });
+
+    const discovered = discoverChangedFiles(join(opencodeRoot, "opencode.db-wal"), {
+      claudeRoot: join(dir, ".claude", "projects"),
+      codexRoot: join(dir, ".codex", "sessions"),
+      geminiRoot: join(dir, ".gemini", "tmp"),
+      geminiHistoryRoot: join(dir, ".gemini", "history"),
+      geminiProjectsPath: join(dir, ".gemini", "projects.json"),
+      cursorRoot: join(dir, ".cursor", "projects"),
+      copilotRoot: join(dir, ".copilot-workspace"),
+      copilotCliRoot: join(dir, ".copilot-cli-sessions"),
+      opencodeRoot,
+      includeClaudeSubagents: false,
+    });
+
+    expect(discovered).toHaveLength(1);
+    expect(discovered[0]?.provider).toBe("opencode");
+    expect(discovered[0]?.backingFilePath).toBe(dbPath);
 
     rmSync(dir, { recursive: true, force: true });
   });

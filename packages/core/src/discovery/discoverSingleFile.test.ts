@@ -17,6 +17,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { createOpenCodeFixtureDatabase } from "../testing/opencodeFixture";
 import { discoverSingleFile } from "./discoverSessionFiles";
 import type { DiscoveryConfig } from "./types";
 
@@ -29,6 +30,8 @@ function makeConfig(dir: string): DiscoveryConfig {
     geminiProjectsPath: join(dir, ".gemini", "projects.json"),
     cursorRoot: join(dir, ".cursor", "projects"),
     copilotRoot: join(dir, "copilot-workspace"),
+    copilotCliRoot: join(dir, ".copilot", "session-state"),
+    opencodeRoot: join(dir, ".local", "share", "opencode"),
     includeClaudeSubagents: false,
   };
 }
@@ -234,6 +237,37 @@ describe("discoverSingleFile", () => {
     expect(discovered.sourceSessionId).toBe("codex-1");
     expect(discovered.metadata.cwd).toBe("/workspace/codex");
     expect(discovered.metadata.gitBranch).toBe("dev");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("resolves a synthetic OpenCode session source key", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-single-opencode-"));
+    const config = makeConfig(dir);
+    const rootDir = config.opencodeRoot;
+    const { dbPath } = createOpenCodeFixtureDatabase({
+      rootDir,
+      sessions: [
+        {
+          id: "opencode-1",
+          directory: "/workspace/opencode-app",
+          title: "OpenCode Session",
+          timeCreated: 1_711_000_000_000,
+          timeUpdated: 1_711_000_000_500,
+          messages: [],
+        },
+      ],
+    });
+
+    const result = discoverSingleFile(`opencode:${dbPath}:opencode-1`, config);
+
+    const discovered = expectDefined(result, "Expected OpenCode session result");
+    expect(discovered.provider).toBe("opencode");
+    expect(discovered.filePath).toBe(`opencode:${dbPath}:opencode-1`);
+    expect(discovered.backingFilePath).toBe(dbPath);
+    expect(discovered.sourceSessionId).toBe("opencode-1");
+    expect(discovered.projectPath).toBe("/workspace/opencode-app");
+    expect(discovered.metadata.providerClient).toBe("OpenCode");
 
     rmSync(dir, { recursive: true, force: true });
   });

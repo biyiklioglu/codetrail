@@ -22,6 +22,7 @@ function buildDefaultDiscoveryPaths(homeDir: string): Record<SettingsInfoPathKey
     cursorRoot: `${homeDir}/.cursor/projects`,
     copilotRoot: `${homeDir}/Library/Application Support/Code/User/workspaceStorage`,
     copilotCliRoot: `${homeDir}/.copilot/session-state`,
+    opencodeRoot: `${homeDir}/.local/share/opencode`,
   };
 }
 

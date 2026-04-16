@@ -527,6 +527,8 @@ describe("App shell", () => {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            copilot_cli: 0,
+            opencode: 0,
           },
           sessions: [
             {
@@ -601,6 +603,8 @@ describe("App shell", () => {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            copilot_cli: 0,
+            opencode: 0,
           },
           sessions: [
             {
@@ -665,6 +669,8 @@ describe("App shell", () => {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            copilot_cli: 0,
+            opencode: 0,
           },
           sessions: [
             {
@@ -1391,6 +1397,8 @@ describe("App shell", () => {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            copilot_cli: 0,
+            opencode: 0,
           },
           sessions: [
             {
@@ -1479,12 +1487,80 @@ describe("App shell", () => {
 
   it("routes Cmd+Left/Right to history and global search pagination", async () => {
     const user = userEvent.setup();
-    const client = createAppClient();
+    const client = createAppClient({
+      "sessions:getDetail": (request) => {
+        const requestedPage = Number(request.page ?? 0);
+        const page = Number.isFinite(requestedPage) && requestedPage >= 0 ? requestedPage : 0;
+        return {
+          session: {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Investigate markdown rendering",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 250,
+            bookmarkCount: 0,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+          totalCount: 250,
+          categoryCounts: {
+            user: 125,
+            assistant: 125,
+            tool_use: 0,
+            tool_edit: 0,
+            tool_result: 0,
+            thinking: 0,
+            system: 0,
+          },
+          page,
+          pageSize: 100,
+          focusIndex: null,
+          messages: [
+            {
+              id: "m1",
+              sourceId: "src1",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "user",
+              content: "Please review markdown table rendering",
+              createdAt: "2026-03-01T10:00:00.000Z",
+              tokenInput: null,
+              tokenOutput: null,
+              operationDurationMs: null,
+              operationDurationSource: null,
+              operationDurationConfidence: null,
+            },
+            {
+              id: "m2",
+              sourceId: "src2",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "assistant",
+              content: "Everything checks out.\n\n| A | B |\n|---|---|\n| 1 | 2 |",
+              createdAt: "2026-03-01T10:00:05.000Z",
+              tokenInput: 14,
+              tokenOutput: 8,
+              operationDurationMs: 5000,
+              operationDurationSource: "native",
+              operationDurationConfidence: "high",
+            },
+          ],
+        };
+      },
+    });
 
     const { container } = renderWithClient(<App />, client);
 
     await waitFor(() => {
       expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("1");
+      expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled();
     });
 
     const messageList = container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
@@ -1493,8 +1569,13 @@ describe("App shell", () => {
       throw new Error("Expected message list");
     }
     messageList.focus();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(messageList);
+    });
 
-    fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
+    });
     await waitFor(() => {
       expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue("2");
     });
@@ -1505,7 +1586,9 @@ describe("App shell", () => {
       expect(screen.getByText("Page 1 of 3")).toBeInTheDocument();
     });
 
-    fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
+    });
     await waitFor(() => {
       expect(screen.getByText("Page 2 of 3")).toBeInTheDocument();
     });
@@ -1517,7 +1600,9 @@ describe("App shell", () => {
       );
     });
 
-    fireEvent.keyDown(window, { key: "ArrowLeft", metaKey: true });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowLeft", metaKey: true });
+    });
     await waitFor(() => {
       expect(screen.getByText("Page 1 of 3")).toBeInTheDocument();
     });
@@ -1753,6 +1838,18 @@ describe("App shell", () => {
       expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
     });
 
+    const rememberedTurnMessageList = document.querySelector<HTMLDivElement>(
+      ".msg-scroll.message-list",
+    );
+    expect(rememberedTurnMessageList).not.toBeNull();
+    if (!rememberedTurnMessageList) {
+      throw new Error("Expected message list");
+    }
+    rememberedTurnMessageList.focus();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(rememberedTurnMessageList);
+    });
+
     fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
     await waitFor(() => {
       expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("2");
@@ -1796,6 +1893,18 @@ describe("App shell", () => {
     fireEvent.keyDown(window, { key: "t", metaKey: true });
     await waitFor(() => {
       expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+    });
+
+    const resetRememberedTurnMessageList = document.querySelector<HTMLDivElement>(
+      ".msg-scroll.message-list",
+    );
+    expect(resetRememberedTurnMessageList).not.toBeNull();
+    if (!resetRememberedTurnMessageList) {
+      throw new Error("Expected message list");
+    }
+    resetRememberedTurnMessageList.focus();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(resetRememberedTurnMessageList);
     });
 
     fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
@@ -3095,6 +3204,8 @@ describe("App shell", () => {
               gemini: 0,
               cursor: 0,
               copilot: 0,
+              copilot_cli: 0,
+              opencode: 0,
             },
             sessions: [],
             claudeHookState: createClaudeHookStateFixture(),
@@ -3109,6 +3220,8 @@ describe("App shell", () => {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            copilot_cli: 0,
+            opencode: 0,
           },
           sessions: [
             {
@@ -3210,6 +3323,8 @@ describe("App shell", () => {
               gemini: 0,
               cursor: 0,
               copilot: 0,
+              copilot_cli: 0,
+              opencode: 0,
             },
             sessions: [],
             claudeHookState: createClaudeHookStateFixture(),
@@ -3224,6 +3339,8 @@ describe("App shell", () => {
             gemini: 0,
             cursor: 0,
             copilot: 0,
+            copilot_cli: 0,
+            opencode: 0,
           },
           sessions: [
             {

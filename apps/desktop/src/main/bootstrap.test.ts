@@ -109,6 +109,10 @@ const {
           claude: ["^<command-name>"],
           codex: ["^<environment_context>"],
           gemini: [],
+          cursor: [],
+          copilot: [],
+          copilot_cli: [],
+          opencode: [],
         }
       );
     }),
@@ -255,6 +259,7 @@ const {
             cursor: 0,
             copilot: 0,
             copilot_cli: 0,
+            opencode: 0,
           },
           sessions: [],
           claudeHookState: {
@@ -306,6 +311,7 @@ vi.mock("@codetrail/core", async () => {
       cursorRoot: "/cursor/root",
       copilotRoot: "/copilot/root",
       copilotCliRoot: "/copilot-cli/root",
+      opencodeRoot: "/opencode/root",
       includeClaudeSubagents: false,
     },
     initializeDatabase: mockInitializeDatabase,
@@ -497,6 +503,7 @@ describe("bootstrapMainProcess", () => {
       cursor: [],
       copilot: [],
       copilot_cli: [],
+      opencode: [],
     },
   };
 
@@ -560,7 +567,15 @@ describe("bootstrapMainProcess", () => {
       getFilePath: () => "/tmp/state.json",
       getPaneState: () => paneState,
       getIndexingState: () => ({
-        enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"],
+        enabledProviders: [
+          "claude",
+          "codex",
+          "gemini",
+          "cursor",
+          "copilot",
+          "copilot_cli",
+          "opencode",
+        ],
         removeMissingSessionsDuringIncrementalIndexing: false,
       }),
       flush,
@@ -632,6 +647,7 @@ describe("bootstrapMainProcess", () => {
           cursorRoot: "/cursor/root",
           copilotRoot: "/copilot/root",
           copilotCliRoot: "/copilot-cli/root",
+          opencodeRoot: "/opencode/root",
         },
       }).discovery,
     );
@@ -694,14 +710,14 @@ describe("bootstrapMainProcess", () => {
         {
           id: "m1",
           ...searchPayload,
-          providers: ["claude", "codex", "gemini", "cursor", "copilot"],
+          providers: ["claude", "codex", "gemini", "cursor", "copilot", "copilot_cli", "opencode"],
         },
       ],
       total: 1,
     });
     expect(mockRunSearchQuery).toHaveBeenCalledWith({
       ...searchPayload,
-      providers: ["claude", "codex", "gemini", "cursor", "copilot"],
+      providers: ["claude", "codex", "gemini", "cursor", "copilot", "copilot_cli", "opencode"],
     });
 
     await expect(getRequiredHandler(handlers, "indexer:refresh")({ force: true })).resolves.toEqual(
@@ -810,20 +826,27 @@ describe("bootstrapMainProcess", () => {
   });
 
   it("opens a native picker for external tool commands and accepts macOS app bundles", async () => {
-    await bootstrapMainProcess({ runStartupIndexing: false });
-    const pickCommand = getRequiredHandler(handlers, "dialog:pickExternalToolCommand");
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "darwin" });
 
-    mockShowOpenDialog.mockResolvedValueOnce({
-      canceled: false,
-      filePaths: ["/System/Applications/TextEdit.app"] as string[],
-    });
-    mockStat.mockResolvedValueOnce({ isFile: () => false });
+    try {
+      await bootstrapMainProcess({ runStartupIndexing: false });
+      const pickCommand = getRequiredHandler(handlers, "dialog:pickExternalToolCommand");
 
-    await expect(pickCommand({})).resolves.toEqual({
-      canceled: false,
-      path: "/System/Applications/TextEdit.app",
-      error: null,
-    });
+      mockShowOpenDialog.mockResolvedValueOnce({
+        canceled: false,
+        filePaths: ["/System/Applications/TextEdit.app"] as string[],
+      });
+      mockStat.mockResolvedValueOnce({ isFile: () => false });
+
+      await expect(pickCommand({})).resolves.toEqual({
+        canceled: false,
+        path: "/System/Applications/TextEdit.app",
+        error: null,
+      });
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform });
+    }
   });
 
   it("honors editor:listAvailable external tool overrides even without persisted pane state", async () => {
@@ -965,6 +988,7 @@ describe("bootstrapMainProcess", () => {
         cursor: [],
         copilot: [],
         copilot_cli: [],
+        opencode: [],
       },
     });
     expect(getRequiredHandler(handlers, "indexer:getConfig")({})).toEqual({
@@ -1232,6 +1256,7 @@ describe("bootstrapMainProcess", () => {
           "/cursor/root",
           "/copilot/root",
           "/copilot-cli/root",
+          "/opencode/root",
         ],
         backend: "kqueue",
       });
@@ -1244,6 +1269,7 @@ describe("bootstrapMainProcess", () => {
           "/cursor/root",
           "/copilot/root",
           "/copilot-cli/root",
+          "/opencode/root",
         ],
         expect.any(Function),
         expect.objectContaining({
@@ -1331,6 +1357,7 @@ describe("bootstrapMainProcess", () => {
           "/cursor/root",
           "/copilot/root",
           "/copilot-cli/root",
+          "/opencode/root",
         ],
         expect.any(Function),
         expect.objectContaining({
@@ -1348,6 +1375,7 @@ describe("bootstrapMainProcess", () => {
           "/cursor/root",
           "/copilot/root",
           "/copilot-cli/root",
+          "/opencode/root",
         ],
         expect.any(Function),
         expect.objectContaining({
@@ -1438,57 +1466,64 @@ describe("bootstrapMainProcess", () => {
   });
 
   it("releases the sender lease when watcher startup fails", async () => {
-    await bootstrapMainProcess({ runStartupIndexing: false });
-    const startWatcher = getRequiredHandler(handlers, "watcher:start");
-    const stopWatcher = getRequiredHandler(handlers, "watcher:stop");
-    const failedStartEvent = createWatcherInvokeEvent(250);
-    const successfulStartEvent = createWatcherInvokeEvent(251);
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "darwin" });
 
-    const createFailingWatcher = (
-      roots: string[],
-      onFilesChanged: (batch: {
-        changedPaths: string[];
-        requiresFullScan: boolean;
-      }) => Promise<void>,
-      options: Record<string, unknown> = {},
-    ) => {
-      const instance = {
-        roots,
-        options,
-        onFilesChanged,
-        start: vi.fn(async () => {
-          throw new Error("watcher boot failed");
-        }),
-        stop: vi.fn(async () => {}),
-        getWatchedRoots: vi.fn(() => roots),
-        getStatus: vi.fn(() => ({ running: false, processing: false, pendingPathCount: 0 })),
+    try {
+      await bootstrapMainProcess({ runStartupIndexing: false });
+      const startWatcher = getRequiredHandler(handlers, "watcher:start");
+      const stopWatcher = getRequiredHandler(handlers, "watcher:stop");
+      const failedStartEvent = createWatcherInvokeEvent(250);
+      const successfulStartEvent = createWatcherInvokeEvent(251);
+
+      const createFailingWatcher = (
+        roots: string[],
+        onFilesChanged: (batch: {
+          changedPaths: string[];
+          requiresFullScan: boolean;
+        }) => Promise<void>,
+        options: Record<string, unknown> = {},
+      ) => {
+        const instance = {
+          roots,
+          options,
+          onFilesChanged,
+          start: vi.fn(async () => {
+            throw new Error("watcher boot failed");
+          }),
+          stop: vi.fn(async () => {}),
+          getWatchedRoots: vi.fn(() => roots),
+          getStatus: vi.fn(() => ({ running: false, processing: false, pendingPathCount: 0 })),
+        };
+        mockFileWatcherInstances.push(instance);
+        return instance;
       };
-      mockFileWatcherInstances.push(instance);
-      return instance;
-    };
 
-    mockFileWatcherService
-      .mockImplementationOnce(createFailingWatcher)
-      .mockImplementationOnce(createFailingWatcher);
+      mockFileWatcherService
+        .mockImplementationOnce(createFailingWatcher)
+        .mockImplementationOnce(createFailingWatcher);
 
-    await expect(startWatcher({ debounceMs: 3000 }, failedStartEvent.event)).resolves.toEqual({
-      ok: false,
-      watchedRoots: [],
-      backend: "default",
-    });
+      await expect(startWatcher({ debounceMs: 3000 }, failedStartEvent.event)).resolves.toEqual({
+        ok: false,
+        watchedRoots: [],
+        backend: "default",
+      });
 
-    mockEnqueue.mockClear();
-    await expect(startWatcher({ debounceMs: 3000 }, successfulStartEvent.event)).resolves.toEqual(
-      expect.objectContaining({ ok: true }),
-    );
+      mockEnqueue.mockClear();
+      await expect(startWatcher({ debounceMs: 3000 }, successfulStartEvent.event)).resolves.toEqual(
+        expect.objectContaining({ ok: true }),
+      );
 
-    const successfulWatcher = mockFileWatcherInstances.at(-1);
-    if (!successfulWatcher) {
-      throw new Error("Expected successful watcher instance");
+      const successfulWatcher = mockFileWatcherInstances.at(-1);
+      if (!successfulWatcher) {
+        throw new Error("Expected successful watcher instance");
+      }
+
+      await stopWatcher({}, successfulStartEvent.event);
+      expect(successfulWatcher.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform });
     }
-
-    await stopWatcher({}, successfulStartEvent.event);
-    expect(successfulWatcher.stop).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the watcher running while another sender still holds a lease", async () => {
@@ -1579,53 +1614,60 @@ describe("bootstrapMainProcess", () => {
   });
 
   it("restarts the kqueue watcher after structural fallback indexing settles and repairs with the structural baseline", async () => {
-    await bootstrapMainProcess({ runStartupIndexing: false });
-    await getRequiredHandler(handlers, "watcher:start")({ debounceMs: 5000 });
-    const liveSessionStore = getLastLiveSessionStore();
-    mockEnqueue.mockClear();
-    liveSessionStore.noteStructuralInvalidation.mockClear();
-    liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart.mockClear();
-    liveSessionStore.repairRecentSessionsAfterIndexing.mockClear();
-    liveSessionStore.hasStructuralInvalidationPending.mockReturnValue(true);
-    liveSessionStore.getStructuralInvalidationObservedAtMs.mockReturnValue(
-      Date.parse("2026-04-11T08:59:00.000Z"),
-    );
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "darwin" });
 
-    const firstWatcher = mockFileWatcherInstances[0];
-    if (!firstWatcher) {
-      throw new Error("Expected watcher instance");
-    }
-
-    await firstWatcher.onFilesChanged({
-      changedPaths: [],
-      requiresFullScan: true,
-    });
-
-    expect(liveSessionStore.noteStructuralInvalidation).toHaveBeenCalledTimes(1);
-    expect(liveSessionStore.noteStructuralInvalidation).toHaveBeenCalledWith(expect.any(Number));
-    expect(mockEnqueue).toHaveBeenCalledWith(
-      { force: false },
-      { source: "watch_fallback_incremental" },
-    );
-
-    await settleIndexingJob({
-      source: "watch_fallback_incremental",
-      request: { kind: "incremental" },
-      startedAtMs: Date.parse("2026-04-11T09:00:00.000Z"),
-      success: true,
-    });
-
-    await vi.waitFor(() => {
-      expect(mockFileWatcherInstances).toHaveLength(2);
-      expect(firstWatcher.stop).toHaveBeenCalledWith({ flushPending: true });
-      expect(liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart).toHaveBeenCalledTimes(
-        1,
+    try {
+      await bootstrapMainProcess({ runStartupIndexing: false });
+      await getRequiredHandler(handlers, "watcher:start")({ debounceMs: 5000 });
+      const liveSessionStore = getLastLiveSessionStore();
+      mockEnqueue.mockClear();
+      liveSessionStore.noteStructuralInvalidation.mockClear();
+      liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart.mockClear();
+      liveSessionStore.repairRecentSessionsAfterIndexing.mockClear();
+      liveSessionStore.hasStructuralInvalidationPending.mockReturnValue(true);
+      liveSessionStore.getStructuralInvalidationObservedAtMs.mockReturnValue(
+        Date.parse("2026-04-11T08:59:00.000Z"),
       );
-      expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledTimes(1);
-    });
-    expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledWith({
-      minFileMtimeMs: Date.parse("2026-04-11T08:59:00.000Z"),
-    });
+
+      const firstWatcher = mockFileWatcherInstances[0];
+      if (!firstWatcher) {
+        throw new Error("Expected watcher instance");
+      }
+
+      await firstWatcher.onFilesChanged({
+        changedPaths: [],
+        requiresFullScan: true,
+      });
+
+      expect(liveSessionStore.noteStructuralInvalidation).toHaveBeenCalledTimes(1);
+      expect(liveSessionStore.noteStructuralInvalidation).toHaveBeenCalledWith(expect.any(Number));
+      expect(mockEnqueue).toHaveBeenCalledWith(
+        { force: false },
+        { source: "watch_fallback_incremental" },
+      );
+
+      await settleIndexingJob({
+        source: "watch_fallback_incremental",
+        request: { kind: "incremental" },
+        startedAtMs: Date.parse("2026-04-11T09:00:00.000Z"),
+        success: true,
+      });
+
+      await vi.waitFor(() => {
+        expect(mockFileWatcherInstances).toHaveLength(2);
+        expect(firstWatcher.stop).toHaveBeenCalledWith({ flushPending: true });
+        expect(liveSessionStore.catchUpTrackedTranscriptsAfterWatcherRestart).toHaveBeenCalledTimes(
+          1,
+        );
+        expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledTimes(1);
+      });
+      expect(liveSessionStore.repairRecentSessionsAfterIndexing).toHaveBeenCalledWith({
+        minFileMtimeMs: Date.parse("2026-04-11T08:59:00.000Z"),
+      });
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform });
+    }
   });
 
   it("continues repair and ignores stale watcher callbacks when stopping the old watcher fails", async () => {

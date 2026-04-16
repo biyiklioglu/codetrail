@@ -162,16 +162,26 @@ export function discoverCursorFiles(
     }
 
     const projectDir = join(cursorRoot, projectEntry.name);
-    const transcriptsDir = join(projectDir, "agent-transcripts");
-    if (!safeIsDirectory(transcriptsDir, dependencies)) {
+    const transcriptsEntry = safeReadDir(projectDir, dependencies).find((entry) => {
+      return entry.isDirectory() && equalsCaseInsensitive(entry.name, "agent-transcripts");
+    });
+    if (!transcriptsEntry) {
       continue;
     }
+    const transcriptsDir = join(projectDir, transcriptsEntry.name);
 
     for (const sessionDir of safeReadDir(transcriptsDir, dependencies)) {
       if (!sessionDir.isDirectory()) {
         continue;
       }
-      const jsonlPath = join(transcriptsDir, sessionDir.name, `${sessionDir.name}.jsonl`);
+      const sessionPath = join(transcriptsDir, sessionDir.name);
+      const transcriptEntry = safeReadDir(sessionPath, dependencies).find((entry) => {
+        return entry.isFile() && equalsCaseInsensitive(entry.name, `${sessionDir.name}.jsonl`);
+      });
+      if (!transcriptEntry) {
+        continue;
+      }
+      const jsonlPath = join(sessionPath, transcriptEntry.name);
       const discoveredFile = toDiscoveredCursorFile(jsonlPath, config, dependencies);
       if (discoveredFile) {
         discovered.push(discoveredFile);

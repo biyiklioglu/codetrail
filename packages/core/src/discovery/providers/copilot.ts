@@ -127,10 +127,13 @@ export function discoverCopilotFiles(
     }
 
     const workspaceDir = join(copilotRoot, workspaceEntry.name);
-    const chatSessionsDir = join(workspaceDir, "chatSessions");
-    if (!safeIsDirectory(chatSessionsDir, dependencies)) {
+    const chatSessionsEntry = safeReadDir(workspaceDir, dependencies).find((entry) => {
+      return entry.isDirectory() && equalsCaseInsensitive(entry.name, "chatSessions");
+    });
+    if (!chatSessionsEntry) {
       continue;
     }
+    const chatSessionsDir = join(workspaceDir, chatSessionsEntry.name);
 
     for (const sessionFile of safeReadDir(chatSessionsDir, dependencies)) {
       if (!sessionFile.isFile()) {

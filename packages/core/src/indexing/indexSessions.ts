@@ -22,9 +22,14 @@ import {
   DEFAULT_DISCOVERY_CONFIG,
   type DiscoveryConfig,
   type WorktreeSource,
+  discoverChangedFiles,
   discoverSessionFiles,
   discoverSingleFile,
 } from "../discovery";
+import {
+  buildOpenCodeSessionSourcePrefix,
+  normalizeOpenCodeDatabasePath,
+} from "../discovery/providers/opencode";
 import { projectNameFromPath } from "../discovery/shared";
 import { stringifyCompactMetadata } from "../metadata";
 import { type ParserDiagnostic, parseSession, parseSessionEvent } from "../parsing";
@@ -75,6 +80,7 @@ export type IndexingResult = {
 export type IndexingDependencies = {
   discoverSessionFiles?: typeof discoverSessionFiles;
   discoverSingleFile?: typeof discoverSingleFile;
+  discoverChangedFiles?: typeof discoverChangedFiles;
   openDatabase?: typeof openDatabase;
   ensureDatabaseSchema?: typeof ensureDatabaseSchema;
   clearIndexedData?: typeof clearIndexedData;
@@ -88,6 +94,7 @@ export type IndexingDependencies = {
 type ResolvedIndexingDependencies = {
   discoverSessionFiles: typeof discoverSessionFiles;
   discoverSingleFile: typeof discoverSingleFile;
+  discoverChangedFiles: typeof discoverChangedFiles;
   openDatabase: typeof openDatabase;
   ensureDatabaseSchema: typeof ensureDatabaseSchema;
   clearIndexedData: typeof clearIndexedData;
@@ -657,9 +664,9 @@ export function indexChangedFiles(
   const resolvedDependencies = resolveIndexingDependencies(dependencies);
   const discoveryConfig = resolveIndexingDiscoveryConfig(config);
 
-  const initiallyDiscoveredFiles = changedFilePaths
-    .map((filePath) => resolvedDependencies.discoverSingleFile(filePath, discoveryConfig))
-    .filter((file): file is NonNullable<typeof file> => file !== null);
+  const initiallyDiscoveredFiles = changedFilePaths.flatMap((filePath) =>
+    resolvedDependencies.discoverChangedFiles(filePath, discoveryConfig),
+  );
 
   const db = resolvedDependencies.openDatabase(config.dbPath);
   try {
@@ -688,6 +695,17 @@ export function indexChangedFiles(
        FROM index_checkpoints WHERE file_path = ?`,
     );
     const getSessionByFile = db.prepare("SELECT id, file_path FROM sessions WHERE file_path = ?");
+    const listIndexedFilesByPrefix = db.prepare(
+      `SELECT
+         file_path,
+         provider,
+         project_path,
+         session_identity,
+         file_size,
+         file_mtime_ms
+       FROM indexed_files
+       WHERE provider = ? AND file_path LIKE ?`,
+    );
     const getDeletedSession = db.prepare(
       `SELECT
          file_path,
@@ -727,6 +745,22 @@ export function indexChangedFiles(
     // on. This mirrors the full incremental path, just scoped to the changed file set.
     const discoveredPathSet = new Set(discoveredFiles.map((f) => f.filePath));
     const enabledProviderSet = new Set(discoveryConfig.enabledProviders);
+    removeMissingOpenCodeSessionsForChangedPaths({
+      changedFilePaths,
+      discoveredFiles,
+      discoveryConfig,
+      listIndexedFilesByPrefix: listIndexedFilesByPrefix as {
+        all: (provider: Provider, prefix: string) => IndexedFileRow[];
+      },
+      getSessionByFile: getSessionByFile as {
+        get: (filePath: string) => SessionFileRow | undefined;
+      },
+      statements,
+      enabledProviderSet,
+      removeMissingSessionsDuringIncrementalIndexing:
+        config.removeMissingSessionsDuringIncrementalIndexing ?? false,
+      ...(config.projectScope ? { projectScope: config.projectScope } : {}),
+    });
     for (const filePath of changedFilePaths) {
       if (discoveredPathSet.has(filePath)) continue;
       const existingSession = getSessionByFile.get(filePath) as SessionFileRow | undefined;
@@ -788,6 +822,59 @@ export function indexChangedFiles(
     };
   } finally {
     db.close();
+  }
+}
+
+function removeMissingOpenCodeSessionsForChangedPaths(args: {
+  changedFilePaths: string[];
+  discoveredFiles: ReturnType<typeof discoverSessionFiles>;
+  discoveryConfig: DiscoveryConfig;
+  listIndexedFilesByPrefix: { all: (provider: Provider, prefix: string) => IndexedFileRow[] };
+  getSessionByFile: { get: (filePath: string) => SessionFileRow | undefined };
+  statements: IndexingStatements;
+  enabledProviderSet: Set<Provider>;
+  removeMissingSessionsDuringIncrementalIndexing: boolean;
+  projectScope?: ProjectIndexingScope;
+}): void {
+  const opencodeRoot = args.discoveryConfig.opencodeRoot;
+  if (!opencodeRoot) {
+    return;
+  }
+
+  const discoveredPathSet = new Set(args.discoveredFiles.map((file) => file.filePath));
+  for (const changedPath of args.changedFilePaths) {
+    const dbPath = normalizeOpenCodeDatabasePath(changedPath, opencodeRoot);
+    if (!dbPath) {
+      continue;
+    }
+
+    const indexedRows = args.listIndexedFilesByPrefix.all(
+      "opencode",
+      `${buildOpenCodeSessionSourcePrefix(dbPath)}%`,
+    );
+    for (const indexedRow of indexedRows) {
+      if (discoveredPathSet.has(indexedRow.file_path)) {
+        continue;
+      }
+      if (!matchesProjectScope(indexedRow.provider, indexedRow.project_path, args.projectScope)) {
+        continue;
+      }
+      if (
+        args.enabledProviderSet.has(indexedRow.provider) &&
+        !args.removeMissingSessionsDuringIncrementalIndexing
+      ) {
+        continue;
+      }
+
+      const existingSession = args.getSessionByFile.get(indexedRow.file_path);
+      if (!existingSession) {
+        continue;
+      }
+
+      deleteSessionDataForFilePath(args.statements, indexedRow.file_path);
+      args.statements.deleteIndexedFileByFilePath.run(indexedRow.file_path);
+      args.statements.deleteCheckpointByFilePath.run(indexedRow.file_path);
+    }
   }
 }
 
@@ -1349,6 +1436,7 @@ function resolveIndexingDependencies(
   return {
     discoverSessionFiles: dependencies.discoverSessionFiles ?? discoverSessionFiles,
     discoverSingleFile: dependencies.discoverSingleFile ?? discoverSingleFile,
+    discoverChangedFiles: dependencies.discoverChangedFiles ?? discoverChangedFiles,
     openDatabase: dependencies.openDatabase ?? openDatabase,
     ensureDatabaseSchema: dependencies.ensureDatabaseSchema ?? ensureDatabaseSchema,
     clearIndexedData: dependencies.clearIndexedData ?? clearIndexedData,
@@ -1479,7 +1567,7 @@ function indexMaterializedSessionFile(args: {
 
   let source: ProviderReadSourceResult;
   try {
-    const loaded = adapter.readSource(args.discovered.filePath, args.readFileText);
+    const loaded = adapter.readSource(args.discovered, args.readFileText);
     if (!loaded) {
       throw new Error("Unable to read provider source.");
     }
@@ -1823,6 +1911,12 @@ function persistMaterializedMessages(args: {
           sessionId: args.discovered.sourceSessionId,
           filePath: args.discovered.filePath,
           onNotice: args.onNotice,
+        });
+        registerGenericToolEditFiles({
+          statements: args.statements,
+          discovered: args.discovered,
+          message,
+          persistedMessageId: makeMessageId(args.sessionDbId, message.id),
         });
       }
 
@@ -2492,6 +2586,204 @@ function persistStreamMessage(args: {
     message: messageToPersist,
     persistedMessageId,
   });
+  registerGenericToolEditFiles({
+    statements: args.statements,
+    discovered: args.discovered,
+    message: messageToPersist,
+    persistedMessageId,
+  });
+}
+
+function registerGenericToolEditFiles(args: {
+  statements: IndexingStatements;
+  discovered: ReturnType<typeof discoverSessionFiles>[number];
+  message: IndexedMessage;
+  persistedMessageId: string;
+}): void {
+  if (args.discovered.provider === "claude" || args.message.category !== "tool_edit") {
+    return;
+  }
+
+  const files = parseGenericToolEditFiles(args.message.content);
+  for (const [index, file] of files.entries()) {
+    upsertMessageToolEditFile(args.statements, {
+      id: makeToolCallId(args.persistedMessageId, 1000 + index),
+      messageId: args.persistedMessageId,
+      fileOrdinal: index,
+      filePath: file.filePath,
+      previousFilePath: file.previousFilePath,
+      changeType: file.changeType,
+      unifiedDiff: file.unifiedDiff,
+      addedLineCount: file.addedLineCount,
+      removedLineCount: file.removedLineCount,
+      exactness: file.exactness,
+      beforeHash: file.beforeHash,
+      afterHash: file.afterHash,
+    });
+  }
+}
+
+function parseGenericToolEditFiles(content: string): Array<{
+  filePath: string;
+  previousFilePath: string | null;
+  changeType: ToolEditChangeType;
+  unifiedDiff: string | null;
+  addedLineCount: number;
+  removedLineCount: number;
+  exactness: ToolEditExactness;
+  beforeHash: string | null;
+  afterHash: string | null;
+}> {
+  const record = tryParseJsonRecord(content);
+  if (!record) {
+    return [];
+  }
+
+  const payload = asRecord(record.input) ?? asRecord(record.args) ?? record;
+  const toolName =
+    readString(record.name) ??
+    readString(record.tool_name) ??
+    readString(record.tool) ??
+    readString(record.operation) ??
+    "";
+  const filePath =
+    readString(payload?.filePath) ??
+    readString(payload?.file_path) ??
+    readString(payload?.path) ??
+    readString(payload?.file) ??
+    null;
+  if (!filePath) {
+    return [];
+  }
+
+  const previousFilePath =
+    readString(payload?.previousFilePath) ??
+    readString(payload?.previous_file_path) ??
+    readString(payload?.oldPath) ??
+    readString(payload?.old_path) ??
+    null;
+  const oldText =
+    readString(payload?.oldString) ??
+    readString(payload?.old_string) ??
+    readString(payload?.oldText) ??
+    readString(payload?.before) ??
+    null;
+  const newText =
+    readString(payload?.newString) ??
+    readString(payload?.new_string) ??
+    readString(payload?.newText) ??
+    readString(payload?.content) ??
+    readString(payload?.text) ??
+    readString(payload?.after) ??
+    null;
+  const unifiedDiff =
+    readString(payload?.unifiedDiff) ??
+    readString(payload?.unified_diff) ??
+    readString(payload?.diff) ??
+    readString(payload?.patch) ??
+    null;
+  const changeType = inferGenericToolEditChangeType({
+    toolName,
+    filePath,
+    previousFilePath,
+    oldText,
+    newText,
+  });
+  const lineCounts = summarizeGenericToolEditLineCounts({
+    filePath,
+    changeType,
+    oldText,
+    newText,
+    unifiedDiff,
+  });
+
+  return [
+    {
+      filePath,
+      previousFilePath,
+      changeType,
+      unifiedDiff,
+      addedLineCount: lineCounts.addedLineCount,
+      removedLineCount: lineCounts.removedLineCount,
+      exactness: "best_effort",
+      beforeHash: oldText === null ? null : hashText(oldText),
+      afterHash: newText === null ? null : hashText(newText),
+    },
+  ];
+}
+
+function inferGenericToolEditChangeType(args: {
+  toolName: string;
+  filePath: string;
+  previousFilePath: string | null;
+  oldText: string | null;
+  newText: string | null;
+}): ToolEditChangeType {
+  const toolName = args.toolName.trim().toLowerCase();
+  if (args.previousFilePath && args.previousFilePath !== args.filePath) {
+    return "move";
+  }
+  if (toolName.includes("delete") || toolName.includes("remove")) {
+    return "delete";
+  }
+  if (toolName.includes("move") || toolName.includes("rename")) {
+    return "move";
+  }
+  if (args.oldText === null && args.newText !== null) {
+    return toolName.includes("edit") ? "update" : "add";
+  }
+  if (args.oldText !== null && args.newText === null) {
+    return "delete";
+  }
+  return "update";
+}
+
+function summarizeGenericToolEditLineCounts(args: {
+  filePath: string;
+  changeType: ToolEditChangeType;
+  oldText: string | null;
+  newText: string | null;
+  unifiedDiff: string | null;
+}): {
+  addedLineCount: number;
+  removedLineCount: number;
+} {
+  if (args.unifiedDiff) {
+    return countUnifiedDiffLines(args.unifiedDiff);
+  }
+  if (args.oldText !== null && args.newText !== null) {
+    return countUnifiedDiffLines(
+      buildUnifiedDiffFromTextPair({
+        oldText: args.oldText,
+        newText: args.newText,
+        filePath: args.filePath,
+      }),
+    );
+  }
+  if (args.changeType === "add" && args.newText !== null) {
+    return { addedLineCount: countTextLines(args.newText), removedLineCount: 0 };
+  }
+  if (args.changeType === "delete" && args.oldText !== null) {
+    return { addedLineCount: 0, removedLineCount: countTextLines(args.oldText) };
+  }
+  return { addedLineCount: 0, removedLineCount: 0 };
+}
+
+function countTextLines(text: string): number {
+  if (text.length === 0) {
+    return 0;
+  }
+  const normalized = text.replace(/\r\n/g, "\n");
+  let lineCount = 1;
+  for (const char of normalized) {
+    if (char === "\n") {
+      lineCount += 1;
+    }
+  }
+  if (normalized.endsWith("\n")) {
+    lineCount -= 1;
+  }
+  return Math.max(lineCount, 0);
 }
 
 function createClaudeTurnNormalizationState(

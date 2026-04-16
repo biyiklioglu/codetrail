@@ -140,6 +140,8 @@ function createBaseProps(): Omit<
         gemini: 0,
         cursor: 0,
         copilot: 0,
+        copilot_cli: 0,
+        opencode: 0,
       },
       sessions: [
         {
@@ -299,7 +301,14 @@ function createBaseProps(): Omit<
       onRescanExternalTools: vi.fn(),
     },
     indexing: {
-      enabledProviders: ["claude", "codex", "gemini", "cursor", "copilot"] as Provider[],
+      enabledProviders: [
+        "claude",
+        "codex",
+        "gemini",
+        "cursor",
+        "copilot",
+        "opencode",
+      ] as Provider[],
       removeMissingSessionsDuringIncrementalIndexing: false,
       canForceReindex: true,
       onToggleProviderEnabled: vi.fn(),
@@ -314,6 +323,7 @@ function createBaseProps(): Omit<
         cursor: [],
         copilot: [],
         copilot_cli: [],
+        opencode: [],
       },
       onAddSystemMessageRegexRule: vi.fn(),
       onUpdateSystemMessageRegexRule: vi.fn(),
@@ -358,6 +368,7 @@ describe("SettingsView", () => {
     );
     expect(screen.getByText("Storage")).toBeInTheDocument();
     expect(screen.getByText("Discovery Roots")).toBeInTheDocument();
+    expect(screen.getByText("OpenCode data root")).toBeInTheDocument();
     expect(screen.getByText("System Message Rules")).toBeInTheDocument();
 
     const selects = screen.getAllByRole("combobox");

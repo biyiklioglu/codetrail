@@ -116,6 +116,21 @@ const AUTO_REFRESH_STRATEGY_VALUES = [
   "scan-5min",
 ] as const;
 const CURRENT_AUTO_REFRESH_STRATEGY_VALUES = ["off", ...AUTO_REFRESH_STRATEGY_VALUES] as const;
+const LEGACY_DEFAULT_ENABLED_PROVIDERS: Provider[] = [
+  "claude",
+  "codex",
+  "gemini",
+  "cursor",
+  "copilot",
+];
+const LEGACY_PRE_OPENCODE_ENABLED_PROVIDERS: Provider[] = [
+  "claude",
+  "codex",
+  "gemini",
+  "cursor",
+  "copilot",
+  "copilot_cli",
+];
 const DEFAULT_FILE_SYSTEM: AppStateStoreFileSystem = {
   existsSync: (path) => existsSync(path),
   mkdirSync: (path, options) => mkdirSync(path, options),
@@ -502,7 +517,9 @@ function sanitizeIndexingState(value: unknown): IndexingConfigState | null {
   }
 
   const record = value as Record<string, unknown>;
-  const enabledProviders = sanitizeStringArray(record.enabledProviders, PROVIDER_VALUES);
+  const enabledProviders = healLegacyEnabledProviders(
+    sanitizeStringArray(record.enabledProviders, PROVIDER_VALUES),
+  );
   const removeMissingSessionsDuringIncrementalIndexing = sanitizeOptionalBoolean(
     record.removeMissingSessionsDuringIncrementalIndexing,
   );
@@ -516,6 +533,33 @@ function sanitizeIndexingState(value: unknown): IndexingConfigState | null {
       ? {}
       : { removeMissingSessionsDuringIncrementalIndexing }),
   };
+}
+
+function healLegacyEnabledProviders(providers: Provider[] | null): Provider[] | null {
+  if (providers === null) {
+    return null;
+  }
+  if (!matchesLegacyDefaultProviderSelection(providers)) {
+    return providers;
+  }
+  return addMissingProviders(providers, PROVIDER_VALUES);
+}
+
+function matchesLegacyDefaultProviderSelection(providers: readonly Provider[]): boolean {
+  return (
+    matchesProviderSelection(providers, LEGACY_DEFAULT_ENABLED_PROVIDERS) ||
+    matchesProviderSelection(providers, LEGACY_PRE_OPENCODE_ENABLED_PROVIDERS)
+  );
+}
+
+function matchesProviderSelection(
+  providers: readonly Provider[],
+  expected: readonly Provider[],
+): boolean {
+  return (
+    providers.length === expected.length &&
+    expected.every((provider, index) => providers[index] === provider)
+  );
 }
 
 function sanitizeWindowState(value: unknown): WindowState | null {

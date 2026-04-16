@@ -34,6 +34,12 @@ describe("App history messages", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+      expect(messageList()).not.toBeNull();
+    });
+
+    messageList()?.focus();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(messageList());
     });
 
     await dispatchWindowShortcut({ key: "ArrowDown", metaKey: true });
@@ -88,93 +94,108 @@ describe("App history messages", () => {
 
   it("top-aligns oversized focused messages in the visible area", async () => {
     installScrollIntoViewMock();
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      });
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation(() => {});
 
-    const client = createAppClient();
-    const { container } = renderWithClient(<App />, client);
+    try {
+      const client = createAppClient();
+      const { container } = renderWithClient(<App />, client);
 
-    await waitFor(() => {
-      expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
-    });
+      await waitFor(() => {
+        expect(screen.getByText("Please review markdown table rendering")).toBeInTheDocument();
+      });
 
-    const messageList = container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
-    const messageCards = Array.from(
-      container.querySelectorAll<HTMLElement>("[data-history-message-id]"),
-    );
-    const firstMessage = messageCards[0];
-    const secondMessage = messageCards[1];
+      const messageList = container.querySelector<HTMLDivElement>(".msg-scroll.message-list");
+      const messageCards = Array.from(
+        container.querySelectorAll<HTMLElement>("[data-history-message-id]"),
+      );
+      const firstMessage = messageCards[0];
+      const secondMessage = messageCards[1];
 
-    expect(messageList).not.toBeNull();
-    expect(firstMessage).toBeDefined();
-    expect(secondMessage).toBeDefined();
-    if (!messageList || !firstMessage || !secondMessage) {
-      throw new Error("Expected message list and visible messages");
+      expect(messageList).not.toBeNull();
+      expect(firstMessage).toBeDefined();
+      expect(secondMessage).toBeDefined();
+      if (!messageList || !firstMessage || !secondMessage) {
+        throw new Error("Expected message list and visible messages");
+      }
+
+      const scrollTo = vi.fn(({ top }: { top: number }) => {
+        messageList.scrollTop = top;
+      });
+
+      Object.defineProperty(messageList, "clientHeight", {
+        value: 120,
+        configurable: true,
+      });
+      Object.defineProperty(messageList, "scrollTop", {
+        value: 40,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(messageList, "scrollTo", {
+        value: scrollTo,
+        configurable: true,
+      });
+      Object.defineProperty(messageList, "getBoundingClientRect", {
+        value: () => ({
+          top: 100,
+          bottom: 220,
+          left: 0,
+          right: 400,
+          width: 400,
+          height: 120,
+          x: 0,
+          y: 100,
+          toJSON: () => "",
+        }),
+        configurable: true,
+      });
+      Object.defineProperty(firstMessage, "getBoundingClientRect", {
+        value: () => ({
+          top: 140,
+          bottom: 420,
+          left: 0,
+          right: 400,
+          width: 400,
+          height: 280,
+          x: 0,
+          y: 140,
+          toJSON: () => "",
+        }),
+        configurable: true,
+      });
+      Object.defineProperty(secondMessage, "getBoundingClientRect", {
+        value: () => ({
+          top: 430,
+          bottom: 470,
+          left: 0,
+          right: 400,
+          width: 400,
+          height: 40,
+          x: 0,
+          y: 430,
+          toJSON: () => "",
+        }),
+        configurable: true,
+      });
+
+      await dispatchWindowShortcut({ key: "ArrowDown", metaKey: true });
+
+      await waitFor(() => {
+        expect(getFocusedHistoryMessageId(container)).toBe("m1");
+        expect(scrollTo).toHaveBeenCalledWith({ top: 80 });
+      });
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+      cancelAnimationFrameSpy.mockRestore();
     }
-
-    const scrollTo = vi.fn(({ top }: { top: number }) => {
-      messageList.scrollTop = top;
-    });
-
-    Object.defineProperty(messageList, "clientHeight", {
-      value: 120,
-      configurable: true,
-    });
-    Object.defineProperty(messageList, "scrollTop", {
-      value: 40,
-      writable: true,
-      configurable: true,
-    });
-    Object.defineProperty(messageList, "scrollTo", {
-      value: scrollTo,
-      configurable: true,
-    });
-    Object.defineProperty(messageList, "getBoundingClientRect", {
-      value: () => ({
-        top: 100,
-        bottom: 220,
-        left: 0,
-        right: 400,
-        width: 400,
-        height: 120,
-        x: 0,
-        y: 100,
-        toJSON: () => "",
-      }),
-      configurable: true,
-    });
-    Object.defineProperty(firstMessage, "getBoundingClientRect", {
-      value: () => ({
-        top: 140,
-        bottom: 420,
-        left: 0,
-        right: 400,
-        width: 400,
-        height: 280,
-        x: 0,
-        y: 140,
-        toJSON: () => "",
-      }),
-      configurable: true,
-    });
-    Object.defineProperty(secondMessage, "getBoundingClientRect", {
-      value: () => ({
-        top: 430,
-        bottom: 470,
-        left: 0,
-        right: 400,
-        width: 400,
-        height: 40,
-        x: 0,
-        y: 430,
-        toJSON: () => "",
-      }),
-      configurable: true,
-    });
-
-    await dispatchWindowShortcut({ key: "ArrowDown", metaKey: true });
-
-    await waitFor(() => {
-      expect(scrollTo).toHaveBeenCalledWith({ top: 80 });
-    });
   });
 
   it("pages the message view with Ctrl+U and Ctrl+D", async () => {
