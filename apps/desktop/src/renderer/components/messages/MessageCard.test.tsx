@@ -81,8 +81,13 @@ describe("MessageCard", () => {
 
     expect(onToggleExpanded).toHaveBeenCalledWith("message_1", "assistant");
     expect(copyTextToClipboard).toHaveBeenCalledTimes(1);
-    expect(onRevealInSession).toHaveBeenCalledWith("message_1", "source_1");
-    expect(onRevealInProject).toHaveBeenCalledWith("message_1", "source_1", "session_1");
+    expect(onRevealInSession).toHaveBeenCalledWith("message_1", "source_1", "assistant");
+    expect(onRevealInProject).toHaveBeenCalledWith(
+      "message_1",
+      "source_1",
+      "session_1",
+      "assistant",
+    );
     expect(onRevealInBookmarks).toHaveBeenCalledWith("message_1", "source_1");
     expect(onRevealInTurn).toHaveBeenCalledWith(message);
     expect(onToggleBookmark).toHaveBeenCalledWith(message);

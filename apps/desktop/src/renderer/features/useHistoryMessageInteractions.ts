@@ -41,6 +41,18 @@ function areAllCategoriesVisible(
   return targetCategories.every((category) => currentCategories.includes(category));
 }
 
+function ensureCategoryVisible(
+  currentCategories: MessageCategory[],
+  targetCategory: MessageCategory,
+): MessageCategory[] {
+  if (currentCategories.includes(targetCategory)) {
+    return currentCategories;
+  }
+  return CATEGORIES.filter(
+    (category) => currentCategories.includes(category) || category === targetCategory,
+  );
+}
+
 export function useHistoryMessageInteractions({
   codetrail,
   logError,
@@ -380,8 +392,22 @@ export function useHistoryMessageInteractions({
     setMessageExpanded,
   ]);
 
+  const ensureHistoryCategoryVisible = useCallback(
+    (category: MessageCategory) => {
+      const currentCategories = historyCategoriesRef.current;
+      const nextCategories = ensureCategoryVisible(currentCategories, category);
+      if (nextCategories === currentCategories) {
+        return currentCategories;
+      }
+      historyCategoriesRef.current = nextCategories;
+      setHistoryCategories(nextCategories);
+      return nextCategories;
+    },
+    [historyCategoriesRef, setHistoryCategories],
+  );
+
   const handleRevealInSession = useCallback(
-    (messageId: string, sourceId: string) => {
+    (messageId: string, sourceId: string, category: MessageCategory) => {
       const shouldRevealViaProjectTree = sessionPaneCollapsed || hideSessionsPaneForTreeView;
       const requestTreeReveal = (projectId: string, sessionId: string) => {
         if (!shouldRevealViaProjectTree) {
@@ -401,6 +427,7 @@ export function useHistoryMessageInteractions({
         if (!bookmarked) {
           return;
         }
+        const nextHistoryCategories = ensureHistoryCategoryVisible(category);
         requestTreeReveal(bookmarked.projectId, bookmarked.sessionId);
         setPendingSearchNavigation({
           targetMode: "session",
@@ -408,7 +435,7 @@ export function useHistoryMessageInteractions({
           sessionId: bookmarked.sessionId,
           messageId,
           sourceId,
-          historyCategories: [...historyCategories],
+          historyCategories: nextHistoryCategories,
         });
         return;
       }
@@ -418,6 +445,7 @@ export function useHistoryMessageInteractions({
         if (!projectMessage || !selectedProjectId) {
           return;
         }
+        const nextHistoryCategories = ensureHistoryCategoryVisible(category);
         requestTreeReveal(selectedProjectId, projectMessage.sessionId);
         setPendingSearchNavigation({
           targetMode: "session",
@@ -425,7 +453,7 @@ export function useHistoryMessageInteractions({
           sessionId: projectMessage.sessionId,
           messageId,
           sourceId,
-          historyCategories: [...historyCategories],
+          historyCategories: nextHistoryCategories,
         });
         return;
       }
@@ -433,14 +461,15 @@ export function useHistoryMessageInteractions({
       if (selectedProjectId && selectedSessionId) {
         requestTreeReveal(selectedProjectId, selectedSessionId);
       }
+      ensureHistoryCategoryVisible(category);
       setSessionQueryInput("");
       setFocusMessageId(messageId);
       setPendingRevealTarget({ messageId, sourceId });
     },
     [
       bookmarksByMessageId,
+      ensureHistoryCategoryVisible,
       hideSessionsPaneForTreeView,
-      historyCategories,
       historyMode,
       projectMessagesById,
       projectPaneCollapsed,
@@ -459,10 +488,11 @@ export function useHistoryMessageInteractions({
   );
 
   const handleRevealInProject = useCallback(
-    (messageId: string, sourceId: string, sessionId: string) => {
+    (messageId: string, sourceId: string, sessionId: string, category: MessageCategory) => {
       if (!selectedProjectId) {
         return;
       }
+      const nextHistoryCategories = ensureHistoryCategoryVisible(category);
       setProjectProviders((value) => (value.length === PROVIDERS.length ? value : [...PROVIDERS]));
       setProjectQueryInput("");
       setPendingSearchNavigation({
@@ -471,12 +501,12 @@ export function useHistoryMessageInteractions({
         sessionId,
         messageId,
         sourceId,
-        historyCategories: [...historyCategories],
+        historyCategories: nextHistoryCategories,
       });
       setHistorySelection(createHistorySelection("project_all", selectedProjectId));
     },
     [
-      historyCategories,
+      ensureHistoryCategoryVisible,
       selectedProjectId,
       setHistorySelection,
       setPendingSearchNavigation,

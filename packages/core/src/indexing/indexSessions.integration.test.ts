@@ -1713,6 +1713,177 @@ describe("runIncrementalIndexing", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("keeps Claude meta skill expansion messages in the parent turn", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codetrail-index-claude-meta-turn-group-"));
+    const dbPath = join(dir, "index.db");
+    const claudeProject = join(dir, ".claude", "projects", "meta-turn-groups");
+    const claudeFile = join(claudeProject, "session.jsonl");
+    mkdirSync(claudeProject, { recursive: true });
+    writeFileSync(
+      claudeFile,
+      `${[
+        JSON.stringify({
+          sessionId: "claude-meta-turn-groups",
+          uuid: "u1",
+          type: "user",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-04-11T09:52:39.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Analyze provider architecture" }],
+          },
+        }),
+        JSON.stringify({
+          sessionId: "claude-meta-turn-groups",
+          uuid: "a1",
+          parentUuid: "u1",
+          type: "assistant",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-04-11T09:52:40.000Z",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_skill",
+                name: "Skill",
+                input: { skill: "md-ultrathink" },
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          sessionId: "claude-meta-turn-groups",
+          uuid: "u_tool_result",
+          parentUuid: "a1",
+          type: "user",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-04-11T09:52:41.000Z",
+          sourceToolAssistantUUID: "a1",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_skill",
+                content: "Launching skill: md-ultrathink",
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          sessionId: "claude-meta-turn-groups",
+          uuid: "u_meta",
+          parentUuid: "u_tool_result",
+          type: "user",
+          isMeta: true,
+          sourceToolUseID: "toolu_skill",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-04-11T09:52:41.500Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "## Usage\n\n`/ultrathink <TASK_DESCRIPTION>`" }],
+          },
+        }),
+        JSON.stringify({
+          sessionId: "claude-meta-turn-groups",
+          uuid: "a2",
+          parentUuid: "u_meta",
+          type: "assistant",
+          cwd: "/workspace/claude",
+          gitBranch: "main",
+          timestamp: "2026-04-11T09:52:42.000Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Starting deep analysis" }],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const result = runIncrementalIndexing({
+      dbPath,
+      discoveryConfig: {
+        ...createDiscoveryConfig(dir),
+        enabledProviders: ["claude"],
+      },
+    });
+
+    expect(result.indexedFiles).toBe(1);
+
+    const db = openDatabase(dbPath);
+    const rows = db
+      .prepare(
+        `SELECT
+           source_id,
+           category,
+           turn_group_id,
+           turn_grouping_mode,
+           turn_anchor_kind,
+           native_turn_id
+         FROM messages
+         ORDER BY created_at, id`,
+      )
+      .all() as Array<{
+      source_id: string;
+      category: string;
+      turn_group_id: string | null;
+      turn_grouping_mode: string;
+      turn_anchor_kind: string | null;
+      native_turn_id: string | null;
+    }>;
+    db.close();
+
+    expect(rows).toEqual([
+      {
+        source_id: "u1",
+        category: "user",
+        turn_group_id: "u1",
+        turn_grouping_mode: "native",
+        turn_anchor_kind: "user_prompt",
+        native_turn_id: "u1",
+      },
+      {
+        source_id: "a1",
+        category: "tool_use",
+        turn_group_id: "u1",
+        turn_grouping_mode: "native",
+        turn_anchor_kind: null,
+        native_turn_id: "u1",
+      },
+      {
+        source_id: "u_tool_result",
+        category: "tool_result",
+        turn_group_id: "u1",
+        turn_grouping_mode: "native",
+        turn_anchor_kind: null,
+        native_turn_id: "u1",
+      },
+      {
+        source_id: "u_meta",
+        category: "user",
+        turn_group_id: "u1",
+        turn_grouping_mode: "native",
+        turn_anchor_kind: null,
+        native_turn_id: "u1",
+      },
+      {
+        source_id: "a2",
+        category: "assistant",
+        turn_group_id: "u1",
+        turn_grouping_mode: "native",
+        turn_anchor_kind: null,
+        native_turn_id: "u1",
+      },
+    ]);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("inserts tombstone sessions for oversized materialized JSON files", () => {
     const dir = mkdtempSync(join(tmpdir(), "codetrail-index-materialized-hard-omit-"));
     const dbPath = join(dir, "index.db");

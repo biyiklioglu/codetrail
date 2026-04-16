@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 
 import type { IpcRequestInput, MessageCategory, SearchMode } from "@codetrail/core/browser";
 
+import { CATEGORIES } from "../app/constants";
 import { areHistorySelectionsEqual, createHistorySelection } from "../app/historySelection";
 import type { HistoryMessage, HistorySelection, SessionTurnDetail } from "../app/types";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
@@ -15,6 +16,18 @@ function getTurnScopeKey(selection: HistorySelection): string {
   return `${selection.mode}:${selection.projectId}:${"sessionId" in selection ? (selection.sessionId ?? "") : ""}`;
 }
 
+function ensureCategoryVisible(
+  currentCategories: MessageCategory[],
+  targetCategory: MessageCategory,
+): MessageCategory[] {
+  if (currentCategories.includes(targetCategory)) {
+    return currentCategories;
+  }
+  return CATEGORIES.filter(
+    (category) => currentCategories.includes(category) || category === targetCategory,
+  );
+}
+
 export function useHistoryTurnController({
   codetrail,
   logError,
@@ -25,6 +38,7 @@ export function useHistoryTurnController({
   selectedSessionId,
   turnViewSortDirection,
   turnViewCategories,
+  setTurnViewCategories,
   setTurnViewCombinedChangesExpandedOverride,
   setHistorySelectionImmediate,
   setHistoryVisualization,
@@ -39,6 +53,7 @@ export function useHistoryTurnController({
   selectedSessionId: string;
   turnViewSortDirection: "asc" | "desc";
   turnViewCategories: MessageCategory[];
+  setTurnViewCategories: Dispatch<SetStateAction<MessageCategory[]>>;
   setTurnViewCombinedChangesExpandedOverride: Dispatch<SetStateAction<boolean | null>>;
   setHistorySelectionImmediate: Dispatch<SetStateAction<HistorySelection>>;
   setHistoryVisualization: Dispatch<SetStateAction<"messages" | "turns" | "bookmarks">>;
@@ -211,6 +226,15 @@ export function useHistoryTurnController({
     setTurnDetailRefreshNonce((value) => value + 1);
   }, []);
 
+  const ensureTurnCategoryVisible = useCallback(
+    (category: MessageCategory) => {
+      setTurnViewCategories((currentCategories) =>
+        ensureCategoryVisible(currentCategories, category),
+      );
+    },
+    [setTurnViewCategories],
+  );
+
   const navigateToTurn = useCallback(
     async (
       request: Pick<
@@ -238,7 +262,15 @@ export function useHistoryTurnController({
       if (!selectedProjectId) {
         return;
       }
-      const nextSelection = createHistorySelection("session", selectedProjectId, message.sessionId);
+      ensureTurnCategoryVisible(message.category);
+      const nextSelection =
+        turnVisualizationSelection.mode === "session"
+          ? createHistorySelection(
+              "session",
+              turnVisualizationSelection.projectId,
+              message.sessionId,
+            )
+          : createHistorySelection("project_all", turnVisualizationSelection.projectId);
       if (!areHistorySelectionsEqual(currentUiHistorySelection, nextSelection)) {
         setHistorySelectionImmediate(nextSelection);
       }
@@ -251,10 +283,12 @@ export function useHistoryTurnController({
     },
     [
       currentUiHistorySelection,
+      ensureTurnCategoryVisible,
       selectedProjectId,
       setFocusMessageId,
       setHistorySelectionImmediate,
       setHistoryVisualization,
+      turnVisualizationSelection,
     ],
   );
 

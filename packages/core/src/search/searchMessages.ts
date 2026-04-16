@@ -13,6 +13,11 @@ import {
   buildWildcardFilterPatterns,
 } from "./queryPlan";
 
+const PROVIDER_SUMMARY_SELECT_SQL = PROVIDER_VALUES.map(
+  (provider) =>
+    `COALESCE((SELECT COUNT(*) FROM result_matches WHERE provider = '${provider}'), 0) as ${provider}_count`,
+).join(",\n         ");
+
 export type SearchMessagesInput = {
   query: string;
   searchMode?: SearchMode;
@@ -132,7 +137,8 @@ export function searchMessages(
          COALESCE(SUM(CASE WHEN category = 'tool_edit' THEN 1 ELSE 0 END), 0) as tool_edit_count,
          COALESCE(SUM(CASE WHEN category = 'tool_result' THEN 1 ELSE 0 END), 0) as tool_result_count,
          COALESCE(SUM(CASE WHEN category = 'thinking' THEN 1 ELSE 0 END), 0) as thinking_count,
-         COALESCE(SUM(CASE WHEN category = 'system' THEN 1 ELSE 0 END), 0) as system_count
+         COALESCE(SUM(CASE WHEN category = 'system' THEN 1 ELSE 0 END), 0) as system_count,
+         ${PROVIDER_SUMMARY_SELECT_SQL}
        FROM facet_matches`,
     )
     .get(...facetWhereParams, ...categoryFilter.params) as
@@ -145,28 +151,9 @@ export function searchMessages(
         tool_result_count: number;
         thinking_count: number;
         system_count: number;
+        [key: string]: number;
       }
     | undefined;
-  const providerRows = db
-    .prepare(
-      `WITH facet_matches AS (
-         SELECT s.provider as provider
-         ${SEARCH_FROM_SQL}
-         ${facetWhereClause}
-       ),
-       result_matches AS (
-         SELECT provider
-         FROM facet_matches
-         ${resultMatchWhereClause}
-       )
-       SELECT provider, COUNT(*) as count
-       FROM result_matches
-       GROUP BY provider`,
-    )
-    .all(...facetWhereParams, ...categoryFilter.params) as Array<{
-    provider: string;
-    count: number;
-  }>;
   const totalCount = Number(summaryRow?.total_count ?? 0);
   categoryCounts.user = Number(summaryRow?.user_count ?? 0);
   categoryCounts.assistant = Number(summaryRow?.assistant_count ?? 0);
@@ -175,9 +162,8 @@ export function searchMessages(
   categoryCounts.tool_result = Number(summaryRow?.tool_result_count ?? 0);
   categoryCounts.thinking = Number(summaryRow?.thinking_count ?? 0);
   categoryCounts.system = Number(summaryRow?.system_count ?? 0);
-  for (const row of providerRows) {
-    const provider = normalizeProvider(row.provider);
-    providerCounts[provider] = Number(row.count ?? 0);
+  for (const provider of PROVIDER_VALUES) {
+    providerCounts[provider] = Number(summaryRow?.[`${provider}_count`] ?? 0);
   }
 
   const limit = Math.max(1, input.limit ?? 50);

@@ -81,12 +81,16 @@ export function annotateClaudeMessagesForEvent(args: {
     readString(normalized?.parent_uuid) ??
     null;
   const userAnchorId = args.messages.find((message) => message.category === "user")?.id ?? null;
-  const eventTurnGroupId =
-    userAnchorId ??
+  const inheritedTurnGroupId =
     (parentEventId
       ? (args.processingState.claudeTurnRootByEventId[parentEventId] ?? null)
-      : null) ??
-    args.processingState.currentTurnGroupId;
+      : null) ?? args.processingState.currentTurnGroupId;
+  const preserveInheritedTurnGroup =
+    userAnchorId !== null &&
+    inheritedTurnGroupId !== null &&
+    shouldPreserveClaudeInheritedTurnGroup(args.eventRecord, normalized);
+  const eventTurnGroupId =
+    (preserveInheritedTurnGroup ? inheritedTurnGroupId : userAnchorId) ?? inheritedTurnGroupId;
 
   if (eventId && eventTurnGroupId) {
     trackClaudeTurnRootEvent(args.processingState, eventId, eventTurnGroupId);
@@ -100,9 +104,20 @@ export function annotateClaudeMessagesForEvent(args: {
     ...message,
     turnGroupId: eventTurnGroupId,
     turnGroupingMode: "native" satisfies TurnGroupingMode,
-    turnAnchorKind: message.id === userAnchorId ? "user_prompt" : null,
+    turnAnchorKind:
+      message.id === userAnchorId && !preserveInheritedTurnGroup ? "user_prompt" : null,
     nativeTurnId: eventTurnGroupId,
   }));
+}
+
+function shouldPreserveClaudeInheritedTurnGroup(
+  eventRecord: Record<string, unknown> | null,
+  normalized: Record<string, unknown> | null,
+): boolean {
+  const isMeta = eventRecord?.isMeta === true || normalized?.isMeta === true;
+  const sourceToolUseId =
+    readString(eventRecord?.sourceToolUseID) ?? readString(normalized?.sourceToolUseID) ?? null;
+  return isMeta && sourceToolUseId !== null;
 }
 
 export function registerClaudePersistedMessage(args: ProviderRegisterPersistedMessageArgs): void {

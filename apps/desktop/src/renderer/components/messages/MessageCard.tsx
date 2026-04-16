@@ -46,8 +46,13 @@ type MessageCardProps = {
   onToggleExpanded: (messageId: string, category: MessageCategory) => void;
   onToggleCategoryExpanded?: (category: MessageCategory) => void;
   onToggleBookmark?: (message: SessionMessage) => void;
-  onRevealInSession?: (messageId: string, sourceId: string) => void;
-  onRevealInProject?: (messageId: string, sourceId: string, sessionId: string) => void;
+  onRevealInSession?: (messageId: string, sourceId: string, category: MessageCategory) => void;
+  onRevealInProject?: (
+    messageId: string,
+    sourceId: string,
+    sessionId: string,
+    category: MessageCategory,
+  ) => void;
   onRevealInBookmarks?: (messageId: string, sourceId: string) => void;
   onRevealInTurn?: (message: SessionMessage) => void;
   cardRef?: Ref<HTMLDivElement> | null;
@@ -167,13 +172,13 @@ function MessageCardComponent({
 
   const handleRevealButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    onRevealInSession?.(message.id, message.sourceId);
+    onRevealInSession?.(message.id, message.sourceId, message.category);
     paneFocus.focusHistoryPane("message");
   };
 
   const handleRevealInProjectButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    onRevealInProject?.(message.id, message.sourceId, message.sessionId);
+    onRevealInProject?.(message.id, message.sourceId, message.sessionId, message.category);
     paneFocus.focusHistoryPane("message");
   };
 

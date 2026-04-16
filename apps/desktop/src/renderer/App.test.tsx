@@ -68,6 +68,156 @@ function installDialogMock(): void {
   });
 }
 
+const revealHiddenCategorySessionMessages = [
+  {
+    id: "m1",
+    sourceId: "src1",
+    sessionId: "session_1",
+    provider: "claude" as const,
+    category: "user" as const,
+    content: "Review the planner state machine",
+    createdAt: "2026-03-01T10:00:00.000Z",
+    tokenInput: null,
+    tokenOutput: null,
+    operationDurationMs: null,
+    operationDurationSource: null,
+    operationDurationConfidence: null,
+  },
+  {
+    id: "m_thinking",
+    sourceId: "src-thinking",
+    sessionId: "session_1",
+    provider: "claude" as const,
+    category: "thinking" as const,
+    content: "Planner note: capture the missing edge case.",
+    createdAt: "2026-03-01T10:00:03.000Z",
+    tokenInput: null,
+    tokenOutput: null,
+    operationDurationMs: null,
+    operationDurationSource: null,
+    operationDurationConfidence: null,
+  },
+  {
+    id: "m2",
+    sourceId: "src2",
+    sessionId: "session_1",
+    provider: "claude" as const,
+    category: "assistant" as const,
+    content: "Ship the state update behind the reveal action.",
+    createdAt: "2026-03-01T10:00:05.000Z",
+    tokenInput: 14,
+    tokenOutput: 8,
+    operationDurationMs: 5000,
+    operationDurationSource: "native" as const,
+    operationDurationConfidence: "high" as const,
+  },
+];
+
+const revealHiddenCategoryCounts = {
+  user: 1,
+  assistant: 1,
+  tool_use: 0,
+  tool_edit: 0,
+  tool_result: 0,
+  thinking: 1,
+  system: 0,
+};
+
+function filterMessagesByRequestCategories<
+  T extends {
+    category: string;
+  },
+>(messages: T[], request: Record<string, unknown>): T[] {
+  const categories = Array.isArray(request.categories)
+    ? request.categories.filter((value): value is string => typeof value === "string")
+    : null;
+  if (!categories) {
+    return messages;
+  }
+  const allowedCategories = new Set(categories);
+  return messages.filter((message) => allowedCategories.has(message.category));
+}
+
+function createRevealHiddenCategoryClient() {
+  return createAppClient({
+    "sessions:getDetail": (request) => ({
+      session: {
+        id: "session_1",
+        projectId: "project_1",
+        provider: "claude",
+        filePath: "/workspace/project-one/session-1.jsonl",
+        title: "Investigate reveal filters",
+        modelNames: "claude-opus-4-1",
+        startedAt: "2026-03-01T10:00:00.000Z",
+        endedAt: "2026-03-01T10:00:05.000Z",
+        durationMs: 5000,
+        gitBranch: "main",
+        cwd: "/workspace/project-one",
+        messageCount: revealHiddenCategorySessionMessages.length,
+        tokenInputTotal: 14,
+        tokenOutputTotal: 8,
+      },
+      totalCount: revealHiddenCategorySessionMessages.length,
+      categoryCounts: revealHiddenCategoryCounts,
+      page: 0,
+      pageSize: 100,
+      focusIndex: null,
+      messages: filterMessagesByRequestCategories(revealHiddenCategorySessionMessages, request),
+    }),
+    "projects:getCombinedDetail": (request) => ({
+      projectId: "project_1",
+      totalCount: revealHiddenCategorySessionMessages.length,
+      categoryCounts: revealHiddenCategoryCounts,
+      page: 0,
+      pageSize: 100,
+      focusIndex: null,
+      messages: filterMessagesByRequestCategories(revealHiddenCategorySessionMessages, request).map(
+        (message) => ({
+          ...message,
+          sessionTitle: "Investigate reveal filters",
+          sessionActivity: "2026-03-01T10:00:05.000Z",
+          sessionStartedAt: "2026-03-01T10:00:00.000Z",
+          sessionEndedAt: "2026-03-01T10:00:05.000Z",
+          sessionGitBranch: "main",
+          sessionCwd: "/workspace/project-one",
+        }),
+      ),
+    }),
+    "sessions:getTurn": () => ({
+      session: {
+        id: "session_1",
+        projectId: "project_1",
+        provider: "claude",
+        filePath: "/workspace/project-one/session-1.jsonl",
+        title: "Investigate reveal filters",
+        modelNames: "claude-opus-4-1",
+        startedAt: "2026-03-01T10:00:00.000Z",
+        endedAt: "2026-03-01T10:00:05.000Z",
+        durationMs: 5000,
+        gitBranch: "main",
+        cwd: "/workspace/project-one",
+        messageCount: revealHiddenCategorySessionMessages.length,
+        tokenInputTotal: 14,
+        tokenOutputTotal: 8,
+      },
+      anchorMessageId: "m1",
+      anchorMessage: revealHiddenCategorySessionMessages[0],
+      turnNumber: 1,
+      totalTurns: 1,
+      previousTurnAnchorMessageId: null,
+      nextTurnAnchorMessageId: null,
+      firstTurnAnchorMessageId: "m1",
+      latestTurnAnchorMessageId: "m1",
+      totalCount: revealHiddenCategorySessionMessages.length,
+      categoryCounts: revealHiddenCategoryCounts,
+      queryError: null,
+      highlightPatterns: [],
+      matchedMessageIds: undefined,
+      messages: revealHiddenCategorySessionMessages,
+    }),
+  });
+}
+
 describe("App shell", () => {
   it("opens the dashboard view from the top bar and loads dashboard stats", async () => {
     installScrollIntoViewMock();
@@ -2438,6 +2588,305 @@ describe("App shell", () => {
       expect(focusedMessageCard).not.toBeNull();
       expect(focusedMessageCard).toHaveClass("focused");
     });
+  });
+
+  it("reveals a hidden Thinking message in Turn view by enabling only that turn filter", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createRevealHiddenCategoryClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            historyCategories: ["user", "assistant", "thinking"],
+            turnViewCategories: ["user", "assistant"],
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    let thinkingMessageCard: HTMLElement | null = null;
+    await waitFor(() => {
+      thinkingMessageCard = screen
+        .getByText("Planner note: capture the missing edge case.")
+        .closest("article");
+      expect(thinkingMessageCard).not.toBeNull();
+    });
+    if (!thinkingMessageCard) {
+      throw new Error("Expected thinking message card");
+    }
+
+    await user.click(
+      within(thinkingMessageCard).getByRole("button", { name: "Reveal this message in turn" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      const focusedTurnCard = screen
+        .getByText("Planner note: capture the missing edge case.")
+        .closest("article");
+      expect(focusedTurnCard).not.toBeNull();
+      expect(focusedTurnCard).toHaveClass("focused");
+    });
+
+    expect(container.querySelector(".msg-filter.thinking-filter")).toHaveClass("active");
+    expect(container.querySelector(".msg-filter.tool_use-filter")).not.toHaveClass("active");
+    expect(container.querySelector(".msg-filter.system-filter")).not.toHaveClass("active");
+  });
+
+  it("reveals a hidden Thinking message in session view by enabling only that flat filter", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createRevealHiddenCategoryClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            historyCategories: ["user", "assistant"],
+            turnViewCategories: ["user", "assistant", "thinking"],
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+
+    let thinkingTurnCard: HTMLElement | null = null;
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      thinkingTurnCard = screen
+        .getByText("Planner note: capture the missing edge case.")
+        .closest("article");
+      expect(thinkingTurnCard).not.toBeNull();
+    });
+    if (!thinkingTurnCard) {
+      throw new Error("Expected thinking turn card");
+    }
+
+    await user.click(
+      within(thinkingTurnCard).getByRole("button", { name: "Reveal this message in session" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Flat/i })).toHaveAttribute("aria-selected", "true");
+      const focusedMessageCard = screen
+        .getByText("Planner note: capture the missing edge case.")
+        .closest("article");
+      expect(focusedMessageCard).not.toBeNull();
+      expect(focusedMessageCard).toHaveClass("focused");
+    });
+
+    expect(container.querySelector(".msg-filter.thinking-filter")).toHaveClass("active");
+    expect(container.querySelector(".msg-filter.system-filter")).not.toHaveClass("active");
+    expect(
+      client.invoke.mock.calls.some(
+        ([channel, payload]) =>
+          channel === "sessions:getDetail" &&
+          Array.isArray((payload as { categories?: string[] }).categories) &&
+          (payload as { categories: string[] }).categories.includes("thinking") &&
+          !(payload as { categories: string[] }).categories.includes("system"),
+      ),
+    ).toBe(true);
+  });
+
+  it("reveals a hidden Thinking message in project view by enabling only that flat filter", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createRevealHiddenCategoryClient();
+    const { container } = renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            selectedSessionId: "session_1",
+            historyMode: "session",
+            historyCategories: ["user", "assistant"],
+            turnViewCategories: ["user", "assistant", "thinking"],
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+
+    let thinkingTurnCard: HTMLElement | null = null;
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      thinkingTurnCard = screen
+        .getByText("Planner note: capture the missing edge case.")
+        .closest("article");
+      expect(thinkingTurnCard).not.toBeNull();
+    });
+    if (!thinkingTurnCard) {
+      throw new Error("Expected thinking turn card");
+    }
+
+    await user.click(
+      within(thinkingTurnCard).getByRole("button", { name: "Reveal this message in project" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Flat/i })).toHaveAttribute("aria-selected", "true");
+      expect(
+        screen.getByRole("button", { name: /first \(all sessions\)\. switch to/i }),
+      ).toBeInTheDocument();
+      const revealedProjectCard = screen
+        .getByText("Planner note: capture the missing edge case.")
+        .closest("article");
+      expect(revealedProjectCard).not.toBeNull();
+    });
+
+    expect(container.querySelector(".msg-filter.thinking-filter")).toHaveClass("active");
+    expect(container.querySelector(".msg-filter.system-filter")).not.toHaveClass("active");
+    expect(
+      client.invoke.mock.calls.some(
+        ([channel, payload]) =>
+          channel === "projects:getCombinedDetail" &&
+          Array.isArray((payload as { categories?: string[] }).categories) &&
+          (payload as { categories: string[] }).categories.includes("thinking") &&
+          !(payload as { categories: string[] }).categories.includes("system"),
+      ),
+    ).toBe(true);
+  });
+
+  it("preserves project-wide turn scope when revealing a message in turn from project view", async () => {
+    installScrollIntoViewMock();
+    const user = userEvent.setup();
+    const client = createAppClient({
+      "sessions:getTurn": (request) => {
+        const isProjectWide = request.scopeMode === "project_all";
+        return {
+          session: {
+            id: "session_1",
+            projectId: "project_1",
+            provider: "claude",
+            filePath: "/workspace/project-one/session-1.jsonl",
+            title: "Investigate markdown rendering",
+            modelNames: "claude-opus-4-1",
+            startedAt: "2026-03-01T10:00:00.000Z",
+            endedAt: "2026-03-01T10:00:05.000Z",
+            durationMs: 5000,
+            gitBranch: "main",
+            cwd: "/workspace/project-one",
+            messageCount: 2,
+            tokenInputTotal: 14,
+            tokenOutputTotal: 8,
+          },
+          anchorMessageId: "m1",
+          anchorMessage: {
+            id: "m1",
+            sourceId: "src1",
+            sessionId: "session_1",
+            provider: "claude",
+            category: "user",
+            content: "Please review markdown table rendering",
+            createdAt: "2026-03-01T10:00:00.000Z",
+            tokenInput: null,
+            tokenOutput: null,
+            operationDurationMs: null,
+            operationDurationSource: null,
+            operationDurationConfidence: null,
+          },
+          turnNumber: isProjectWide ? 363 : 1,
+          totalTurns: isProjectWide ? 363 : 1,
+          previousTurnAnchorMessageId: null,
+          nextTurnAnchorMessageId: null,
+          firstTurnAnchorMessageId: "m1",
+          latestTurnAnchorMessageId: "m1",
+          totalCount: 2,
+          categoryCounts: {
+            user: 1,
+            assistant: 1,
+            tool_use: 0,
+            tool_edit: 0,
+            tool_result: 0,
+            thinking: 0,
+            system: 0,
+          },
+          queryError: null,
+          highlightPatterns: [],
+          matchedMessageIds: undefined,
+          messages: [
+            {
+              id: "m1",
+              sourceId: "src1",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "user",
+              content: "Please review markdown table rendering",
+              createdAt: "2026-03-01T10:00:00.000Z",
+              tokenInput: null,
+              tokenOutput: null,
+              operationDurationMs: null,
+              operationDurationSource: null,
+              operationDurationConfidence: null,
+            },
+            {
+              id: "m2",
+              sourceId: "src2",
+              sessionId: "session_1",
+              provider: "claude",
+              category: "assistant",
+              content: "Everything checks out.",
+              createdAt: "2026-03-01T10:00:05.000Z",
+              tokenInput: 14,
+              tokenOutput: 8,
+              operationDurationMs: 5000,
+              operationDurationSource: "native",
+              operationDurationConfidence: "high",
+            },
+          ],
+        };
+      },
+    });
+
+    renderWithClient(
+      <App
+        initialPaneState={
+          {
+            selectedProjectId: "project_1",
+            historyMode: "project_all",
+          } as PaneStateSnapshot
+        }
+      />,
+      client,
+    );
+
+    let assistantMessageCard: HTMLElement | null = null;
+    await waitFor(() => {
+      assistantMessageCard = screen.getByText("Everything checks out.").closest("article");
+      expect(assistantMessageCard).not.toBeNull();
+    });
+    if (!assistantMessageCard) {
+      throw new Error("Expected assistant message card");
+    }
+
+    await user.click(
+      within(assistantMessageCard).getByRole("button", { name: "Reveal this message in turn" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Turns/i })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("textbox", { name: "Turn number" })).toHaveValue("1");
+      expect(screen.getByText("of 363")).toBeInTheDocument();
+    });
+
+    expect(
+      client.invoke.mock.calls.some(
+        ([channel, payload]) =>
+          channel === "sessions:getTurn" &&
+          (payload as { scopeMode?: string }).scopeMode === "project_all",
+      ),
+    ).toBe(true);
   });
 
   it("exits Turn view before revealing a message in the project view", async () => {

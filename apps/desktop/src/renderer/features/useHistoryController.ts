@@ -797,6 +797,7 @@ export function useHistoryController({
     selectedSessionId,
     turnViewSortDirection,
     turnViewCategories,
+    setTurnViewCategories,
     setTurnViewCombinedChangesExpandedOverride,
     setHistorySelectionImmediate,
     setHistoryVisualization,
@@ -1140,19 +1141,19 @@ export function useHistoryController({
   });
 
   const handleRevealInSessionWithTurnExit = useCallback(
-    (messageId: string, sourceId: string) => {
+    (messageId: string, sourceId: string, category: MessageCategory) => {
       setHistoryVisualization("messages");
       clearTurnViewState();
-      handleRevealInSession(messageId, sourceId);
+      handleRevealInSession(messageId, sourceId, category);
     },
     [clearTurnViewState, handleRevealInSession, setHistoryVisualization],
   );
 
   const handleRevealInProjectWithTurnExit = useCallback(
-    (messageId: string, sourceId: string, sessionId: string) => {
+    (messageId: string, sourceId: string, sessionId: string, category: MessageCategory) => {
       setHistoryVisualization("messages");
       clearTurnViewState();
-      handleRevealInProject(messageId, sourceId, sessionId);
+      handleRevealInProject(messageId, sourceId, sessionId, category);
     },
     [clearTurnViewState, handleRevealInProject, setHistoryVisualization],
   );
